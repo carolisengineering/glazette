@@ -9,6 +9,8 @@ pnpm install
 pnpm dev
 ```
 
+The app needs a secure context (HTTPS or localhost) because it uses `crypto.subtle` and `crypto.randomUUID`, so testing on a phone over the LAN needs HTTPS (a dev-HTTPS setup arrives in a later PR).
+
 ## Test
 
 ```sh
