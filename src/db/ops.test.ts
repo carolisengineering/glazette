@@ -92,6 +92,20 @@ test('softDelete sets deletedAt and filtered queries exclude it', async () => {
   expect(await db.pieces.filter((p) => !p.deletedAt).toArray()).toHaveLength(0)
 })
 
+test('softDelete sets deletedAt on a photo', async () => {
+  await db.photos.add({
+    id: 'p1',
+    blob: new Blob(['a']),
+    thumb: new Blob(['b']),
+    hash: 'h',
+    width: 1,
+    height: 1,
+    takenAt: '2026-11-01T10:00:00.000Z',
+  })
+  await softDelete('photos', 'p1')
+  expect((await db.photos.get('p1'))?.deletedAt).toBeTruthy()
+})
+
 test('upsertClay("white STONEWARE") returns the existing id', async () => {
   await ensureDefaults()
   const existing = (await db.clays.toArray())[0]

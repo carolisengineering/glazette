@@ -57,6 +57,7 @@ export interface Photo {
   width: number
   height: number
   takenAt: string
+  deletedAt?: string // soft delete (tombstone for v2 sync)
 }
 
 export interface Settings {
