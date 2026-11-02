@@ -5,6 +5,7 @@ import {
   createPiece,
   defaultNoteFor,
   ensureDefaults,
+  removePhoto,
   softDelete,
   upsertClay,
 } from './ops'
@@ -135,6 +136,86 @@ test('addStageEntry for a nonexistent piece rejects and writes nothing', async (
   expect(await db.photos.count()).toBe(0)
 })
 
+test('addStageEntry rejects a soft-deleted piece and writes nothing', async () => {
+  const pieceId = await createPiece({})
+  await softDelete('pieces', pieceId)
+  const deleted = await db.pieces.get(pieceId)
+  await expect(
+    addStageEntry({ pieceId, stage: 'trimmed', photo: photo('h4') }),
+  ).rejects.toThrow('Piece not found')
+  expect(await db.entries.count()).toBe(1)
+  expect(await db.photos.count()).toBe(0)
+  expect((await db.pieces.get(pieceId))?.updatedAt).toBe(deleted?.updatedAt)
+})
+
+test('dates are stored as full ISO timestamps so a date-only value orders correctly', async () => {
+  const pieceId = await createPiece({ date: '2026-11-02' })
+  expect((await db.pieces.get(pieceId))?.createdAt).toBe(
+    '2026-11-02T00:00:00.000Z',
+  )
+  const entryId = await addStageEntry({
+    pieceId,
+    stage: 'trimmed',
+    date: '2026-11-03',
+  })
+  expect((await db.entries.get(entryId))?.date).toBe('2026-11-03T00:00:00.000Z')
+})
+
+test('an invalid date is rejected', async () => {
+  await expect(createPiece({ date: 'not a date' })).rejects.toThrow(
+    'Invalid date',
+  )
+  const pieceId = await createPiece({})
+  await expect(
+    addStageEntry({ pieceId, stage: 'trimmed', date: '2026-13-45' }),
+  ).rejects.toThrow('Invalid date')
+  expect(await db.entries.count()).toBe(1)
+})
+
+test('removePhoto unlinks a shared photo from one entry and keeps it for the other', async () => {
+  const pieceId = await createPiece({ photo: photo('shared') })
+  const trimmedId = await addStageEntry({
+    pieceId,
+    stage: 'trimmed',
+    photo: photo('shared'),
+  })
+  const [thrown] = await db.entries
+    .where('pieceId')
+    .equals(pieceId)
+    .filter((e) => e.stage === 'thrown')
+    .toArray()
+  const photoId = thrown.photoId as string
+  expect((await db.entries.get(trimmedId))?.photoId).toBe(photoId)
+
+  await removePhoto(trimmedId)
+  expect((await db.entries.get(trimmedId))?.photoId).toBeUndefined()
+  expect((await db.entries.get(thrown.id))?.photoId).toBe(photoId)
+  expect((await db.photos.get(photoId))?.deletedAt).toBeUndefined()
+
+  await removePhoto(thrown.id)
+  expect((await db.entries.get(thrown.id))?.photoId).toBeUndefined()
+  expect((await db.photos.get(photoId))?.deletedAt).toBeTruthy()
+})
+
+test('removePhoto ignores references from deleted entries', async () => {
+  const pieceId = await createPiece({ photo: photo('solo') })
+  const otherId = await addStageEntry({
+    pieceId,
+    stage: 'trimmed',
+    photo: photo('solo'),
+  })
+  await softDelete('entries', otherId)
+  const [thrown] = await db.entries
+    .where('pieceId')
+    .equals(pieceId)
+    .filter((e) => e.stage === 'thrown')
+    .toArray()
+  await removePhoto(thrown.id)
+  expect(
+    (await db.photos.get(thrown.photoId as string))?.deletedAt,
+  ).toBeTruthy()
+})
+
 test('upsertClay rejects a blank name', async () => {
   await expect(upsertClay('   ')).rejects.toThrow('Clay name is required')
   expect(await db.clays.count()).toBe(0)
@@ -145,20 +226,6 @@ test('softDelete sets deletedAt and filtered queries exclude it', async () => {
   await softDelete('pieces', id)
   expect((await db.pieces.get(id))?.deletedAt).toBeTruthy()
   expect(await db.pieces.filter((p) => !p.deletedAt).toArray()).toHaveLength(0)
-})
-
-test('softDelete sets deletedAt on a photo', async () => {
-  await db.photos.add({
-    id: 'p1',
-    blob: new Blob(['a']),
-    thumb: new Blob(['b']),
-    hash: 'h',
-    width: 1,
-    height: 1,
-    takenAt: '2026-11-01T10:00:00.000Z',
-  })
-  await softDelete('photos', 'p1')
-  expect((await db.photos.get('p1'))?.deletedAt).toBeTruthy()
 })
 
 test('upsertClay("white STONEWARE") returns the existing id', async () => {

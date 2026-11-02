@@ -14,6 +14,13 @@ import type {
 
 const nowIso = (): string => new Date().toISOString()
 
+/** Stored dates are always full ISO timestamps; stage and timeline ordering compares them as strings. */
+function toIsoDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`)
+  return date.toISOString()
+}
+
 export async function ensureDefaults(): Promise<void> {
   await db.transaction('rw', db.clays, db.settings, async () => {
     if (await db.settings.get('app')) return
@@ -40,7 +47,7 @@ export async function createPiece(input: {
   date?: string
 }): Promise<string> {
   const now = nowIso()
-  const createdAt = input.date ?? input.photo?.takenAt ?? now
+  const createdAt = toIsoDate(input.date ?? input.photo?.takenAt ?? now)
   const piece: Piece = {
     id: newId(),
     name: input.name,
@@ -78,6 +85,7 @@ export async function addStageEntry(input: {
   }>
 }): Promise<string> {
   const now = nowIso()
+  const date = toIsoDate(input.date ?? input.photo?.takenAt ?? now)
   const entryId = newId()
   const apps: GlazeApplication[] = (input.glazes ?? []).map((g, order) => ({
     id: newId(),
@@ -96,6 +104,8 @@ export async function addStageEntry(input: {
     db.pieces,
     db.photos,
     async () => {
+      const piece = await db.pieces.get(input.pieceId)
+      if (!piece || piece.deletedAt) throw new Error('Piece not found')
       const photoId = input.photo ? await storePhoto(input.photo) : undefined
       const entry: StageEntry = {
         id: entryId,
@@ -103,12 +113,11 @@ export async function addStageEntry(input: {
         stage: input.stage,
         photoId,
         note: input.note,
-        date: input.date ?? input.photo?.takenAt ?? now,
+        date,
       }
       await db.entries.add(entry)
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
-      const updated = await db.pieces.update(input.pieceId, { updatedAt: now })
-      if (updated === 0) throw new Error('Piece not found')
+      await db.pieces.update(input.pieceId, { updatedAt: now })
     },
   )
   return entryId
@@ -125,11 +134,32 @@ export async function markLost(id: string, lost: boolean): Promise<void> {
   await db.pieces.update(id, { lost, updatedAt: nowIso() })
 }
 
+/** Photos are shared between entries (hash dedupe), so they are removed per entry with `removePhoto`. */
 export async function softDelete(
-  table: 'pieces' | 'entries' | 'photos' | 'glazes' | 'clays',
+  table: 'pieces' | 'entries' | 'glazes' | 'clays',
   id: string,
 ): Promise<void> {
   await db.table(table).update(id, { deletedAt: nowIso() })
+}
+
+/**
+ * Removes the photo from one entry. The Photo row is soft-deleted only when no
+ * other live entry still shows it, because identical photos share one row.
+ */
+export async function removePhoto(entryId: string): Promise<void> {
+  await db.transaction('rw', db.entries, db.photos, db.pieces, async () => {
+    const entry = await db.entries.get(entryId)
+    if (!entry) throw new Error('Entry not found')
+    const { photoId } = entry
+    if (!photoId) return
+    const now = nowIso()
+    await db.entries.update(entryId, { photoId: undefined })
+    const stillUsed = await db.entries
+      .filter((e) => e.photoId === photoId && !e.deletedAt)
+      .count()
+    if (stillUsed === 0) await db.photos.update(photoId, { deletedAt: now })
+    await db.pieces.update(entry.pieceId, { updatedAt: now })
+  })
 }
 
 export async function upsertGlaze(
