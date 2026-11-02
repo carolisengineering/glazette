@@ -1,10 +1,8 @@
 import { db } from '../db/db'
-import { processImage } from './process'
-import { savePhoto } from './store'
+import type { ProcessedImage } from './process'
+import { storePhoto } from './store'
 
-vi.mock('./process', () => ({ processImage: vi.fn() }))
-
-const fake = (hash: string) => ({
+const fake = (hash: string): ProcessedImage => ({
   blob: new Blob(['full']),
   thumb: new Blob(['thumb']),
   hash,
@@ -13,27 +11,33 @@ const fake = (hash: string) => ({
   takenAt: '2026-11-01T10:00:00.000Z',
 })
 
-const file = () => new File(['bytes'], 'a.jpg', { type: 'image/jpeg' })
+const store = (photo: ProcessedImage) =>
+  db.transaction('rw', db.photos, () => storePhoto(photo))
 
 beforeEach(async () => {
   await db.delete()
   await db.open()
-  vi.mocked(processImage).mockReset()
 })
 
-test('savePhoto returns the same id for a file with the same bytes', async () => {
-  vi.mocked(processImage).mockResolvedValue(fake('h1'))
-  const first = await savePhoto(file())
-  const second = await savePhoto(file())
+test('storePhoto returns the same id for the same hash', async () => {
+  const first = await store(fake('h1'))
+  const second = await store(fake('h1'))
   expect(second).toBe(first)
   expect(await db.photos.count()).toBe(1)
 })
 
-test('savePhoto stores a second row for a different hash', async () => {
-  vi.mocked(processImage).mockResolvedValueOnce(fake('h1'))
-  vi.mocked(processImage).mockResolvedValueOnce(fake('h2'))
-  const first = await savePhoto(file())
-  const second = await savePhoto(file())
+test('storePhoto stores a second row for a different hash', async () => {
+  const first = await store(fake('h1'))
+  const second = await store(fake('h2'))
   expect(second).not.toBe(first)
   expect(await db.photos.count()).toBe(2)
+})
+
+test('storePhoto undeletes a soft-deleted photo with the same hash', async () => {
+  const first = await store(fake('h1'))
+  await db.photos.update(first, { deletedAt: '2026-11-01T11:00:00.000Z' })
+  const second = await store(fake('h1'))
+  expect(second).toBe(first)
+  expect(await db.photos.count()).toBe(1)
+  expect((await db.photos.get(first))?.deletedAt).toBeUndefined()
 })

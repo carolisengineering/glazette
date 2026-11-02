@@ -1,3 +1,5 @@
+import type { ProcessedImage } from '../photos/process'
+import { storePhoto } from '../photos/store'
 import { db, newId } from './db'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
 import type {
@@ -31,29 +33,31 @@ export function defaultNoteFor(stage: Stage, settings: Settings): string {
 }
 
 export async function createPiece(input: {
-  photoId?: string
+  photo?: ProcessedImage
   name?: string
   form?: Piece['form']
   clayId?: string
   date?: string
 }): Promise<string> {
-  const createdAt = input.date ?? nowIso()
+  const now = nowIso()
+  const createdAt = input.date ?? input.photo?.takenAt ?? now
   const piece: Piece = {
     id: newId(),
     name: input.name,
     form: input.form,
     clayId: input.clayId,
     createdAt,
-    updatedAt: createdAt,
+    updatedAt: now,
   }
-  const entry: StageEntry = {
-    id: newId(),
-    pieceId: piece.id,
-    stage: 'thrown',
-    photoId: input.photoId,
-    date: createdAt,
-  }
-  await db.transaction('rw', db.pieces, db.entries, async () => {
+  await db.transaction('rw', db.pieces, db.entries, db.photos, async () => {
+    const photoId = input.photo ? await storePhoto(input.photo) : undefined
+    const entry: StageEntry = {
+      id: newId(),
+      pieceId: piece.id,
+      stage: 'thrown',
+      photoId,
+      date: createdAt,
+    }
     await db.pieces.add(piece)
     await db.entries.add(entry)
   })
@@ -63,7 +67,7 @@ export async function createPiece(input: {
 export async function addStageEntry(input: {
   pieceId: string
   stage: Stage
-  photoId?: string
+  photo?: ProcessedImage
   note?: string
   date?: string
   glazes?: Array<{
@@ -74,17 +78,10 @@ export async function addStageEntry(input: {
   }>
 }): Promise<string> {
   const now = nowIso()
-  const entry: StageEntry = {
-    id: newId(),
-    pieceId: input.pieceId,
-    stage: input.stage,
-    photoId: input.photoId,
-    note: input.note,
-    date: input.date ?? now,
-  }
+  const entryId = newId()
   const apps: GlazeApplication[] = (input.glazes ?? []).map((g, order) => ({
     id: newId(),
-    entryId: entry.id,
+    entryId,
     pieceId: input.pieceId,
     glazeId: g.glazeId,
     order,
@@ -92,12 +89,29 @@ export async function addStageEntry(input: {
     method: g.method,
     note: g.note,
   }))
-  await db.transaction('rw', db.entries, db.glazeApps, db.pieces, async () => {
-    await db.entries.add(entry)
-    if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
-    await db.pieces.update(input.pieceId, { updatedAt: now })
-  })
-  return entry.id
+  await db.transaction(
+    'rw',
+    db.entries,
+    db.glazeApps,
+    db.pieces,
+    db.photos,
+    async () => {
+      const photoId = input.photo ? await storePhoto(input.photo) : undefined
+      const entry: StageEntry = {
+        id: entryId,
+        pieceId: input.pieceId,
+        stage: input.stage,
+        photoId,
+        note: input.note,
+        date: input.date ?? input.photo?.takenAt ?? now,
+      }
+      await db.entries.add(entry)
+      if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
+      const updated = await db.pieces.update(input.pieceId, { updatedAt: now })
+      if (updated === 0) throw new Error('Piece not found')
+    },
+  )
+  return entryId
 }
 
 export async function updatePiece(
@@ -132,6 +146,7 @@ export async function upsertGlaze(
 
 export async function upsertClay(name: string): Promise<string> {
   const trimmed = name.trim()
+  if (!trimmed) throw new Error('Clay name is required')
   const lower = trimmed.toLowerCase()
   return db.transaction('rw', db.clays, async () => {
     const match: Clay | undefined = await db.clays

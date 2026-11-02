@@ -7,8 +7,11 @@ const THUMB_EDGE = 400
 const JPEG_QUALITY = 0.8
 
 export class UnsupportedImageError extends Error {
-  constructor(message = 'This image format is not supported') {
-    super(message)
+  constructor(
+    message = "This photo format isn't supported",
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
     this.name = 'UnsupportedImageError'
   }
 }
@@ -26,8 +29,8 @@ async function decode(file: File): Promise<ImageBitmap> {
   if (typeof createImageBitmap !== 'function') throw new UnsupportedImageError()
   try {
     return await createImageBitmap(file, { imageOrientation: 'from-image' })
-  } catch {
-    throw new UnsupportedImageError()
+  } catch (err) {
+    throw new UnsupportedImageError(undefined, { cause: err })
   }
 }
 
@@ -39,6 +42,7 @@ async function resize(
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('2d canvas context unavailable')
+  ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(bitmap, 0, 0, w, h)
   const blob = await canvas.convertToBlob({
     type: 'image/jpeg',
@@ -47,12 +51,17 @@ async function resize(
   return { blob, width: w, height: h }
 }
 
+/** A capture date from the future (wrong camera clock) falls back to now. */
+export function clampTakenAt(date: Date, now: Date): string {
+  return (date.getTime() > now.getTime() ? now : date).toISOString()
+}
+
 async function readTakenAt(file: File): Promise<string> {
   try {
     const exif = await exifr.parse(file, ['DateTimeOriginal'])
     const taken: unknown = exif?.DateTimeOriginal
     if (taken instanceof Date && !Number.isNaN(taken.getTime())) {
-      return taken.toISOString()
+      return clampTakenAt(taken, new Date())
     }
   } catch {
     // Unreadable EXIF falls back to now.
