@@ -10,7 +10,12 @@ export const STAGES = [
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-/** Latest non-deleted entry by date (ties: later array position wins), optionally for one stage. */
+/**
+ * Latest non-deleted entry, optionally for one stage. A piece never moves
+ * backward, so a later stage outranks an earlier one whatever their dates
+ * (same-day entries and backdated library photos still advance the piece).
+ * Within one stage the newest date wins.
+ */
 export function latestEntry(
   entries: StageEntry[],
   stage?: Stage,
@@ -18,9 +23,15 @@ export function latestEntry(
   let latest: StageEntry | undefined
   for (const e of entries) {
     if (e.deletedAt || (stage && e.stage !== stage)) continue
-    if (!latest || e.date >= latest.date) latest = e
+    if (!latest || isLaterThan(e, latest)) latest = e
   }
   return latest
+}
+
+function isLaterThan(a: StageEntry, b: StageEntry): boolean {
+  const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)
+  if (byStage !== 0) return byStage > 0
+  return a.date >= b.date
 }
 
 export function currentStage(entries: StageEntry[]): Stage | undefined {

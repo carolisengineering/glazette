@@ -37,6 +37,21 @@ test('currentStage is the latest entry by date, ignoring deleted', () => {
   expect(currentStage(entries)).toBe('trimmed')
 })
 
+test('currentStage prefers the later stage when dates tie, in any order', () => {
+  const thrown = entry('a', 'thrown', '2026-11-02T10:00:00.000Z')
+  const trimmed = entry('b', 'trimmed', '2026-11-02T10:00:00.000Z')
+  expect(currentStage([thrown, trimmed])).toBe('trimmed')
+  expect(currentStage([trimmed, thrown])).toBe('trimmed')
+})
+
+test('currentStage advances even when the later stage has an earlier date', () => {
+  const entries = [
+    entry('a', 'thrown', '2026-11-02T10:00:00.000Z'),
+    entry('b', 'trimmed', '2026-11-01T08:00:00.000Z'),
+  ]
+  expect(currentStage(entries)).toBe('trimmed')
+})
+
 test('currentStage of no entries is undefined', () => {
   expect(currentStage([])).toBeUndefined()
   expect(
