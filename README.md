@@ -1,6 +1,6 @@
 # Glazette
 
-Glazette is a photo-first pottery journal for studio potters. It runs entirely on your device: pieces, photos, glazes and firings are stored locally in the browser, it works offline as a PWA, and there is no server or account. It is built with React, Vite and TypeScript, and deployed as static assets on Cloudflare Workers.
+Glazette is a photo-first pottery journal for studio potters. It runs entirely on your device: pieces, photos, glazes and firings are stored locally in the browser, there is no server or account, and offline PWA support is planned. It is built with React, Vite and TypeScript, and deployed as static assets on Cloudflare Workers.
 
 ## Run
 
@@ -32,4 +32,4 @@ Pushes to `main` deploy automatically through GitHub Actions after the checks pa
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-For a manual deploy, run `pnpm exec wrangler login` once, then `pnpm deploy`.
+For a manual deploy, run `pnpm exec wrangler login` once, then `pnpm run deploy`.
