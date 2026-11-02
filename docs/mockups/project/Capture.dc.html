@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quick add</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#175474}a:hover{color:#0f3a50}
+button,input{font-family:inherit}
+input::placeholder{color:#6B7580}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0E151C; font-family: Inter, system-ui, sans-serif; color: #FFFFFF; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+  <sc-if value="{{isCamera}}" hint-placeholder-val="{{ true }}">
+    <div style="height: 844px; display: flex; flex-direction: column">
+      <div style="padding: 52px 20px 12px; display: flex; align-items: center; justify-content: space-between">
+        <a href="Main.dc.html" aria-label="Close" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </a>
+        <div style="display: flex; gap: 2px; padding: 4px; border-radius: 22px; background: rgba(255,255,255,0.12)">
+          <span style="height: 36px; padding: 0 16px; border-radius: 18px; background: #FFFFFF; color: #16202A; font-size: 13px; font-weight: 600; display: flex; align-items: center">New piece</span>
+          <a href="PickPiece.dc.html" style="height: 36px; padding: 0 16px; border-radius: 18px; color: #FFFFFF; font-size: 13px; font-weight: 600; display: flex; align-items: center; text-decoration: none">Update</a>
+        </div>
+        <button aria-label="Flash off" style="width: 44px; height: 44px; border-radius: 22px; border: none; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"><path d="M13 3L5 13h6l-1 8 8-10h-6z"></path></svg>
+        </button>
+      </div>
+
+      <div style="margin: 8px 12px 0; height: 520px; border-radius: 28px; background: #4A5560; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="366" height="520" viewBox="0 0 366 520" style="position: absolute; inset: 0">
+          <rect width="366" height="520" fill="#55606B"></rect>
+          <rect y="340" width="366" height="180" fill="#3D464F"></rect>
+          <ellipse cx="183" cy="372" rx="150" ry="34" fill="#2C333A"></ellipse>
+          <ellipse cx="183" cy="366" rx="128" ry="26" fill="#7D7268"></ellipse>
+          <path d="M108 236 h150 c0 70 -34 120 -75 120 s-75 -50 -75 -120 z" fill="#7A6A5E"></path>
+          <ellipse cx="183" cy="236" rx="75" ry="12" fill="#5F5248"></ellipse>
+          <path d="M120 262 c10 40 30 70 52 78" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="5" stroke-linecap="round"></path>
+        </svg>
+        <span style="position: absolute; top: 24px; left: 24px; width: 28px; height: 28px; border-top: 2px solid rgba(255,255,255,0.8); border-left: 2px solid rgba(255,255,255,0.8); border-top-left-radius: 10px"></span>
+        <span style="position: absolute; top: 24px; right: 24px; width: 28px; height: 28px; border-top: 2px solid rgba(255,255,255,0.8); border-right: 2px solid rgba(255,255,255,0.8); border-top-right-radius: 10px"></span>
+        <span style="position: absolute; bottom: 24px; left: 24px; width: 28px; height: 28px; border-bottom: 2px solid rgba(255,255,255,0.8); border-left: 2px solid rgba(255,255,255,0.8); border-bottom-left-radius: 10px"></span>
+        <span style="position: absolute; bottom: 24px; right: 24px; width: 28px; height: 28px; border-bottom: 2px solid rgba(255,255,255,0.8); border-right: 2px solid rgba(255,255,255,0.8); border-bottom-right-radius: 10px"></span>
+        <span style="position: absolute; top: 28px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; background: rgba(14,21,28,0.6); padding: 6px 12px; border-radius: 12px">Stage: Thrown</span>
+      </div>
+
+      <p style="margin: 18px 0 0; text-align: center; font-size: 13px; color: #B7C0C9">Snap it now. Details can wait.</p>
+
+      <div style="flex: 1 1 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 40px">
+        <div style="width: 48px; height: 48px; border-radius: 12px; background: #E6ECF0; display: flex; align-items: center; justify-content: center" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 120 120"><path d="M14 50 h92 c0 28 -20 44 -46 44 s-46 -16 -46 -44 z" fill="#2F5D7C"></path></svg>
+        </div>
+        <button onClick="{{snap}}" aria-label="Take photo" style="width: 78px; height: 78px; border-radius: 39px; border: 4px solid #FFFFFF; background: transparent; padding: 4px; cursor: pointer; display: flex">
+          <span style="flex: 1 1 auto; border-radius: 50%; background: #FFFFFF"></span>
+        </button>
+        <button aria-label="Switch camera" style="width: 48px; height: 48px; border-radius: 24px; border: none; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"></path></svg>
+        </button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isDetails}}" hint-placeholder-val="{{ false }}">
+    <div style="height: 844px; display: flex; flex-direction: column; background: #EEF1F4; color: #16202A">
+      <div style="height: 300px; flex: 0 0 auto; position: relative; overflow: hidden">
+        <svg aria-hidden="true" width="390" height="300" viewBox="0 110 366 282" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0">
+          <rect y="0" width="366" height="520" fill="#55606B"></rect>
+          <rect y="340" width="366" height="180" fill="#3D464F"></rect>
+          <ellipse cx="183" cy="372" rx="150" ry="34" fill="#2C333A"></ellipse>
+          <ellipse cx="183" cy="366" rx="128" ry="26" fill="#7D7268"></ellipse>
+          <path d="M108 236 h150 c0 70 -34 120 -75 120 s-75 -50 -75 -120 z" fill="#7A6A5E"></path>
+          <ellipse cx="183" cy="236" rx="75" ry="12" fill="#5F5248"></ellipse>
+        </svg>
+        <button onClick="{{retake}}" style="position: absolute; top: 52px; left: 20px; height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: rgba(14,21,28,0.6); color: #FFFFFF; font-size: 14px; font-weight: 500; cursor: pointer">Retake</button>
+      </div>
+
+      <div style="flex: 1 1 auto; margin-top: -28px; background: #EEF1F4; border-radius: 28px 28px 0 0; position: relative; padding: 22px 20px 28px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span style="width: 28px; height: 28px; border-radius: 14px; background: #175474; display: flex; align-items: center; justify-content: center; flex: 0 0 auto">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+          </span>
+          <span style="font-size: 15px; font-weight: 600">Saved to your shelf as Thrown</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <label for="pieceName" style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Name</label>
+          <input id="pieceName" type="text" placeholder="Name it later" style="height: 52px; border-radius: 16px; border: 1px solid #D5DBE1; background: #FFFFFF; padding: 0 16px; font-family: 'Instrument Serif', Georgia, serif; font-size: 22px; color: #16202A; outline-color: #175474">
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Form</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <sc-for list="{{forms}}" as="c" hint-placeholder-count="5">
+              <sc-if value="{{c.on}}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{c.pick}}" aria-pressed="true" style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: #16202A; color: #FFFFFF; font-size: 14px; font-weight: 500; cursor: pointer">{{c.label}}</button>
+              </sc-if>
+              <sc-if value="{{c.off}}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{c.pick}}" aria-pressed="false" style="height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid #D5DBE1; background: #FFFFFF; color: #16202A; font-size: 14px; font-weight: 500; cursor: pointer">{{c.label}}</button>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Clay · from your recent</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <sc-for list="{{clays}}" as="c" hint-placeholder-count="3">
+              <sc-if value="{{c.on}}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{c.pick}}" aria-pressed="true" style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: #16202A; color: #FFFFFF; font-size: 14px; font-weight: 500; cursor: pointer">{{c.label}}</button>
+              </sc-if>
+              <sc-if value="{{c.off}}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{c.pick}}" aria-pressed="false" style="height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid #D5DBE1; background: #FFFFFF; color: #16202A; font-size: 14px; font-weight: 500; cursor: pointer">{{c.label}}</button>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+
+        <a href="Main.dc.html" style="margin-top: auto; height: 56px; border-radius: 28px; background: #175474; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Done</a>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 'camera', form: 'Bowl', clay: 'Stoneware' };
+  }
+  renderVals() {
+    var self = this;
+    function chips(list, key) {
+      return list.map(function (l) {
+        var on = self.state[key] === l;
+        return { label: l, on: on, off: !on, pick: function () { var o = {}; o[key] = on ? '' : l; self.setState(o); } };
+      });
+    }
+    return {
+      isCamera: this.state.step === 'camera',
+      isDetails: this.state.step === 'details',
+      snap: function () { self.setState({ step: 'details' }); },
+      retake: function () { self.setState({ step: 'camera' }); },
+      forms: chips(['Mug', 'Bowl', 'Vase', 'Plate', 'Jar'], 'form'),
+      clays: chips(['Stoneware', 'Speckled buff', 'Porcelain'], 'clay')
+    };
+  }
+}
+</script>
+</body>
+</html>

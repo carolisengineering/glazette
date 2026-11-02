@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shelf</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#175474}a:hover{color:#0f3a50}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #EEF1F4; font-family: Inter, system-ui, sans-serif; color: #16202A; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+  <div style="flex: 1 1 auto; overflow-y: auto; padding: 56px 20px 120px; display: flex; flex-direction: column; gap: 20px">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-end">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5B6672">Studio</span>
+        <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 44px; line-height: 1">The Shelf</h1>
+      </div>
+      <button aria-label="Search pieces" style="width: 44px; height: 44px; border-radius: 22px; border: none; background: #FFFFFF; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 2px rgba(22,32,42,0.06)">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16202A" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4 4"></path></svg>
+      </button>
+    </div>
+
+    <sc-if value="{{showKiln}}" hint-placeholder-val="{{ true }}">
+      <div style="background: #175474; color: #FFFFFF; border-radius: 20px; padding: 16px 18px; display: flex; align-items: center; gap: 14px">
+        <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.14); display: flex; align-items: center; justify-content: center; flex: 0 0 auto">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 3 5 5 5 9a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-8z"></path></svg>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto">
+          <span style="font-size: 15px; font-weight: 600">{{kilnTitle}}</span>
+          <span style="font-size: 13px; color: rgba(255,255,255,0.8)">Next bisque firing</span>
+        </div>
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><path d="M9 6l6 6-6 6"></path></svg>
+      </div>
+    </sc-if>
+
+    <div style="display: flex; gap: 8px; overflow-x: auto; margin: 0 -20px; padding: 0 20px 2px">
+      <sc-for list="{{chips}}" as="c" hint-placeholder-count="6">
+        <sc-if value="{{c.on}}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{c.pick}}" style="flex: 0 0 auto; height: 36px; padding: 0 14px; border-radius: 18px; border: none; background: #16202A; color: #FFFFFF; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<span style="font-size: 12px; color: rgba(255,255,255,0.7)">{{c.count}}</span></button>
+        </sc-if>
+        <sc-if value="{{c.off}}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{c.pick}}" style="flex: 0 0 auto; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid #D5DBE1; background: #FFFFFF; color: #16202A; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<span style="font-size: 12px; color: #5B6672">{{c.count}}</span></button>
+        </sc-if>
+      </sc-for>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+      <sc-for list="{{pieces}}" as="p" hint-placeholder-count="6">
+        <div style="background: #FFFFFF; border-radius: 22px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(22,32,42,0.05)">
+          <div style="height: 148px; background: {{p.backdrop}}; display: flex; align-items: center; justify-content: center; position: relative">
+            <svg aria-hidden="true" width="128" height="128" viewBox="0 0 120 120">
+              <ellipse cx="60" cy="100" rx="40" ry="5" fill="rgba(22,32,42,0.10)"></ellipse>
+              <path d="{{p.handle}}" fill="none" stroke="{{p.glaze}}" stroke-width="7" stroke-linecap="round"></path>
+              <path d="{{p.body}}" fill="{{p.glaze}}"></path>
+              <sc-if value="{{p.glossy}}" hint-placeholder-val="{{ false }}">
+                <ellipse cx="{{p.hx}}" cy="{{p.hy}}" rx="5" ry="12" fill="rgba(255,255,255,0.38)"></ellipse>
+              </sc-if>
+            </svg>
+            <span style="position: absolute; top: 12px; left: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: #16202A; background: rgba(255,255,255,0.82); padding: 4px 9px; border-radius: 10px">{{p.stage}}</span>
+          </div>
+          <div style="padding: 12px 12px 12px 14px; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; flex-direction: column; gap: 1px">
+              <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 21px; line-height: 1.1">{{p.name}}</span>
+              <span style="font-size: 12px; color: #5B6672">{{p.meta}}</span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between">
+              <div style="display: flex; gap: 4px" aria-label="{{p.progressLabel}}" role="img">
+                <sc-for list="{{p.dots}}" as="d" hint-placeholder-count="5">
+                  <sc-if value="{{d.on}}" hint-placeholder-val="{{ true }}"><span style="width: 14px; height: 4px; border-radius: 2px; background: #175474"></span></sc-if>
+                  <sc-if value="{{d.off}}" hint-placeholder-val="{{ false }}"><span style="width: 14px; height: 4px; border-radius: 2px; background: #D5DBE1"></span></sc-if>
+                </sc-for>
+              </div>
+              <sc-if value="{{p.canAdvance}}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{p.advance}}" aria-label="{{p.advanceLabel}}" style="width: 44px; height: 44px; margin: -6px -6px -6px 0; border-radius: 22px; border: none; background: #E3ECF1; display: flex; align-items: center; justify-content: center; cursor: pointer">
+                  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#175474" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+                </button>
+              </sc-if>
+              <sc-if value="{{p.done}}" hint-placeholder-val="{{ false }}">
+                <span style="font-size: 12px; font-weight: 600; color: #175474">Out of the kiln</span>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <nav style="position: absolute; left: 20px; right: 20px; bottom: 28px; height: 68px; background: rgba(22,32,42,0.94); border-radius: 34px; display: flex; align-items: center; justify-content: space-around; padding: 0 10px">
+    <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 3px; text-decoration: none; color: #FFFFFF; font-size: 11px; font-weight: 500; width: 72px">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h18M3 20h18M6 10V6h4v4M14 10V4h4v6M6 20v-6h5v6M15 20v-4h3v4"></path></svg>
+      Shelf
+    </a>
+    <a href="Capture.dc.html" aria-label="New piece" style="width: 56px; height: 56px; border-radius: 28px; background: #175474; display: flex; align-items: center; justify-content: center; text-decoration: none; box-shadow: 0 6px 16px rgba(23,84,116,0.45)">
+      <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+    </a>
+    <a href="Glazes.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 3px; text-decoration: none; color: #AEB8C2; font-size: 11px; font-weight: 500; width: 72px">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#AEB8C2" stroke-width="1.8"><circle cx="7" cy="7" r="3.5"></circle><circle cx="17" cy="7" r="3.5"></circle><circle cx="7" cy="17" r="3.5"></circle><circle cx="17" cy="17" r="3.5"></circle></svg>
+      Glazes
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      filter: -1,
+      stages: { a: 4, b: 3, c: 2, d: 1, e: 0, f: 4, g: 4, h: 1 }
+    };
+  }
+  renderVals() {
+    var STAGES = ['Thrown', 'Trimmed', 'Bisqued', 'Glazed', 'Fired'];
+    var SHAPES = {
+      mug: { body: 'M30 38 h52 v50 a8 8 0 0 1 -8 8 h-36 a8 8 0 0 1 -8 -8 z', handle: 'M82 50 c16 0 16 28 0 28', hx: 42, hy: 62 },
+      bowl: { body: 'M14 50 h92 c0 28 -20 44 -46 44 s-46 -16 -46 -44 z', handle: '', hx: 34, hy: 64 },
+      vase: { body: 'M51 18 h18 v10 c0 6 16 14 16 36 c0 20 -11 32 -25 32 s-25 -12 -25 -32 c0 -22 16 -30 16 -36 z', handle: '', hx: 47, hy: 62 },
+      jar: { body: 'M36 34 c0 -6 48 -6 48 0 v4 c6 4 8 10 8 20 v30 a8 8 0 0 1 -8 8 h-48 a8 8 0 0 1 -8 -8 v-30 c0 -10 2 -16 8 -20 z', handle: '', hx: 42, hy: 64 },
+      plate: { body: 'M10 74 h100 c-4 12 -20 18 -50 18 s-46 -6 -50 -18 z', handle: '', hx: 30, hy: 80 }
+    };
+    var RAW = ['#8A7B6E', '#A0907F', '#E8D5C4', '#D9DDD6'];
+    var BACK = ['#E7E2DC', '#ECE7E1', '#F3ECE6', '#EEF0EC', '#E6ECF0'];
+    var data = [
+      { id: 'a', name: 'Morning Mug', shape: 'mug', clay: 'Speckled buff', glaze: '#D8C7A6', glazeName: 'Oatmeal', day: 18 },
+      { id: 'b', name: 'Tall Vase', shape: 'vase', clay: 'Porcelain', glaze: '#9DBBAA', glazeName: 'Celadon', day: 11 },
+      { id: 'c', name: 'Serving Bowl', shape: 'bowl', clay: 'Stoneware', glaze: '#2F5D7C', glazeName: 'Floating Blue', day: 8 },
+      { id: 'd', name: 'Mug Pair', shape: 'mug', clay: 'Speckled buff', glaze: '#3A2A20', glazeName: 'Tenmoku', day: 3 },
+      { id: 'e', name: 'Bud Vase', shape: 'vase', clay: 'Stoneware', glaze: '#C96F4A', glazeName: 'Shino', day: 1 },
+      { id: 'f', name: 'Ramen Bowl', shape: 'bowl', clay: 'Stoneware', glaze: '#2F5D7C', glazeName: 'Floating Blue', day: 24 },
+      { id: 'g', name: 'Side Plate', shape: 'plate', clay: 'Dark stoneware', glaze: '#3A2A20', glazeName: 'Tenmoku', day: 21 },
+      { id: 'h', name: 'Lidded Jar', shape: 'jar', clay: 'Porcelain', glaze: '#9DBBAA', glazeName: 'Celadon', day: 4 }
+    ];
+    var self = this;
+    var st = this.state.stages;
+    var filter = this.state.filter;
+    var counts = [0, 0, 0, 0, 0];
+    data.forEach(function (d) { counts[st[d.id]]++; });
+
+    var chips = [{ label: 'All', count: data.length, idx: -1 }].concat(
+      STAGES.map(function (s, i) { return { label: s, count: counts[i], idx: i }; })
+    ).map(function (c) {
+      var on = c.idx === filter;
+      return { label: c.label, count: c.count, on: on, off: !on, pick: function () { self.setState({ filter: c.idx }); } };
+    });
+
+    var pieces = data.filter(function (d) { return filter === -1 || st[d.id] === filter; }).map(function (d) {
+      var s = st[d.id];
+      var shape = SHAPES[d.shape];
+      var color = s >= 3 ? d.glaze : RAW[s];
+      if (s === 3) color = d.glaze + 'B3';
+      var meta = s >= 3 ? d.glazeName + ' · ' + d.clay : d.clay + ' · Day ' + d.day;
+      var dots = STAGES.map(function (_, i) { return { on: i <= s, off: i > s }; });
+      var next = STAGES[s + 1];
+      return {
+        name: d.name,
+        meta: meta,
+        stage: STAGES[s],
+        glaze: color,
+        backdrop: BACK[s],
+        body: shape.body,
+        handle: shape.handle,
+        hx: shape.hx,
+        hy: shape.hy,
+        glossy: s === 4,
+        dots: dots,
+        progressLabel: 'Stage ' + (s + 1) + ' of 5',
+        canAdvance: s < 4,
+        done: s === 4,
+        advanceLabel: next ? 'Move ' + d.name + ' to ' + next : '',
+        advance: function () {
+          var ns = Object.assign({}, self.state.stages);
+          ns[d.id] = Math.min(4, ns[d.id] + 1);
+          self.setState({ stages: ns });
+        }
+      };
+    });
+
+    var ready = counts[1];
+    return {
+      chips: chips,
+      pieces: pieces,
+      showKiln: ready > 0,
+      kilnTitle: ready === 1 ? '1 piece ready to bisque' : ready + ' pieces ready to bisque'
+    };
+  }
+}
+</script>
+</body>
+</html>

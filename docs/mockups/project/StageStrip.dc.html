@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Update – Stage strip</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#175474}a:hover{color:#0f3a50}
+button,input{font-family:inherit}
+input::placeholder{color:#6B7580}
+button:disabled{cursor:default}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0E151C; font-family: Inter, system-ui, sans-serif; color: #16202A; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+  <div style="height: 300px; flex: 0 0 auto; position: relative; overflow: hidden">
+    <svg aria-hidden="true" width="390" height="300" viewBox="0 110 366 282" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0">
+      <rect y="0" width="366" height="520" fill="#55606B"></rect>
+      <rect y="320" width="366" height="200" fill="#3D464F"></rect>
+      <ellipse cx="183" cy="330" rx="120" ry="12" fill="rgba(14,21,28,0.35)"></ellipse>
+      <g transform="translate(75 150) scale(1.5)">
+        <path d="M82 50 c16 0 16 28 0 28" fill="none" stroke="#A0907F" stroke-width="7" stroke-linecap="round"></path>
+        <path d="M30 38 h52 v50 a8 8 0 0 1 -8 8 h-36 a8 8 0 0 1 -8 -8 z" fill="#A0907F"></path>
+        <ellipse cx="56" cy="38" rx="26" ry="4" fill="#8E7F72"></ellipse>
+      </g>
+    </svg>
+    <a href="PickPiece.dc.html" aria-label="Back to piece list" style="position: absolute; top: 52px; left: 20px; width: 40px; height: 40px; border-radius: 20px; background: rgba(14,21,28,0.6); display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+    </a>
+    <span style="position: absolute; top: 58px; right: 20px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #FFFFFF; background: rgba(14,21,28,0.6); padding: 6px 12px; border-radius: 12px">Update a piece</span>
+  </div>
+
+  <div style="flex: 1 1 auto; margin-top: -28px; background: #EEF1F4; border-radius: 28px 28px 0 0; position: relative; padding: 10px 20px 28px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto">
+    <span aria-hidden="true" style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #C5CDD5"></span>
+
+    <div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; border-radius: 18px; padding: 8px 14px 8px 8px">
+      <span style="width: 52px; height: 52px; border-radius: 12px; background: #ECE7E1; flex: 0 0 auto; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="40" height="40" viewBox="0 0 120 120"><path d="M82 50 c16 0 16 28 0 28" fill="none" stroke="#A0907F" stroke-width="8" stroke-linecap="round"></path><path d="M30 38 h52 v50 a8 8 0 0 1 -8 8 h-36 a8 8 0 0 1 -8 -8 z" fill="#A0907F"></path></svg>
+      </span>
+      <span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+        <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 22px; line-height: 1.1">Mug Pair</span>
+        <span style="font-size: 12px; color: #5B6672">Speckled buff · Day 3</span>
+      </span>
+      <a href="PickPiece.dc.html" style="font-size: 14px; font-weight: 600; padding: 10px 4px; text-decoration: none">Change</a>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Stage for this photo</span>
+      <div role="group" aria-label="Stage" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; background: #FFFFFF; border-radius: 18px; padding: 6px">
+        <sc-for list="{{stages}}" as="s" hint-placeholder-count="5">
+          <sc-if value="{{s.sel}}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{s.pick}}" aria-pressed="true" style="border: none; background: #175474; color: #FFFFFF; border-radius: 13px; padding: 10px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer">
+              <span style="width: 24px; height: 4px; border-radius: 2px; background: #FFFFFF"></span>
+              <span style="font-size: 12px; font-weight: 600">{{s.label}}</span>
+              <span style="font-size: 10px; color: rgba(255,255,255,0.85); height: 12px">{{s.caption}}</span>
+            </button>
+          </sc-if>
+          <sc-if value="{{s.open}}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{s.pick}}" aria-pressed="false" style="border: none; background: transparent; color: #16202A; border-radius: 13px; padding: 10px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer">
+              <span style="width: 24px; height: 4px; border-radius: 2px; background: {{s.bar}}"></span>
+              <span style="font-size: 12px; font-weight: 600">{{s.label}}</span>
+              <span style="font-size: 10px; color: #5B6672; height: 12px">{{s.caption}}</span>
+            </button>
+          </sc-if>
+          <sc-if value="{{s.past}}" hint-placeholder-val="{{ false }}">
+            <button disabled="{{ true }}" aria-pressed="false" style="border: none; background: transparent; color: #5B6672; border-radius: 13px; padding: 10px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px">
+              <span style="width: 24px; height: 4px; border-radius: 2px; background: #9FB6C3"></span>
+              <span style="font-size: 12px; font-weight: 500">{{s.label}}</span>
+              <span style="font-size: 10px; height: 12px; display: flex; align-items: center; gap: 2px"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5B6672" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>Done</span>
+            </button>
+          </sc-if>
+        </sc-for>
+      </div>
+      <span style="font-size: 14px; color: #16202A; display: flex; align-items: center; gap: 8px">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#175474" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+        {{summary}}
+      </span>
+    </div>
+
+    <sc-if value="{{isGlazed}}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Glaze · from your library</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <sc-for list="{{glazes}}" as="g" hint-placeholder-count="4">
+            <sc-if value="{{g.on}}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{g.pick}}" aria-pressed="true" style="height: 40px; padding: 0 14px 0 8px; border-radius: 20px; border: none; background: #16202A; color: #FFFFFF; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; cursor: pointer"><span style="width: 24px; height: 24px; border-radius: 12px; background: {{g.color}}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3)"></span>{{g.name}}</button>
+            </sc-if>
+            <sc-if value="{{g.off}}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{g.pick}}" aria-pressed="false" style="height: 40px; padding: 0 14px 0 8px; border-radius: 20px; border: 1px solid #D5DBE1; background: #FFFFFF; color: #16202A; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; cursor: pointer"><span style="width: 24px; height: 24px; border-radius: 12px; background: {{g.color}}"></span>{{g.name}}</button>
+            </sc-if>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="stageNote" style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Note · optional</label>
+      <input id="stageNote" type="text" placeholder="{{notePlaceholder}}" style="height: 52px; border-radius: 16px; border: 1px solid #D5DBE1; background: #FFFFFF; padding: 0 16px; font-size: 15px; color: #16202A; outline-color: #175474">
+    </div>
+
+    <a href="Main.dc.html" style="margin-top: auto; flex: 0 0 auto; height: 56px; border-radius: 28px; background: #175474; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">{{saveLabel}}</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { stage: 2, glaze: 'Oatmeal' };
+  }
+  renderVals() {
+    var self = this;
+    var STAGES = ['Thrown', 'Trimmed', 'Bisqued', 'Glazed', 'Fired'];
+    var NOTES = ['e.g. 1.1 lb of clay', 'e.g. Handle attached', 'e.g. Cone 04', 'e.g. 2 dips, 3 seconds', 'e.g. Cone 6, oxidation'];
+    var current = 1;
+    var sel = this.state.stage;
+    var stages = STAGES.map(function (label, i) {
+      var past = i < current;
+      var isSel = i === sel;
+      return {
+        label: label,
+        past: past,
+        sel: !past && isSel,
+        open: !past && !isSel,
+        bar: i <= sel ? '#175474' : '#D5DBE1',
+        caption: i === current ? 'Now' : (i === current + 1 ? 'Next' : ''),
+        pick: function () { self.setState({ stage: i }); }
+      };
+    });
+    var glazes = [
+      { name: 'Oatmeal', color: '#D8C7A6' },
+      { name: 'Floating Blue', color: '#2F5D7C' },
+      { name: 'Celadon', color: '#9DBBAA' },
+      { name: 'Tenmoku', color: '#3A2A20' }
+    ].map(function (g) {
+      var on = self.state.glaze === g.name;
+      return { name: g.name, color: g.color, on: on, off: !on, pick: function () { self.setState({ glaze: on ? '' : g.name }); } };
+    });
+    var summary = sel === current
+      ? 'Adds a photo to Trimmed'
+      : 'Moves Mug Pair from Trimmed to ' + STAGES[sel];
+    return {
+      stages: stages,
+      glazes: glazes,
+      isGlazed: sel === 3,
+      summary: summary,
+      notePlaceholder: NOTES[sel],
+      saveLabel: sel === current ? 'Save photo' : 'Save to ' + STAGES[sel]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Piece – Morning Mug</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#175474}a:hover{color:#0f3a50}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #EEF1F4; font-family: Inter, system-ui, sans-serif; color: #16202A; display: flex; flex-direction: column; overflow: hidden; position: relative">
+  <div style="flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column">
+
+    <div style="height: 400px; flex: 0 0 auto; background: {{heroBg}}; position: relative; display: flex; align-items: center; justify-content: center">
+      <a href="Main.dc.html" aria-label="Back to shelf" style="position: absolute; top: 52px; left: 20px; width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16202A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+      </a>
+      <button aria-label="More options" style="position: absolute; top: 52px; right: 20px; width: 44px; height: 44px; border-radius: 22px; border: none; background: rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center; cursor: pointer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="#16202A"><circle cx="6" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18" cy="12" r="1.6"></circle></svg>
+      </button>
+
+      <svg aria-hidden="true" width="240" height="240" viewBox="0 0 120 120" style="margin-top: 20px">
+        <ellipse cx="60" cy="100" rx="40" ry="5" fill="rgba(22,32,42,0.12)"></ellipse>
+        <path d="M82 50 c16 0 16 28 0 28" fill="none" stroke="{{potColor}}" stroke-width="7" stroke-linecap="round"></path>
+        <path d="M30 38 h52 v50 a8 8 0 0 1 -8 8 h-36 a8 8 0 0 1 -8 -8 z" fill="{{potColor}}"></path>
+        <sc-if value="{{fired}}" hint-placeholder-val="{{ true }}">
+          <ellipse cx="41" cy="60" rx="4.5" ry="13" fill="rgba(255,255,255,0.42)"></ellipse>
+          <circle cx="50" cy="74" r="0.9" fill="#6E5A44"></circle>
+          <circle cx="62" cy="52" r="0.8" fill="#6E5A44"></circle>
+          <circle cx="70" cy="80" r="1" fill="#6E5A44"></circle>
+          <circle cx="58" cy="86" r="0.7" fill="#6E5A44"></circle>
+          <circle cx="74" cy="64" r="0.8" fill="#6E5A44"></circle>
+        </sc-if>
+      </svg>
+
+      <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.9); border-radius: 22px; padding: 4px; display: flex; gap: 2px">
+        <sc-for list="{{views}}" as="v" hint-placeholder-count="2">
+          <sc-if value="{{v.on}}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{v.pick}}" aria-pressed="true" style="height: 36px; padding: 0 18px; border-radius: 18px; border: none; background: #16202A; color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">{{v.label}}</button>
+          </sc-if>
+          <sc-if value="{{v.off}}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{v.pick}}" aria-pressed="false" style="height: 36px; padding: 0 18px; border-radius: 18px; border: none; background: transparent; color: #16202A; font-size: 13px; font-weight: 600; cursor: pointer">{{v.label}}</button>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="padding: 24px 20px 48px; display: flex; flex-direction: column; gap: 24px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #175474">Fired · Oct 25</span>
+        <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 40px; line-height: 1.05">Morning Mug</h1>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+        <div style="background: #FFFFFF; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 11px; color: #5B6672">Clay</span>
+          <span style="font-size: 14px; font-weight: 600">Speckled buff</span>
+        </div>
+        <div style="background: #FFFFFF; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 11px; color: #5B6672">Glaze</span>
+          <span style="font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #D8C7A6; flex: 0 0 auto"></span>Oatmeal</span>
+        </div>
+        <div style="background: #FFFFFF; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 11px; color: #5B6672">Firing</span>
+          <span style="font-size: 14px; font-weight: 600">Cone 6</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Journey</h2>
+        <div style="background: #FFFFFF; border-radius: 20px; padding: 8px 16px">
+          <sc-for list="{{timeline}}" as="t" hint-placeholder-count="5">
+            <div style="display: flex; align-items: center; gap: 14px; padding: 10px 0">
+              <div style="width: 44px; height: 44px; border-radius: 12px; background: {{t.tile}}; flex: 0 0 auto; display: flex; align-items: center; justify-content: center">
+                <svg aria-hidden="true" width="30" height="30" viewBox="0 0 120 120"><path d="M30 38 h52 v50 a8 8 0 0 1 -8 8 h-36 a8 8 0 0 1 -8 -8 z" fill="{{t.color}}"></path><path d="M82 50 c16 0 16 28 0 28" fill="none" stroke="{{t.color}}" stroke-width="8"></path></svg>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0">
+                <span style="font-size: 15px; font-weight: 600">{{t.stage}}</span>
+                <span style="font-size: 13px; color: #5B6672">{{t.note}}</span>
+              </div>
+              <span style="font-size: 12px; color: #5B6672; flex: 0 0 auto">{{t.date}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5B6672">Notes</h2>
+        <p style="margin: 0; background: #FFFFFF; border-radius: 20px; padding: 16px; font-size: 15px; line-height: 1.5">Two dips of Oatmeal, three seconds each. Breaks nicely over the rim. Use a thinner second dip next time.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { view: 'fired' };
+  }
+  renderVals() {
+    var self = this;
+    var fired = this.state.view === 'fired';
+    var views = [{ id: 'glazed', label: 'Before firing' }, { id: 'fired', label: 'Out of the kiln' }].map(function (v) {
+      var on = v.id === self.state.view;
+      return { label: v.label, on: on, off: !on, pick: function () { self.setState({ view: v.id }); } };
+    });
+    var timeline = [
+      { stage: 'Thrown', note: '1.1 lb of clay', date: 'Oct 8', color: '#8A7B6E', tile: '#E7E2DC' },
+      { stage: 'Trimmed', note: 'Handle pulled and attached', date: 'Oct 10', color: '#A0907F', tile: '#ECE7E1' },
+      { stage: 'Bisqued', note: 'Cone 04', date: 'Oct 16', color: '#E8D5C4', tile: '#F3ECE6' },
+      { stage: 'Glazed', note: 'Oatmeal, 2 dips', date: 'Oct 21', color: '#D8C7A6B3', tile: '#EEF0EC' },
+      { stage: 'Fired', note: 'Cone 6, oxidation', date: 'Oct 25', color: '#D8C7A6', tile: '#E6ECF0' }
+    ];
+    return {
+      fired: fired,
+      potColor: fired ? '#D8C7A6' : '#EDE6DA',
+      heroBg: fired ? '#E2E9EE' : '#ECEDEA',
+      views: views,
+      timeline: timeline
+    };
+  }
+}
+</script>
+</body>
+</html>
