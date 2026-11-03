@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #eef1f4;
+  --color-surface: #ffffff;
+  --color-ink: #16202a;
+  --color-muted: #5b6672;
+  --color-border: #d5dbe1;
+  --color-accent: #175474;
+  --color-accent-tint: #e3ecf1;
+  --color-camera: #0e151c;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-sans: Inter, system-ui, sans-serif;
+  --radius-card: 22px;
+}
