@@ -3,5 +3,5 @@ import App from './App'
 
 test('renders the Shelf title', () => {
   render(<App />)
-  expect(screen.getByRole('heading', { name: 'The Shelf' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'My Shelf' })).toBeInTheDocument()
 })

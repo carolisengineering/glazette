@@ -10,6 +10,19 @@
 
 **Spec:** `docs/glazette-mvp-spec.md` (sections 4–8 drive this plan). Mockups: `docs/mockups/project/*.dc.html` and `docs/mockups/README.md`.
 
+## Delivery
+
+Four PRs against `main`, each on its own branch in a git worktree, executed with superpowers:subagent-driven-development. CI runs from PR 1 so every later PR is checked.
+
+| PR | Branch | Tasks | Ships |
+|----|--------|-------|-------|
+| 1 | `pr1-foundation` | 1, 2, 3, 4, 13 | Scaffold, database, photo pipeline, CI and deploy of an empty shell |
+| 2 | `pr2-shelf-capture` | 5, 6, 7, 14 | Shelf and the full capture flow; first usable app |
+| 3 | `pr3-piece-glazes` | 8, 9 | Piece detail and Glazes |
+| 4 | `pr4-backup-pwa` | 10, 11, 12 | Backup, PWA, end-to-end tests |
+
+Task 13's Playwright step runs only the specs that exist at that point; Task 12 adds the rest.
+
 ## Global Constraints
 
 - Stages are exactly `'thrown' | 'trimmed' | 'bisqued' | 'glazed' | 'fired'`, in that order. A piece never moves backward; its current stage is derived from its latest `StageEntry`, never stored.
@@ -18,7 +31,8 @@
 - Photos: JPEG at quality 0.8, max 2000px long edge, plus a ~400px thumbnail, content-addressed by SHA-256 hash.
 - Design tokens (section 7): Background `#EEF1F4`, Surface `#FFFFFF`, Ink `#16202A`, Muted `#5B6672`, Border `#D5DBE1`, Accent `#175474`, Accent tint `#E3ECF1`, Camera `#0E151C`. Fonts: Instrument Serif for names and screen titles, Inter elsewhere. Card radius 20–24px, pill chips, touch targets ≥ 44px.
 - Defaults (section 2.1): clay "White stoneware"; Bisqued note "Cone 6"; glaze cone "6"; Fired note "Cone 6 oxidation". Pre-filled, never locked.
-- Copy: "Untitled <form>" (e.g. "Untitled bowl") when a piece has no name; "(retired)" suffix for a deleted glaze or clay; Shelf title "The Shelf"; kiln banner "N pieces ready to bisque" / "1 piece ready to bisque"; before/after labels "Before firing" / "Out of the kiln".
+- Copy: "Untitled <form>" (e.g. "Untitled bowl") when a piece has no name; "(retired)" suffix for a deleted glaze or clay; Shelf title "My Shelf"; kiln banner "N pieces ready to bisque" / "1 piece ready to bisque"; before/after labels "Before firing" / "Out of the kiln".
+- Type sizes (Carol, 2026-11-03): the mockups' text is too small, so every size below 16px goes up one step. 11px and 12px become 13px, 13px becomes 14px, 14px becomes 15px, 15px becomes 16px. Text inputs (search, name, notes, glaze rows) are 16px so iOS Safari does not zoom on focus. Screen titles ("My Shelf", "Glazes", piece names on the detail screen) are 32px, not the mockups' 40–44px. Other sizes of 16px and above stay as in the mockups. Long names and meta lines truncate with an ellipsis rather than wrapping or overflowing their card.
 - American spelling in all UI copy, comments and docs.
 - No server, no telemetry endpoint, no dark mode in v1.
 
@@ -60,13 +74,13 @@ import { render, screen } from '@testing-library/react';
 import App from './App';
 test('renders the Shelf title', () => {
   render(<App />);
-  expect(screen.getByRole('heading', { name: 'The Shelf' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'My Shelf' })).toBeInTheDocument();
 });
 ```
 
 - [ ] **Step 3: Run it to verify it fails** — `pnpm test` → FAIL: heading not found.
 
-- [ ] **Step 4: Replace the template `App.tsx` with a page that renders `<h1 className="font-serif">The Shelf</h1>` on `bg-background`; declare the tokens in `src/styles/app.css`**
+- [ ] **Step 4: Replace the template `App.tsx` with a page that renders `<h1 className="font-serif">My Shelf</h1>` on `bg-background`; declare the tokens in `src/styles/app.css`**
 
 ```css
 @import "tailwindcss";
@@ -393,7 +407,7 @@ test('ReloadPrompt renders the Reload button only when needRefresh is true')  //
 
 ```ts
 // offline.spec.ts
-test('app shell loads after going offline and reloading')   // visit /, wait for SW active, context.setOffline(true), reload, expect heading "The Shelf"
+test('app shell loads after going offline and reloading')   // visit /, wait for SW active, context.setOffline(true), reload, expect heading "My Shelf"
 // persistence.spec.ts
 test('a piece created with a photo survives closing and reopening the browser context')  // setInputFiles on the capture input, "Use photo", "Done"; new context on the same storageState dir; expect one card
 ```
@@ -416,6 +430,22 @@ test('a piece created with a photo survives closing and reopening the browser co
 - [ ] **Step 2: Verify locally** — `pnpm build && pnpm exec wrangler deploy --dry-run` → prints the asset upload plan without error.
 - [ ] **Step 3: Push a branch and open a PR** — the CI run is green. Add the two secrets in the repo settings (a manual step for Carol), merge, confirm the `*.workers.dev` URL serves the Shelf.
 - [ ] **Step 4: Commit** — `ci: lint, test, e2e and deploy to Cloudflare Workers`
+
+---
+
+### Task 14: Move CI actions off Node 20
+
+Added 2026-11-02. The first deploy run on `main` (run 41571842421) warned: "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, pnpm/action-setup@v4."
+
+**Files:**
+- Modify: `.github/workflows/ci.yml` (both the `check` and `deploy` jobs)
+
+**Interfaces:**
+- No behavior change. Same jobs, steps, triggers, permissions and secrets; only the action versions move.
+
+- [ ] **Step 1: Bump each action to its latest major release that runs on Node 24.** That is at least `actions/checkout@v5` and `actions/setup-node@v5`. For `pnpm/action-setup`, check its releases and use the newest major whose `action.yml` declares `runs.using: node24`; if none exists yet, leave it on v4 and say so in the PR description. Read each release's breaking-change notes before bumping. The pnpm version still comes from `packageManager` in `package.json`, and Node stays at 22 via `node-version`.
+- [ ] **Step 2: Verify** — on the PR's CI run, the `check` job passes and its annotations no longer include the Node 20 deprecation warning (except for any action left on v4 in Step 1). The `deploy` job only runs on `main`, so confirm it after merge.
+- [ ] **Step 3: Commit** — `ci: move GitHub Actions to Node 24 releases`
 
 ---
 
