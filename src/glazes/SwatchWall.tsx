@@ -45,10 +45,10 @@ export function SwatchWall({ glazes, selectedId, onSelect }: Props) {
                 />
               )}
             </span>
-            <span className="truncate text-[14px] font-semibold">
+            <span className="truncate text-center text-[14px] font-semibold">
               {glaze.name}
             </span>
-            <span className="-mt-1 truncate text-[13px] text-muted">
+            <span className="-mt-1 truncate text-center text-[13px] text-muted">
               {pieceCount(pieceIds.length)}
             </span>
           </button>

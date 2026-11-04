@@ -24,6 +24,10 @@ beforeEach(async () => {
   await ensureDefaults()
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 function photo(tag: string): ProcessedImage {
   return {
     blob: new Blob([tag], { type: 'image/jpeg' }),

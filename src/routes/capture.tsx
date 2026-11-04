@@ -88,7 +88,12 @@ export function CaptureScreen() {
   }
 
   /** Retake from the details sheet: the piece was already saved, so discard it first. */
+  const retaking = useRef(false)
   const retakeNewPiece = async (id: string) => {
+    if (retaking.current) return
+    retaking.current = true
+    // Open the camera in the tap itself: iOS drops the user activation after an await.
+    retake()
     try {
       await softDelete('pieces', id)
     } catch {
@@ -96,9 +101,9 @@ export function CaptureScreen() {
         message: "Couldn't discard the photo. Try again.",
         id: (t?.id ?? 0) + 1,
       }))
-      return
+    } finally {
+      retaking.current = false
     }
-    retake()
   }
 
   /** Saves the photo as a new Thrown piece with the default clay, then asks for details. */
@@ -210,7 +215,9 @@ export function CaptureScreen() {
           Choose from library
         </button>
         <Link
-          to="/"
+          {...(pieceId
+            ? { to: '/piece/$id', params: { id: pieceId } }
+            : { to: '/' })}
           className="flex h-11 items-center text-[15px] text-[#b7c0c9]"
         >
           Cancel

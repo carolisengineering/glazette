@@ -21,6 +21,8 @@ export interface PieceView {
   clayName?: string
   /** Glaze names of the latest live Glazed entry, in layering order. */
   glazeNames: string[]
+  /** Color of the first glaze layer, if any. */
+  glazeColor?: string
 }
 
 const FIRED_FADE_DAYS = 14
@@ -55,7 +57,7 @@ export function buildPieceViews(
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
     const glazedEntry = latestEntry(own, 'glazed')
-    const glazeNames = glazedEntry
+    const layers = glazedEntry
       ? glazeApps
           .filter(
             (a) => a.entryId === glazedEntry.id && liveEntryIds.has(a.entryId),
@@ -63,9 +65,10 @@ export function buildPieceViews(
           .sort((a, b) => a.order - b.order)
           .flatMap((a) => {
             const glaze = glazeById.get(a.glazeId)
-            return glaze ? [nameWithRetired(glaze)] : []
+            return glaze ? [glaze] : []
           })
       : []
+    const glazeNames = layers.map(nameWithRetired)
     const clay = piece.clayId ? clayById.get(piece.clayId) : undefined
     return {
       piece,
@@ -74,6 +77,7 @@ export function buildPieceViews(
       latestPhotoId: latestEntry(own.filter((e) => e.photoId))?.photoId,
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeNames,
+      glazeColor: layers[0]?.color,
     }
   })
 }

@@ -356,6 +356,8 @@ test('Retake on the details sheet soft-deletes the new piece and returns to the 
   const [piece] = await db.pieces.toArray()
   clickSpy.mockClear()
   await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  // The camera opens in the tap itself, before the soft delete resolves.
+  expect(clickSpy).toHaveBeenCalledTimes(1)
   expect(
     await screen.findByRole('button', { name: 'Take photo' }),
   ).toBeVisible()
@@ -363,6 +365,26 @@ test('Retake on the details sheet soft-deletes the new piece and returns to the 
   expect((await db.pieces.get(piece.id))?.deletedAt).toBeTruthy()
   expect(clickSpy).toHaveBeenCalledTimes(1)
   expect(clickSpy.mock.contexts[0]).toBe(screen.getByTestId('capture-input'))
+})
+
+test('Retake on the details sheet shows a toast when the discard fails', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  vi.spyOn(ops, 'softDelete').mockRejectedValueOnce(new Error('boom'))
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  expect(
+    await screen.findByText("Couldn't discard the photo. Try again."),
+  ).toBeVisible()
+})
+
+test('Cancel goes back to the piece when capture came from one', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = renderRoute(`/capture?pieceId=${id}`)
+  await userEvent.click(await screen.findByRole('link', { name: 'Cancel' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
 })
 
 test('review defaults to New piece when there are no in-progress pieces, Update when there is one', async () => {

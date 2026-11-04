@@ -1,10 +1,28 @@
 import type { PieceDetail } from '../db/queries'
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({
+  label,
+  value,
+  dot,
+}: {
+  label: string
+  value: string
+  dot?: string
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-2xl bg-surface p-3">
       <span className="text-[13px] text-muted">{label}</span>
-      <span className="text-[15px] font-semibold break-words">{value}</span>
+      <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+        {dot ? (
+          <span
+            aria-hidden="true"
+            data-testid="glaze-dot"
+            className="size-3 flex-none rounded-full"
+            style={{ backgroundColor: dot }}
+          />
+        ) : null}
+        <span className="min-w-0 truncate">{value}</span>
+      </span>
     </div>
   )
 }
@@ -17,7 +35,7 @@ export function FactCards({ view }: { view: PieceDetail }) {
   return (
     <div className="grid grid-cols-3 gap-2">
       <Fact label="Clay" value={view.clayName ?? 'No clay'} />
-      <Fact label="Glaze" value={glaze} />
+      <Fact label="Glaze" value={glaze} dot={view.glazeColor} />
       <Fact
         label="Firing"
         value={view.cone ? `Cone ${view.cone}` : 'Not set'}

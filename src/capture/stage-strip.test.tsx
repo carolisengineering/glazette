@@ -53,6 +53,25 @@ async function openStrip(pieceId: string) {
 const stageBtn = (name: string) =>
   screen.getByRole('button', { name: new RegExp(`^${name}`) })
 
+test('a lost Thrown piece preselects Thrown and saves a photo without advancing', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await ops.markLost(id, true)
+  await openStrip(id)
+  await screen.findByRole('button', { name: 'Save photo' })
+  expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByText('Adds a photo to Thrown')).toBeVisible()
+  expect(stageBtn('Trimmed')).toBeEnabled()
+})
+
+test('Close goes back to the piece when capture came from one', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = await openStrip(id)
+  await userEvent.click(await screen.findByRole('link', { name: 'Close' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+})
+
 test('stage strip preselects Trimmed for a Thrown piece and disables earlier stages', async () => {
   const id = await createPiece({ name: 'Mug' })
   await openStrip(id)
@@ -291,7 +310,13 @@ test('removing the first of two glaze rows saves only the second glaze, at order
   expect(apps[0]).toMatchObject({ glazeId: glazes[0].id, order: 0 })
 })
 
-test('removing the only glaze row leaves one empty row', async () => {
+test('a single empty glaze row has no remove button', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await openGlazedRows(id)
+  expect(screen.queryByRole('button', { name: 'Remove glaze 1' })).toBeNull()
+})
+
+test('removing the only filled glaze row leaves one empty row', async () => {
   const id = await createPiece({ name: 'Mug' })
   await openGlazedRows(id)
   await userEvent.type(screen.getByLabelText('Glaze 1'), 'Celadon')

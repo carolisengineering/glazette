@@ -80,25 +80,27 @@ export function GlazeRows({ value, onChange }: Props) {
                 placeholder="Glaze name"
                 className={`${input} flex-1`}
               />
-              <button
-                type="button"
-                aria-label={`Remove glaze ${n}`}
-                onClick={() => remove(i)}
-                className="flex size-12 flex-none items-center justify-center rounded-full"
-              >
-                <svg
-                  aria-hidden="true"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#5B6672"
-                  strokeWidth="2"
-                  strokeLinecap="round"
+              {value.length > 1 || row.name.trim() ? (
+                <button
+                  type="button"
+                  aria-label={`Remove glaze ${n}`}
+                  onClick={() => remove(i)}
+                  className="flex size-12 flex-none items-center justify-center rounded-full"
                 >
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#5B6672"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  >
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              ) : null}
             </div>
             {suggestions.length > 0 ? (
               <div className="flex flex-wrap gap-2">

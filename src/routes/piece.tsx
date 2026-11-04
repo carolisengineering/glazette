@@ -119,7 +119,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
               search={{ pieceId: piece.id }}
               className="flex h-14 items-center justify-center rounded-[28px] bg-accent text-[16px] font-semibold text-white no-underline"
             >
-              {`Move ${name} to ${STAGE_LABEL[next]}`}
+              <span className="min-w-0 truncate px-4">{`Move ${name} to ${STAGE_LABEL[next]}`}</span>
             </Link>
           ) : null}
           <div className="grid grid-cols-2 gap-3">

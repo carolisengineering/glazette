@@ -96,10 +96,14 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
 
   const current = view.stage
   const currentIndex = current ? STAGES.indexOf(current) : 0
-  const stage: Stage = picked ?? nextStage(current) ?? 'fired'
+  // A lost piece doesn't advance from the arrow: preselect where it already is.
+  const stage: Stage =
+    picked ??
+    (view.piece.lost && current ? current : (nextStage(current) ?? 'fired'))
   const selectable = (s: Stage) =>
     current === 'fired' ? s === 'fired' : STAGES.indexOf(s) >= currentIndex
   const name = displayName(view.piece)
+  const back = { to: '/piece/$id', params: { id: pieceId } } as const
   const days = dayCount(view.piece, new Date())
   const meta = [view.clayName, days ? `Day ${days}` : undefined]
     .filter(Boolean)
@@ -162,7 +166,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
           <img src={url} alt="" className="size-full object-cover" />
         ) : null}
         <Link
-          to="/"
+          {...back}
           aria-label="Close"
           className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
         >
