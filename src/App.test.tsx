@@ -1,7 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import App from './App'
 
-test('renders the Shelf title', () => {
+test('renders the Shelf title', async () => {
   render(<App />)
-  expect(screen.getByRole('heading', { name: 'My Shelf' })).toBeInTheDocument()
+  expect(
+    await screen.findByRole('heading', { name: 'My Shelf' }),
+  ).toBeInTheDocument()
 })

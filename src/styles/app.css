@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./grid.css";
 
 @theme {
   --color-background: #eef1f4;

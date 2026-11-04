@@ -8,6 +8,14 @@ export const STAGES = [
   'fired',
 ] as const satisfies readonly Stage[]
 
+export const STAGE_LABEL: Record<Stage, string> = {
+  thrown: 'Thrown',
+  trimmed: 'Trimmed',
+  bisqued: 'Bisqued',
+  glazed: 'Glazed',
+  fired: 'Fired',
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
@@ -49,10 +57,19 @@ export function displayName(piece: Piece): string {
   return piece.form ? `Untitled ${piece.form}` : 'Untitled piece'
 }
 
-/** Whole days since creation, floored, never negative. */
-export function dayCount(piece: Piece, now: Date): number {
-  const days = Math.floor(
-    (now.getTime() - new Date(piece.createdAt).getTime()) / DAY_MS,
+/**
+ * "Day N" for a piece: local calendar days since it was thrown, plus one, so
+ * the day it was thrown is Day 1. Undefined when createdAt is not a valid date.
+ */
+export function dayCount(piece: Piece, now: Date): number | undefined {
+  const created = new Date(piece.createdAt)
+  if (Number.isNaN(created.getTime())) return undefined
+  const start = new Date(
+    created.getFullYear(),
+    created.getMonth(),
+    created.getDate(),
   )
-  return Math.max(0, days)
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const days = Math.round((today.getTime() - start.getTime()) / DAY_MS)
+  return Math.max(0, days) + 1
 }
