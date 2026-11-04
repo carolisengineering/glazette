@@ -18,7 +18,7 @@ Four PRs against `main`, each on its own branch in a git worktree, executed with
 |----|--------|-------|-------|
 | 1 | `pr1-foundation` | 1, 2, 3, 4, 13 | Scaffold, database, photo pipeline, CI and deploy of an empty shell |
 | 2 | `pr2-shelf-capture` | 5, 6, 7, 14 | Shelf and the full capture flow; first usable app |
-| 3 | `pr3-piece-glazes` | 8, 9 | Piece detail and Glazes |
+| 3 | `pr3-piece-glazes` | 15, 8, 9 | PR2 follow-ups, Piece detail and Glazes |
 | 4 | `pr4-backup-pwa` | 10, 11, 12 | Backup, PWA, end-to-end tests |
 
 Task 13's Playwright step runs only the specs that exist at that point; Task 12 adds the rest.
@@ -446,6 +446,37 @@ Added 2026-11-02. The first deploy run on `main` (run 41571842421) warned: "Node
 - [ ] **Step 1: Bump each action to its latest major release that runs on Node 24.** That is at least `actions/checkout@v5` and `actions/setup-node@v5`. For `pnpm/action-setup`, check its releases and use the newest major whose `action.yml` declares `runs.using: node24`; if none exists yet, leave it on v4 and say so in the PR description. Read each release's breaking-change notes before bumping. The pnpm version still comes from `packageManager` in `package.json`, and Node stays at 22 via `node-version`.
 - [ ] **Step 2: Verify** — on the PR's CI run, the `check` job passes and its annotations no longer include the Node 20 deprecation warning (except for any action left on v4 in Step 1). The `deploy` job only runs on `main`, so confirm it after merge.
 - [ ] **Step 3: Commit** — `ci: move GitHub Actions to Node 24 releases`
+
+---
+
+### Task 15: PR2 follow-ups
+
+Added 2026-11-04. Carol's answers to the product questions left open by PR2's reviews. Runs first in PR3.
+
+**Files:**
+- Modify: `src/capture/GlazeRows.tsx`, `src/components/PieceCard.tsx`, `src/capture/NewPieceSheet.tsx`, `src/routes/capture.tsx`, `docs/glazette-mvp-spec.md` (sections 4 and 5.1)
+- Test: `src/capture/stage-strip.test.tsx`, `src/routes/shelf.test.tsx`, `src/capture/capture.test.tsx`
+
+**Interfaces:**
+- Produces:
+  - **Removable glaze rows.** Each glaze row has a remove button (accessible name `Remove glaze N`, at least 44px). Removing a row keeps the others in order; removing the only row leaves one empty row. Rows need stable keys so a removal never shifts typed text into the wrong row.
+  - **No advance arrow on lost pieces.** A lost piece's Shelf card shows a muted "Lost" label where the arrow would be, in the same position and type as "Out of the kiln".
+  - **Retake on the details sheet.** The New piece details sheet has a Retake button, as in the Capture mockup. The piece was already saved as Thrown on "Use photo", so Retake soft-deletes that just-created piece, clears the photo, returns to the review step and opens the camera, the same way Retake on the review screen does.
+  - **First-run mode.** When the review screen's New piece / Update toggle first appears and the user hasn't touched it, the mode is New piece if there are no in-progress pieces (not lost, not fired, not deleted), otherwise Update. The default must not apply before the pieces query resolves, and must never override a choice the user made.
+  - **Spec text.** Section 4: a fired piece can be refired but not reglazed (Carol, 2026-11-02). Section 5.1: lost pieces have no advance arrow.
+
+- [ ] **Step 1: Write failing tests**
+
+```ts
+test('removing the first of two glaze rows saves only the second glaze, at order 0')
+test('removing the only glaze row leaves one empty row')
+test('a lost piece card has no advance link and shows "Lost"')
+test('Retake on the details sheet soft-deletes the new piece and returns to the camera')
+test('review defaults to New piece when there are no in-progress pieces, Update when there is one')
+```
+
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
+- [ ] **Step 5: Commit** — `feat(capture): removable glaze rows, details-sheet Retake and first-run New mode`
 
 ---
 
