@@ -29,7 +29,7 @@ export function CaptureScreen() {
   const [step, setStep] = useState<Step>({ name: 'review' })
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string>()
-  const [toast, setToast] = useState<string>()
+  const [toast, setToast] = useState<{ message: string; id: number }>()
   const [saving, setSaving] = useState(false)
 
   // Start clean. Leaving the screen
@@ -82,13 +82,20 @@ export function CaptureScreen() {
     setSaving(true)
     try {
       const settings = await db.settings.get('app')
+      const defaultClay = settings?.defaultClayId
+        ? await db.clays.get(settings.defaultClayId)
+        : undefined
       const id = await createPiece({
         photo,
-        clayId: settings?.defaultClayId,
+        clayId:
+          defaultClay && !defaultClay.deletedAt ? defaultClay.id : undefined,
       })
       setStep({ name: 'details', pieceId: id })
     } catch {
-      setToast("Couldn't save. Free up space and try again.")
+      setToast((t) => ({
+        message: "Couldn't save. Free up space and try again.",
+        id: (t?.id ?? 0) + 1,
+      }))
     } finally {
       setSaving(false)
     }
@@ -106,7 +113,7 @@ export function CaptureScreen() {
   }
 
   const done = () => {
-    void navigate({ to: '/' })
+    void navigate({ to: '/', replace: true })
   }
 
   let body: React.ReactNode
@@ -190,7 +197,11 @@ export function CaptureScreen() {
       <CameraInput ref={camera} onFile={onFile} />
       {body}
       {toast ? (
-        <Toast message={toast} onDismiss={() => setToast(undefined)} />
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          onDismiss={() => setToast(undefined)}
+        />
       ) : null}
     </>
   )

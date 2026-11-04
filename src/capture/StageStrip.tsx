@@ -3,9 +3,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
 import { Toast } from '../components/Toast'
+import { usePhotoUrl } from '../components/usePhotoUrl'
 import { db } from '../db/db'
 import { addStageEntry, defaultNoteFor, upsertGlaze } from '../db/ops'
-import { notDeleted, usePieces } from '../db/queries'
+import { notDeleted, usePiecesQuery } from '../db/queries'
 import {
   dayCount,
   displayName,
@@ -16,7 +17,6 @@ import {
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
-import { usePhotoUrl } from './usePhotoUrl'
 
 interface Props {
   pieceId: string
@@ -66,17 +66,32 @@ async function resolveGlazes(rows: GlazeRow[], cone: string) {
 /** Which stage is this photo? Next stage preselected; one tap saves. */
 export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
   const navigate = useNavigate()
-  const view = usePieces().find((v) => v.piece.id === pieceId)
+  const views = usePiecesQuery()
+  const view = views?.find((v) => v.piece.id === pieceId)
   const settings = useLiveQuery(() => db.settings.get('app'), [])
   const url = usePhotoUrl(photo?.blob)
   const [picked, setPicked] = useState<Stage>()
   const [note, setNote] = useState<string>()
   const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<string>()
+  const [toast, setToast] = useState<{ message: string; id: number }>()
   const inFlight = useRef(false)
 
-  if (!view) return null
+  // Still loading: just the camera background, so nothing else flashes.
+  if (!views) return <main className="min-h-dvh bg-camera" />
+  if (!view) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col items-center justify-center gap-4 bg-camera px-5 text-white">
+        <p className="text-[16px]">This piece isn't on your shelf anymore.</p>
+        <Link
+          to="/"
+          className="flex h-14 w-full max-w-[320px] items-center justify-center rounded-[28px] bg-accent text-[16px] font-semibold text-white"
+        >
+          Close
+        </Link>
+      </main>
+    )
+  }
 
   const current = view.stage
   const currentIndex = current ? STAGES.indexOf(current) : 0
@@ -105,20 +120,35 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
     inFlight.current = true
     setSaving(true)
     try {
-      const glazes =
-        stage === 'glazed'
-          ? await resolveGlazes(rows, settings?.defaultCone ?? '6')
-          : undefined
-      await addStageEntry({
-        pieceId,
-        stage,
-        photo,
-        note: noteValue.trim() || undefined,
-        glazes,
+      // One transaction, so a failed save doesn't leave new library glazes behind.
+      await db.transaction(
+        'rw',
+        db.glazes,
+        db.entries,
+        db.glazeApps,
+        db.pieces,
+        db.photos,
+        async () => {
+          const glazes =
+            stage === 'glazed'
+              ? await resolveGlazes(rows, settings?.defaultCone ?? '6')
+              : undefined
+          await addStageEntry({
+            pieceId,
+            stage,
+            photo,
+            note: noteValue.trim() || undefined,
+            glazes,
+          })
+        },
+      )
+      void navigate({
+        to: '/piece/$id',
+        params: { id: pieceId },
+        replace: true,
       })
-      void navigate({ to: '/piece/$id', params: { id: pieceId } })
     } catch {
-      setToast(SAVE_ERROR)
+      setToast((t) => ({ message: SAVE_ERROR, id: (t?.id ?? 0) + 1 }))
       inFlight.current = false
       setSaving(false)
     }
@@ -281,7 +311,11 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
         </button>
       </div>
       {toast ? (
-        <Toast message={toast} onDismiss={() => setToast(undefined)} />
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          onDismiss={() => setToast(undefined)}
+        />
       ) : null}
     </main>
   )

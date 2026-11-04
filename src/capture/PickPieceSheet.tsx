@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
+import { usePhotoUrl } from '../components/usePhotoUrl'
 import { type PieceView, usePieces } from '../db/queries'
 import { displayName, STAGE_LABEL } from '../db/stage'
 import type { ProcessedImage } from '../photos/process'
-import { usePhotoUrl } from './usePhotoUrl'
 
 interface Props {
   onPick: (pieceId: string) => void
@@ -36,10 +36,7 @@ export function PickPieceSheet({ onPick, onNew, photo, onRetake }: Props) {
   const [chosen, setChosen] = useState<string>()
 
   const q = query.trim().toLowerCase()
-  const visible = views
-    .filter(inProgress)
-    .filter((v) => matches(v, q))
-    .sort((a, b) => b.piece.updatedAt.localeCompare(a.piece.updatedAt))
+  const visible = views.filter(inProgress).filter((v) => matches(v, q))
 
   // The chosen piece, or the first visible one when it is gone or filtered out.
   const selected = visible.find((v) => v.piece.id === chosen) ?? visible[0]

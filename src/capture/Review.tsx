@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
+import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { ProcessedImage } from '../photos/process'
 import type { CaptureMode } from './store'
-import { usePhotoUrl } from './usePhotoUrl'
 
 interface Props {
   photo: ProcessedImage

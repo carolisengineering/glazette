@@ -1,12 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { Toast } from '../components/Toast'
+import { usePhotoUrl } from '../components/usePhotoUrl'
 import { db } from '../db/db'
 import { updatePiece, upsertClay } from '../db/ops'
 import { notDeleted } from '../db/queries'
 import type { Clay, Piece } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
-import { usePhotoUrl } from './usePhotoUrl'
 
 type Form = NonNullable<Piece['form']>
 
@@ -67,7 +67,7 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
   const [otherOpen, setOtherOpen] = useState(false)
   const [otherName, setOtherName] = useState('')
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<string>()
+  const [toast, setToast] = useState<{ message: string; id: number }>()
 
   const clayId = otherOpen ? undefined : (pickedClay ?? data?.defaultClayId)
 
@@ -87,7 +87,10 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
       await updatePiece(pieceId, patch)
       onDone()
     } catch {
-      setToast("Couldn't save. Free up space and try again.")
+      setToast((t) => ({
+        message: "Couldn't save. Free up space and try again.",
+        id: (t?.id ?? 0) + 1,
+      }))
     } finally {
       setSaving(false)
     }
@@ -204,7 +207,11 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
         </button>
       </div>
       {toast ? (
-        <Toast message={toast} onDismiss={() => setToast(undefined)} />
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          onDismiss={() => setToast(undefined)}
+        />
       ) : null}
     </main>
   )

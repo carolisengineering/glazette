@@ -290,3 +290,50 @@ test('a photo that finishes processing after leaving capture is dropped', async 
     screen.queryByRole('button', { name: 'Use photo' }),
   ).not.toBeInTheDocument()
 })
+
+test('Done on the new-piece sheet replaces the capture entry, so Back does not return to it', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await userEvent.click(await screen.findByRole('button', { name: 'Done' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  act(() => router.history.back())
+  await new Promise((r) => setTimeout(r, 50))
+  expect(router.state.location.pathname).not.toBe('/capture')
+})
+
+test('a retired default clay is not assigned to a new piece', async () => {
+  const settings = await db.settings.get('app')
+  await softDelete('clays', settings?.defaultClayId as string)
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const [piece] = await db.pieces.toArray()
+  expect(piece.clayId).toBeUndefined()
+})
+
+test('a live default clay is still assigned to a new piece', async () => {
+  const settings = await db.settings.get('app')
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const [piece] = await db.pieces.toArray()
+  expect(piece.clayId).toBe(settings?.defaultClayId)
+})
+
+test('a repeat failure with the same message restarts the toast timer', async () => {
+  const timers = vi.spyOn(globalThis, 'setTimeout')
+  const spy = vi.spyOn(db.pieces, 'add').mockRejectedValue(new Error('quota'))
+  const toastTimers = () =>
+    timers.mock.calls.filter(([, ms]) => ms === 4000).length
+  try {
+    renderRoute('/capture')
+    await submitAsNewPiece()
+    await screen.findByText("Couldn't save. Free up space and try again.")
+    expect(toastTimers()).toBe(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+    await waitFor(() => expect(toastTimers()).toBe(2))
+  } finally {
+    spy.mockRestore()
+    timers.mockRestore()
+  }
+})

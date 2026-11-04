@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useState } from 'react'
 import { db } from '../db/db'
+import { usePhotoUrl } from './usePhotoUrl'
 
 interface Props {
   photoId?: string
@@ -18,17 +18,7 @@ export function PhotoImg({ photoId, thumb, alt = '', className = '' }: Props) {
   )
   const blob =
     photo && !photo.deletedAt ? (thumb ? photo.thumb : photo.blob) : undefined
-  const [url, setUrl] = useState<string>()
-
-  useEffect(() => {
-    if (!blob) {
-      setUrl(undefined)
-      return
-    }
-    const objectUrl = URL.createObjectURL(blob)
-    setUrl(objectUrl)
-    return () => URL.revokeObjectURL(objectUrl)
-  }, [blob])
+  const url = usePhotoUrl(blob)
 
   if (!blob || !url) {
     return <div aria-hidden="true" className={`bg-accent-tint ${className}`} />

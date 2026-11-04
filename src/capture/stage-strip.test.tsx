@@ -1,7 +1,8 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
+import * as queries from '../db/queries'
 import { type ProcessedImage, processImage } from '../photos/process'
 import { renderRoute } from '../test/renderRoute'
 import { useCaptureStore } from './store'
@@ -206,4 +207,57 @@ test('save failure shows the toast and does not navigate', async () => {
   expect(router.state.location.pathname).toBe('/capture')
   expect(screen.getByRole('button', { name: 'Save to Trimmed' })).toBeEnabled()
   expect(useCaptureStore.getState().photo).toBeDefined()
+})
+
+test('an unknown piece shows a not-found message with a Close control that goes to the shelf', async () => {
+  const router = await openStrip('does-not-exist')
+  expect(
+    await screen.findByText("This piece isn't on your shelf anymore."),
+  ).toBeVisible()
+  await userEvent.click(screen.getByRole('link', { name: 'Close' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+})
+
+test('while pieces are still loading the strip shows neither the form nor the not-found message', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  vi.spyOn(queries, 'usePiecesQuery').mockReturnValue(undefined)
+  await openStrip(id)
+  await waitFor(() => expect(queries.usePiecesQuery).toHaveBeenCalled())
+  expect(
+    screen.queryByText("This piece isn't on your shelf anymore."),
+  ).toBeNull()
+  expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull()
+})
+
+test('Back after saving does not return to the capture screen', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = await openStrip(id)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Save to Trimmed' }),
+  )
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  act(() => router.history.back())
+  await new Promise((r) => setTimeout(r, 50))
+  expect(router.state.location.pathname).not.toBe('/capture')
+})
+
+test('a failed save leaves no new glazes behind', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = await openStrip(id)
+  await screen.findByRole('button', { name: 'Save to Trimmed' })
+  await userEvent.click(stageBtn('Glazed'))
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Celadon')
+  await userEvent.click(
+    screen.getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(screen.getByLabelText('Glaze 2'), 'Tenmoku')
+  vi.spyOn(ops, 'addStageEntry').mockRejectedValueOnce(new Error('quota'))
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Glazed' }))
+  expect(
+    await screen.findByText("Couldn't save. Free up space and try again."),
+  ).toBeVisible()
+  expect(router.state.location.pathname).toBe('/capture')
+  expect(await db.glazes.count()).toBe(0)
 })

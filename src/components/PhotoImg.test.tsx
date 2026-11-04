@@ -39,13 +39,19 @@ test('renders the full photo when thumb is not requested', async () => {
   )
 })
 
-test('shows a placeholder when the id is missing, the row is missing, or it is deleted', async () => {
-  await db.photos.add(photo({ deletedAt: '2026-11-02' }))
+test('shows a placeholder when the id is missing or the row is missing', async () => {
   const { rerender } = render(<PhotoImg alt="x" />)
   expect(screen.queryByRole('img')).not.toBeInTheDocument()
   rerender(<PhotoImg photoId="nope" alt="x" />)
-  rerender(<PhotoImg photoId="p1" alt="x" />)
-  await waitFor(() => expect(db.photos.get('p1')).resolves.toBeTruthy())
+  await waitFor(() => expect(db.photos.get('nope')).resolves.toBeUndefined())
   expect(screen.queryByRole('img')).not.toBeInTheDocument()
   expect(URL.createObjectURL).not.toHaveBeenCalled()
+})
+
+test('a photo that gets soft-deleted stops rendering', async () => {
+  await db.photos.add(photo())
+  render(<PhotoImg photoId="p1" alt="x" />)
+  expect(await screen.findByRole('img', { name: 'x' })).toBeVisible()
+  await db.photos.update('p1', { deletedAt: '2026-11-02' })
+  await waitFor(() => expect(screen.queryByRole('img')).not.toBeInTheDocument())
 })

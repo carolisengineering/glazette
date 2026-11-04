@@ -78,22 +78,25 @@ export function buildPieceViews(
   })
 }
 
+/** Live pieces, newest activity first. `undefined` until the first read resolves. */
+export function usePiecesQuery(): PieceView[] | undefined {
+  return useLiveQuery(async () => {
+    const [pieces, entries, glazeApps, glazes, clays] = await Promise.all([
+      db.pieces.toArray(),
+      db.entries.toArray(),
+      db.glazeApps.toArray(),
+      db.glazes.toArray(),
+      db.clays.toArray(),
+    ])
+    return buildPieceViews(pieces, entries, glazeApps, glazes, clays).sort(
+      (a, b) => b.piece.updatedAt.localeCompare(a.piece.updatedAt),
+    )
+  }, [])
+}
+
 /** Live pieces, newest activity first. Empty until the first read resolves. */
 export function usePieces(): PieceView[] {
-  return (
-    useLiveQuery(async () => {
-      const [pieces, entries, glazeApps, glazes, clays] = await Promise.all([
-        db.pieces.toArray(),
-        db.entries.toArray(),
-        db.glazeApps.toArray(),
-        db.glazes.toArray(),
-        db.clays.toArray(),
-      ])
-      return buildPieceViews(pieces, entries, glazeApps, glazes, clays).sort(
-        (a, b) => b.piece.updatedAt.localeCompare(a.piece.updatedAt),
-      )
-    }, []) ?? []
-  )
+  return usePiecesQuery() ?? []
 }
 
 function isFadedFromAll(view: PieceView, now: Date): boolean {
