@@ -16,7 +16,6 @@ import {
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
-import { useCaptureStore } from './store'
 import { usePhotoUrl } from './usePhotoUrl'
 
 interface Props {
@@ -117,7 +116,6 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
         note: noteValue.trim() || undefined,
         glazes,
       })
-      useCaptureStore.getState().reset()
       void navigate({ to: '/piece/$id', params: { id: pieceId } })
     } catch {
       setToast(SAVE_ERROR)
@@ -127,7 +125,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[430px] flex-col bg-camera">
+    <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col bg-camera">
       <div className="relative h-[250px] flex-none overflow-hidden">
         {url ? (
           <img src={url} alt="" className="size-full object-cover" />
@@ -221,9 +219,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
                         ? 'bg-white'
                         : STAGES.indexOf(s) <= STAGES.indexOf(stage)
                           ? 'bg-accent'
-                          : past
-                            ? 'bg-[#9FB6C3]'
-                            : 'bg-border'
+                          : 'bg-border'
                     }`}
                   />
                   <span className="text-[13px] font-semibold">

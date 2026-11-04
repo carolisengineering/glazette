@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
+import { Toast } from '../components/Toast'
 import { db } from '../db/db'
 import { updatePiece, upsertClay } from '../db/ops'
 import { notDeleted } from '../db/queries'
@@ -66,6 +67,7 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
   const [otherOpen, setOtherOpen] = useState(false)
   const [otherName, setOtherName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string>()
 
   const clayId = otherOpen ? undefined : (pickedClay ?? data?.defaultClayId)
 
@@ -84,13 +86,15 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
       }
       await updatePiece(pieceId, patch)
       onDone()
+    } catch {
+      setToast("Couldn't save. Free up space and try again.")
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[430px] flex-col bg-background text-ink">
+    <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col bg-background text-ink">
       <div className="relative h-[300px] flex-none overflow-hidden bg-camera">
         {url ? (
           <img src={url} alt="" className="size-full object-cover" />
@@ -199,6 +203,9 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
           Done
         </button>
       </div>
+      {toast ? (
+        <Toast message={toast} onDismiss={() => setToast(undefined)} />
+      ) : null}
     </main>
   )
 }

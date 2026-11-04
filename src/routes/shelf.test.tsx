@@ -122,7 +122,7 @@ test('advance arrow navigates to /capture?pieceId=<id>', async () => {
   const router = renderRoute('/')
   const user = userEvent.setup()
   await user.click(
-    await screen.findByRole('link', { name: 'Move Mug to trimmed' }),
+    await screen.findByRole('link', { name: 'Move Mug to Trimmed' }),
   )
   await waitFor(() => {
     expect(router.state.location.pathname).toBe('/capture')

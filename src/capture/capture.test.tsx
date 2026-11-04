@@ -1,6 +1,7 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
+import * as ops from '../db/ops'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import {
   type ProcessedImage,
@@ -126,6 +127,27 @@ test('Done with nothing filled in leaves name and form unset', async () => {
   expect(piece.form).toBeUndefined()
 })
 
+test('a failed Done shows a toast, stays on the sheet and can be retried', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  const spy = vi
+    .spyOn(ops, 'updatePiece')
+    .mockRejectedValueOnce(new Error('quota'))
+  try {
+    const done = await screen.findByRole('button', { name: 'Done' })
+    await userEvent.click(done)
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "Couldn't save. Free up space and try again.",
+    )
+    expect(router.state.location.pathname).toBe('/capture')
+    await waitFor(() => expect(done).toBeEnabled())
+    await userEvent.click(done)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  } finally {
+    spy.mockRestore()
+  }
+})
+
 test('Other clay creates a clay and assigns it on Done', async () => {
   const router = renderRoute('/capture')
   await submitAsNewPiece()
@@ -238,7 +260,6 @@ test('with a pieceId the toggle is hidden and Use photo creates no piece', async
     screen.queryByRole('button', { name: 'New piece' }),
   ).not.toBeInTheDocument()
   expect(await db.pieces.count()).toBe(0)
-  expect(useCaptureStore.getState().pieceId).toBe('abc')
 })
 
 test('leaving the screen resets the store', async () => {

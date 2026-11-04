@@ -9,9 +9,8 @@ export default defineConfig(({ command, isPreview }) => ({
     react(),
     tailwindcss(),
     // Phones testing over the LAN need a secure context for crypto.subtle and
-    // randomUUID. Dev server only: never in build, preview or tests.
+    // randomUUID. Dev server only: never in build, preview or tests. The dev
+    // server listens on localhost only; use `pnpm dev --host` for phone testing.
     ...(command === 'serve' && !isPreview ? [basicSsl()] : []),
   ],
-  // Without this, `vite` listens on localhost only. Opt in with `pnpm dev --host`
-  // when testing on a phone, rather than exposing the dev server by default.
 }))

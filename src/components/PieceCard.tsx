@@ -1,15 +1,13 @@
 import { Link } from '@tanstack/react-router'
 import type { PieceView } from '../db/queries'
-import { dayCount, displayName, nextStage, STAGES } from '../db/stage'
+import {
+  dayCount,
+  displayName,
+  nextStage,
+  STAGE_LABEL,
+  STAGES,
+} from '../db/stage'
 import { PhotoImg } from './PhotoImg'
-
-const STAGE_LABEL = {
-  thrown: 'Thrown',
-  trimmed: 'Trimmed',
-  bisqued: 'Bisqued',
-  glazed: 'Glazed',
-  fired: 'Fired',
-} as const
 
 function metaLine(view: PieceView, now: Date): string {
   const { stage, clayName, glazeNames } = view
@@ -82,7 +80,7 @@ export function PieceCard({ view, now }: { view: PieceView; now: Date }) {
           <Link
             to="/capture"
             search={{ pieceId: piece.id }}
-            aria-label={`Move ${name} to ${next}`}
+            aria-label={`Move ${name} to ${STAGE_LABEL[next]}`}
             className="flex size-11 items-center justify-center rounded-full bg-accent-tint"
           >
             <svg

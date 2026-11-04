@@ -45,7 +45,7 @@ export function PickPieceSheet({ onPick, onNew, photo, onRetake }: Props) {
   const selected = visible.find((v) => v.piece.id === chosen) ?? visible[0]
 
   return (
-    <main className="mx-auto flex h-screen max-w-[430px] flex-col overflow-hidden bg-camera">
+    <main className="mx-auto flex h-dvh max-w-[430px] flex-col overflow-hidden bg-camera">
       <div className="relative h-[250px] flex-none overflow-hidden">
         {url ? (
           <img src={url} alt="" className="size-full object-cover" />

@@ -21,7 +21,7 @@ export function ShelfScreen() {
   const ready = counts.trimmed
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[430px] flex-col gap-5 px-5 pt-14 pb-32">
+    <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col gap-5 px-5 pt-14 pb-32">
       <header className="flex flex-col gap-0.5">
         <span className="text-[13px] font-semibold tracking-[0.12em] text-muted uppercase">
           Studio

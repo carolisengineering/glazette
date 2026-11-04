@@ -32,18 +32,17 @@ export function CaptureScreen() {
   const [toast, setToast] = useState<string>()
   const [saving, setSaving] = useState(false)
 
-  // Start clean, then hold the URL's piece id in the store. Leaving the screen
+  // Start clean. Leaving the screen
   // drops the photo, and `mounted` stops a still-processing photo from landing afterward.
   const mounted = useRef(false)
   useEffect(() => {
     mounted.current = true
     useCaptureStore.getState().reset()
-    useCaptureStore.getState().setPieceId(pieceId)
     return () => {
       mounted.current = false
       useCaptureStore.getState().reset()
     }
-  }, [pieceId])
+  }, [])
 
   // Open the camera once on arrival. The ref guard stops StrictMode opening it twice.
   useEffect(() => {
@@ -107,7 +106,6 @@ export function CaptureScreen() {
   }
 
   const done = () => {
-    useCaptureStore.getState().reset()
     void navigate({ to: '/' })
   }
 
@@ -147,7 +145,7 @@ export function CaptureScreen() {
     )
   } else {
     body = (
-      <main className="mx-auto flex min-h-screen max-w-[430px] flex-col items-center justify-center gap-4 bg-camera px-5 text-white">
+      <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col items-center justify-center gap-4 bg-camera px-5 text-white">
         <h1 className="font-serif text-[32px] leading-none font-normal">
           New photo
         </h1>

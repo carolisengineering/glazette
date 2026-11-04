@@ -29,7 +29,7 @@ export function Review({
 }: Props) {
   const url = usePhotoUrl(photo.blob)
   return (
-    <main className="mx-auto flex min-h-screen max-w-[430px] flex-col bg-camera pt-14 pb-8 text-white">
+    <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col bg-camera pt-14 pb-8 text-white">
       <div className="flex items-center justify-between px-5 pb-3">
         <Link
           to="/"
