@@ -13,7 +13,8 @@ interface Props {
   onRetake?: () => void
 }
 
-const inProgress = (v: PieceView) => !v.piece.lost && v.stage !== 'fired'
+/** Pieces still being worked on: not lost, not fired. (Deleted ones never reach a view.) */
+export const inProgress = (v: PieceView) => !v.piece.lost && v.stage !== 'fired'
 
 function matches(v: PieceView, q: string): boolean {
   if (!q) return true

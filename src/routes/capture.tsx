@@ -2,13 +2,13 @@ import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { type CameraHandle, CameraInput } from '../capture/CameraInput'
 import { NewPieceSheet } from '../capture/NewPieceSheet'
-import { PickPieceSheet } from '../capture/PickPieceSheet'
-import { Review } from '../capture/Review'
+import { inProgress, PickPieceSheet } from '../capture/PickPieceSheet'
+import { type ExitTarget, Review } from '../capture/Review'
 import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
-import { Toast } from '../components/Toast'
-import { createPiece } from '../db/ops'
-import { liveDefaultClayId } from '../db/queries'
+import { SAVE_ERROR, useToast } from '../components/useToast'
+import { createPiece, softDelete } from '../db/ops'
+import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
 import { processImage, UnsupportedImageError } from '../photos/process'
 
 const captureRoute = getRouteApi('/capture')
@@ -29,7 +29,7 @@ export function CaptureScreen() {
   const [step, setStep] = useState<Step>({ name: 'review' })
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string>()
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
   const [saving, setSaving] = useState(false)
 
   // Start clean. Leaving the screen
@@ -43,6 +43,17 @@ export function CaptureScreen() {
       useCaptureStore.getState().reset()
     }
   }, [])
+
+  // Default the New piece / Update toggle once the pieces are known: New when
+  // nothing is in progress. Never overrides a choice the user made.
+  const pieces = usePiecesQuery()
+  const hasPhoto = photo !== undefined
+  useEffect(() => {
+    if (!hasPhoto || pieceId || !pieces) return
+    useCaptureStore
+      .getState()
+      .defaultMode(pieces.some(inProgress) ? 'update' : 'new')
+  }, [hasPhoto, pieceId, pieces])
 
   // Open the camera once on arrival. The ref guard stops StrictMode opening it twice.
   useEffect(() => {
@@ -76,6 +87,22 @@ export function CaptureScreen() {
     camera.current?.openCamera()
   }
 
+  /** Retake from the details sheet: the piece was already saved, so discard it first. */
+  const retaking = useRef(false)
+  const retakeNewPiece = async (id: string) => {
+    if (retaking.current) return
+    retaking.current = true
+    // Open the camera in the tap itself: iOS drops the user activation after an await.
+    retake()
+    try {
+      await softDelete('pieces', id)
+    } catch {
+      showToast("Couldn't discard that piece. It's still on your shelf.")
+    } finally {
+      retaking.current = false
+    }
+  }
+
   /** Saves the photo as a new Thrown piece with the default clay, then asks for details. */
   const startNewPiece = async () => {
     if (!photo || saving) return
@@ -87,10 +114,7 @@ export function CaptureScreen() {
       })
       setStep({ name: 'details', pieceId: id })
     } catch {
-      setToast((t) => ({
-        message: "Couldn't save. Free up space and try again.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast(SAVE_ERROR)
     } finally {
       setSaving(false)
     }
@@ -107,13 +131,25 @@ export function CaptureScreen() {
     }
   }
 
+  // Cancelling returns to where capture was entered from.
+  const exit: ExitTarget = pieceId
+    ? { to: '/piece/$id', params: { id: pieceId } }
+    : { to: '/' }
+
   const done = () => {
     void navigate({ to: '/', replace: true })
   }
 
   let body: React.ReactNode
   if (photo && step.name === 'details') {
-    body = <NewPieceSheet pieceId={step.pieceId} photo={photo} onDone={done} />
+    body = (
+      <NewPieceSheet
+        pieceId={step.pieceId}
+        photo={photo}
+        onDone={done}
+        onRetake={() => void retakeNewPiece(step.pieceId)}
+      />
+    )
   } else if (photo && step.name === 'pick') {
     body = (
       <PickPieceSheet
@@ -128,6 +164,7 @@ export function CaptureScreen() {
       <StageStrip
         pieceId={step.pieceId}
         photo={photo}
+        exit={exit}
         onChangePiece={
           step.fromPick ? () => setStep({ name: 'pick' }) : undefined
         }
@@ -137,6 +174,7 @@ export function CaptureScreen() {
     body = (
       <Review
         photo={photo}
+        exit={exit}
         showToggle={!pieceId}
         mode={mode}
         onMode={(m) => useCaptureStore.getState().setMode(m)}
@@ -178,7 +216,9 @@ export function CaptureScreen() {
           Choose from library
         </button>
         <Link
-          to="/"
+          {...(pieceId
+            ? { to: '/piece/$id', params: { id: pieceId } }
+            : { to: '/' })}
           className="flex h-11 items-center text-[15px] text-[#b7c0c9]"
         >
           Cancel
@@ -191,13 +231,7 @@ export function CaptureScreen() {
     <>
       <CameraInput ref={camera} onFile={onFile} />
       {body}
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </>
   )
 }

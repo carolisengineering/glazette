@@ -31,15 +31,16 @@ export function latestEntry(
   let latest: StageEntry | undefined
   for (const e of entries) {
     if (e.deletedAt || (stage && e.stage !== stage)) continue
-    if (!latest || isLaterThan(e, latest)) latest = e
+    if (!latest || compareEntries(e, latest) >= 0) latest = e
   }
   return latest
 }
 
-function isLaterThan(a: StageEntry, b: StageEntry): boolean {
+/** Ascending rank of two entries: later stage first, then later date. Sort with (a, b) => compareEntries(b, a) for newest first. */
+export function compareEntries(a: StageEntry, b: StageEntry): number {
   const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)
-  if (byStage !== 0) return byStage > 0
-  return a.date >= b.date
+  if (byStage !== 0) return byStage
+  return a.date < b.date ? -1 : a.date > b.date ? 1 : 0
 }
 
 export function currentStage(entries: StageEntry[]): Stage | undefined {

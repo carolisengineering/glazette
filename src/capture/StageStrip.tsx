@@ -2,11 +2,12 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
-import { Toast } from '../components/Toast'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { addStageEntry, defaultNoteFor, upsertGlaze } from '../db/ops'
 import { notDeleted, usePiecesQuery } from '../db/queries'
+import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import {
   dayCount,
   displayName,
@@ -17,10 +18,13 @@ import {
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
+import type { ExitTarget } from './Review'
 
 interface Props {
   pieceId: string
   photo?: ProcessedImage
+  /** Where Close goes: the screen's entry point, not necessarily this piece. */
+  exit: ExitTarget
   /** Shown only when the piece was chosen from the pick step. */
   onChangePiece?: () => void
 }
@@ -33,7 +37,6 @@ const NOTE_PLACEHOLDER: Record<Stage, string> = {
   fired: 'Cone 6 oxidation',
 }
 
-const SAVE_ERROR = "Couldn't save. Free up space and try again."
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
 
 /** Match each row to a library glaze (by id, then name ignoring case) or create it once. */
@@ -49,7 +52,7 @@ async function resolveGlazes(rows: GlazeRow[], cone: string) {
       const key = name.toLowerCase()
       glazeId = byName.get(key)
       if (!glazeId) {
-        glazeId = await upsertGlaze({ name, cone, color: '#9DBBAA' })
+        glazeId = await upsertGlaze({ name, cone, color: DEFAULT_GLAZE_COLOR })
         byName.set(key, glazeId)
       }
     }
@@ -64,7 +67,7 @@ async function resolveGlazes(rows: GlazeRow[], cone: string) {
 }
 
 /** Which stage is this photo? Next stage preselected; one tap saves. */
-export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
+export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const navigate = useNavigate()
   const views = usePiecesQuery()
   const view = views?.find((v) => v.piece.id === pieceId)
@@ -74,7 +77,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
   const [note, setNote] = useState<string>()
   const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
   const inFlight = useRef(false)
 
   // Still loading: just the camera background, so nothing else flashes.
@@ -95,7 +98,10 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
 
   const current = view.stage
   const currentIndex = current ? STAGES.indexOf(current) : 0
-  const stage: Stage = picked ?? nextStage(current) ?? 'fired'
+  // A lost piece doesn't advance from the arrow: preselect where it already is.
+  const stage: Stage =
+    picked ??
+    (view.piece.lost && current ? current : (nextStage(current) ?? 'fired'))
   const selectable = (s: Stage) =>
     current === 'fired' ? s === 'fired' : STAGES.indexOf(s) >= currentIndex
   const name = displayName(view.piece)
@@ -148,7 +154,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
         replace: true,
       })
     } catch {
-      setToast((t) => ({ message: SAVE_ERROR, id: (t?.id ?? 0) + 1 }))
+      showToast(SAVE_ERROR)
       inFlight.current = false
       setSaving(false)
     }
@@ -161,7 +167,8 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
           <img src={url} alt="" className="size-full object-cover" />
         ) : null}
         <Link
-          to="/"
+          {...exit}
+          replace
           aria-label="Close"
           className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
         >
@@ -310,13 +317,7 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
           {saveLabel}
         </button>
       </div>
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </main>
   )
 }

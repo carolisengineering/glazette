@@ -21,6 +21,8 @@ export interface PieceView {
   clayName?: string
   /** Glaze names of the latest live Glazed entry, in layering order. */
   glazeNames: string[]
+  /** Color of the first glaze layer, if any. */
+  glazeColor?: string
 }
 
 const FIRED_FADE_DAYS = 14
@@ -55,7 +57,7 @@ export function buildPieceViews(
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
     const glazedEntry = latestEntry(own, 'glazed')
-    const glazeNames = glazedEntry
+    const layers = glazedEntry
       ? glazeApps
           .filter(
             (a) => a.entryId === glazedEntry.id && liveEntryIds.has(a.entryId),
@@ -63,9 +65,10 @@ export function buildPieceViews(
           .sort((a, b) => a.order - b.order)
           .flatMap((a) => {
             const glaze = glazeById.get(a.glazeId)
-            return glaze ? [nameWithRetired(glaze)] : []
+            return glaze ? [glaze] : []
           })
       : []
+    const glazeNames = layers.map(nameWithRetired)
     const clay = piece.clayId ? clayById.get(piece.clayId) : undefined
     return {
       piece,
@@ -74,6 +77,7 @@ export function buildPieceViews(
       latestPhotoId: latestEntry(own.filter((e) => e.photoId))?.photoId,
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeNames,
+      glazeColor: layers[0]?.color,
     }
   })
 }
@@ -139,4 +143,44 @@ export async function liveDefaultClayId(): Promise<string | undefined> {
   if (!settings?.defaultClayId) return undefined
   const clay = await db.clays.get(settings.defaultClayId)
   return clay && !clay.deletedAt ? clay.id : undefined
+}
+
+export interface PieceDetail extends PieceView {
+  /** Cone of the first glaze with one on the latest Glazed entry, else the default cone. */
+  cone?: string
+}
+
+/**
+ * One live piece with its history. `undefined` while loading, `null` when the
+ * piece is missing or deleted. Reads only this piece's rows.
+ */
+export function usePiece(id: string): PieceDetail | null | undefined {
+  return useLiveQuery(async () => {
+    const piece = await db.pieces.get(id)
+    if (!piece || !notDeleted(piece)) return null
+    const [entries, glazeApps, clay, settings] = await Promise.all([
+      db.entries.where('pieceId').equals(id).toArray(),
+      db.glazeApps.where('pieceId').equals(id).toArray(),
+      piece.clayId ? db.clays.get(piece.clayId) : undefined,
+      db.settings.get('app'),
+    ])
+    const glazes = (
+      await db.glazes.bulkGet([...new Set(glazeApps.map((a) => a.glazeId))])
+    ).filter((g) => g !== undefined)
+    const [view] = buildPieceViews(
+      [piece],
+      entries,
+      glazeApps,
+      glazes,
+      clay ? [clay] : [],
+    )
+    const glazed = latestEntry(view.entries, 'glazed')
+    const glazeById = new Map(glazes.map((g) => [g.id, g]))
+    const glazedCone = glazeApps
+      .filter((a) => a.entryId === glazed?.id)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => glazeById.get(a.glazeId)?.cone)
+      .find(Boolean)
+    return { ...view, cone: glazedCone ?? settings?.defaultCone }
+  }, [id])
 }
