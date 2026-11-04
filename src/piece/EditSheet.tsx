@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import {
   ClayChips,
   type Form,
@@ -9,6 +9,7 @@ import {
   useOrderedClays,
 } from '../components/PieceFields'
 import { Toast } from '../components/Toast'
+import { useModal } from '../components/useModal'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
 import type { Piece } from '../db/types'
@@ -21,6 +22,8 @@ interface Props {
 /** Edit a piece's name, form and clay. */
 export function EditSheet({ piece, onClose }: Props) {
   const titleId = useId()
+  const nameRef = useRef<HTMLInputElement>(null)
+  useModal(nameRef, onClose)
   const clays = useOrderedClays()
   const current = useLiveQuery(
     () => (piece.clayId ? db.clays.get(piece.clayId) : undefined),
@@ -38,7 +41,11 @@ export function EditSheet({ piece, onClose }: Props) {
     if (saving) return
     setSaving(true)
     try {
-      const clayId = await clay.resolve()
+      // An empty "+ Other" keeps the current clay rather than clearing it.
+      const clayId =
+        clay.otherOpen && !clay.otherName.trim()
+          ? piece.clayId
+          : await clay.resolve()
       await updatePiece(piece.id, {
         name: name.trim() || undefined,
         form: form ?? (piece.form === 'other' ? 'other' : undefined),
@@ -71,6 +78,7 @@ export function EditSheet({ piece, onClose }: Props) {
           </label>
           <input
             id="editName"
+            ref={nameRef}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}

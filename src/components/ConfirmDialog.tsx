@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef } from 'react'
+import { useId, useRef } from 'react'
+import { useModal } from './useModal'
 
 interface Props {
   title: string
@@ -18,22 +19,7 @@ export function ConfirmDialog({
 }: Props) {
   const titleId = useId()
   const cancelRef = useRef<HTMLButtonElement>(null)
-  const cancel = useRef(onCancel)
-  cancel.current = onCancel
-
-  useEffect(() => {
-    const opener = document.activeElement
-    cancelRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') cancel.current()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      if (opener instanceof HTMLElement) opener.focus()
-    }
-  }, [])
-
+  useModal(cancelRef, onCancel)
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-5 sm:items-center">
       <div

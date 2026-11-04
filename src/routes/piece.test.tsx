@@ -331,3 +331,81 @@ test('shows a message and a way back for a missing or deleted piece', async () =
     '/',
   )
 })
+
+const SAVE_ERROR = "Couldn't save. Free up space and try again."
+
+/** Makes `softDelete` fail: it writes through `db.table(name).update`. */
+const failTableWrites = () =>
+  vi.spyOn(db, 'table').mockReturnValue({
+    update: () => Promise.reject(new Error('full')),
+  } as never)
+
+test('a failed notes save shows the toast', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  const notes = await screen.findByRole('textbox', { name: 'Notes' })
+  const update = vi
+    .spyOn(db.pieces, 'update')
+    .mockRejectedValue(new Error('full'))
+  await userEvent.type(notes, 'Hello')
+  await userEvent.tab()
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+  expect((await db.pieces.get(id))?.notes).toBeUndefined()
+})
+
+test('a failed piece delete shows the toast and stays on the piece', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Delete piece' }),
+  )
+  const update = failTableWrites()
+  await userEvent.click(
+    within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }),
+  )
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+  expect(router.state.location.pathname).toBe(`/piece/${id}`)
+  expect((await db.pieces.get(id))?.deletedAt).toBeUndefined()
+})
+
+test('a failed timeline entry delete shows the toast', async () => {
+  const id = await firedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Delete Fired entry' }),
+  )
+  const update = failTableWrites()
+  await userEvent.click(
+    within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }),
+  )
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+})
+
+test('Edit moves focus into the sheet, and Escape closes it and returns focus', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(dialog).toContainElement(document.activeElement as HTMLElement)
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus()
+})
+
+test('Edit with an empty "+ Other" keeps the current clay', async () => {
+  const clayId = newId()
+  await db.clays.add({ id: clayId, name: 'Porcelain' })
+  const id = await createPiece({ name: 'Mug', clayId })
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.click(within(dialog).getByRole('button', { name: '+ Other' }))
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  expect((await db.pieces.get(id))?.clayId).toBe(clayId)
+})

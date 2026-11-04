@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { Toast } from '../components/Toast'
 import { markLost, softDelete, updatePiece } from '../db/ops'
 import { type PieceDetail, usePiece } from '../db/queries'
 import { displayName, latestEntry, nextStage, STAGE_LABEL } from '../db/stage'
@@ -49,6 +50,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const [side, setSide] = useState<Side>('fired')
   const [editing, setEditing] = useState(false)
   const [pending, setPending] = useState<Pending>()
+  const [toast, setToast] = useState<{ message: string; id: number }>()
   const [notes, setNotes] = useState(piece.notes ?? '')
 
   const fired = latestEntry(entries, 'fired')
@@ -58,18 +60,35 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const latest = latestEntry(entries)
   const next = nextStage(stage)
 
+  /** Runs a write; a failure shows the same toast the sheets use. Returns whether it worked. */
+  const attempt = async (write: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await write()
+      return true
+    } catch {
+      setToast((t) => ({
+        message: "Couldn't save. Free up space and try again.",
+        id: (t?.id ?? 0) + 1,
+      }))
+      return false
+    }
+  }
+
   const saveNotes = async () => {
-    if (notes !== (piece.notes ?? '')) await updatePiece(piece.id, { notes })
+    if (notes !== (piece.notes ?? '')) {
+      await attempt(() => updatePiece(piece.id, { notes }))
+    }
   }
 
   const confirmDelete = async () => {
     const target = pending
     setPending(undefined)
     if (target?.kind === 'entry') {
-      await softDelete('entries', target.entry.id)
+      await attempt(() => softDelete('entries', target.entry.id))
     } else if (target?.kind === 'piece') {
-      await softDelete('pieces', piece.id)
-      await navigate({ to: '/', replace: true })
+      if (await attempt(() => softDelete('pieces', piece.id))) {
+        await navigate({ to: '/', replace: true })
+      }
     }
   }
 
@@ -148,7 +167,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => markLost(piece.id, !piece.lost)}
+            onClick={() => attempt(() => markLost(piece.id, !piece.lost))}
             className={secondary}
           >
             {piece.lost ? 'Mark as found' : 'Mark as lost'}
@@ -163,6 +182,13 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         </div>
       </div>
 
+      {toast ? (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          onDismiss={() => setToast(undefined)}
+        />
+      ) : null}
       {editing ? (
         <EditSheet piece={piece} onClose={() => setEditing(false)} />
       ) : null}
