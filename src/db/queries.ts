@@ -140,3 +140,43 @@ export async function liveDefaultClayId(): Promise<string | undefined> {
   const clay = await db.clays.get(settings.defaultClayId)
   return clay && !clay.deletedAt ? clay.id : undefined
 }
+
+export interface PieceDetail extends PieceView {
+  /** Cone of the first glaze with one on the latest Glazed entry, else the default cone. */
+  cone?: string
+}
+
+/**
+ * One live piece with its history. `undefined` while loading, `null` when the
+ * piece is missing or deleted. Reads only this piece's rows.
+ */
+export function usePiece(id: string): PieceDetail | null | undefined {
+  return useLiveQuery(async () => {
+    const piece = await db.pieces.get(id)
+    if (!piece || !notDeleted(piece)) return null
+    const [entries, glazeApps, clay, settings] = await Promise.all([
+      db.entries.where('pieceId').equals(id).toArray(),
+      db.glazeApps.where('pieceId').equals(id).toArray(),
+      piece.clayId ? db.clays.get(piece.clayId) : undefined,
+      db.settings.get('app'),
+    ])
+    const glazes = (
+      await db.glazes.bulkGet([...new Set(glazeApps.map((a) => a.glazeId))])
+    ).filter((g) => g !== undefined)
+    const [view] = buildPieceViews(
+      [piece],
+      entries,
+      glazeApps,
+      glazes,
+      clay ? [clay] : [],
+    )
+    const glazed = latestEntry(view.entries, 'glazed')
+    const glazeById = new Map(glazes.map((g) => [g.id, g]))
+    const glazedCone = glazeApps
+      .filter((a) => a.entryId === glazed?.id)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => glazeById.get(a.glazeId)?.cone)
+      .find(Boolean)
+    return { ...view, cone: glazedCone ?? settings?.defaultCone }
+  }, [id])
+}

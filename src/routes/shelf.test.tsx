@@ -141,7 +141,7 @@ test('the + button goes to /capture without a pieceId, Glazes goes to /glazes', 
   await waitFor(() => expect(router.state.location.pathname).toBe('/glazes'))
 })
 
-test('tapping a card opens the piece stub', async () => {
+test('tapping a card opens the piece screen', async () => {
   const id = await createPiece({ name: 'Mug' })
   const router = renderRoute('/')
   const user = userEvent.setup()
@@ -150,8 +150,8 @@ test('tapping a card opens the piece stub', async () => {
     expect(router.state.location.pathname).toBe(`/piece/${id}`),
   )
   expect(await screen.findByRole('heading', { name: 'Mug' })).toBeVisible()
-  expect(screen.getByText('Thrown')).toBeVisible()
-  expect(screen.getByRole('link', { name: /Shelf/ })).toBeVisible()
+  expect(screen.getByText(/^Thrown ·/)).toBeVisible()
+  expect(screen.getByRole('link', { name: 'Back to shelf' })).toBeVisible()
 })
 
 test('a lost piece card has no advance link and shows "Lost"', async () => {
