@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { type CameraHandle, CameraInput } from '../capture/CameraInput'
 import { NewPieceSheet } from '../capture/NewPieceSheet'
 import { inProgress, PickPieceSheet } from '../capture/PickPieceSheet'
-import { Review } from '../capture/Review'
+import { type ExitTarget, Review } from '../capture/Review'
 import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
 import { Toast } from '../components/Toast'
@@ -98,7 +98,7 @@ export function CaptureScreen() {
       await softDelete('pieces', id)
     } catch {
       setToast((t) => ({
-        message: "Couldn't discard the photo. Try again.",
+        message: "Couldn't discard that piece. It's still on your shelf.",
         id: (t?.id ?? 0) + 1,
       }))
     } finally {
@@ -137,6 +137,11 @@ export function CaptureScreen() {
     }
   }
 
+  // Cancelling returns to where capture was entered from.
+  const exit: ExitTarget = pieceId
+    ? { to: '/piece/$id', params: { id: pieceId } }
+    : { to: '/' }
+
   const done = () => {
     void navigate({ to: '/', replace: true })
   }
@@ -165,6 +170,7 @@ export function CaptureScreen() {
       <StageStrip
         pieceId={step.pieceId}
         photo={photo}
+        exit={exit}
         onChangePiece={
           step.fromPick ? () => setStep({ name: 'pick' }) : undefined
         }
@@ -174,6 +180,7 @@ export function CaptureScreen() {
     body = (
       <Review
         photo={photo}
+        exit={exit}
         showToggle={!pieceId}
         mode={mode}
         onMode={(m) => useCaptureStore.getState().setMode(m)}

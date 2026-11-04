@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
+import * as queries from '../db/queries'
 import {
   type ProcessedImage,
   processImage,
@@ -58,6 +59,13 @@ async function submitAsNewPiece() {
   await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
 }
 
+/** Done waits for the sheet to finish loading, so wait for it to be enabled. */
+async function clickDone() {
+  const done = await screen.findByRole('button', { name: 'Done' })
+  await waitFor(() => expect(done).toBeEnabled())
+  await userEvent.click(done)
+}
+
 test('opens the camera input on mount and offers Take photo and Choose from library', async () => {
   renderRoute('/capture')
   expect(
@@ -93,6 +101,44 @@ test('Use photo in New mode creates a piece at Thrown with the photo and opens t
   ).toHaveAttribute('aria-pressed', 'true')
 })
 
+test('details sheet holds the clay chips and Done until the default clay has loaded', async () => {
+  renderRoute('/capture')
+  await chooseFile()
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'New piece' }),
+  )
+  // The piece is created with the default clay; then the sheet's own read is held.
+  const real = queries.liveDefaultClayId
+  let release!: () => void
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const spy = vi
+    .spyOn(queries, 'liveDefaultClayId')
+    .mockImplementation(async () => {
+      await gate
+      return real()
+    })
+  spy.mockImplementationOnce(real)
+  try {
+    await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+    await screen.findByText('Saved to your shelf as Thrown')
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: 'White stoneware' }),
+    ).not.toBeInTheDocument()
+    release()
+    expect(
+      await screen.findByRole('button', { name: 'White stoneware' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled(),
+    )
+  } finally {
+    spy.mockRestore()
+  }
+})
+
 test('nothing is saved before Use photo', async () => {
   renderRoute('/capture')
   await chooseFile()
@@ -109,7 +155,7 @@ test('details sheet Done with name "Morning Mug" and form Mug updates the piece 
     '  Morning Mug ',
   )
   await userEvent.click(screen.getByRole('button', { name: 'Mug' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+  await clickDone()
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const [piece] = await db.pieces.toArray()
   expect(piece.name).toBe('Morning Mug')
@@ -120,7 +166,7 @@ test('details sheet Done with name "Morning Mug" and form Mug updates the piece 
 test('Done with nothing filled in leaves name and form unset', async () => {
   const router = renderRoute('/capture')
   await submitAsNewPiece()
-  await userEvent.click(await screen.findByRole('button', { name: 'Done' }))
+  await clickDone()
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const [piece] = await db.pieces.toArray()
   expect(piece.name).toBeUndefined()
@@ -135,6 +181,7 @@ test('a failed Done shows a toast, stays on the sheet and can be retried', async
     .mockRejectedValueOnce(new Error('quota'))
   try {
     const done = await screen.findByRole('button', { name: 'Done' })
+    await waitFor(() => expect(done).toBeEnabled())
     await userEvent.click(done)
     expect(await screen.findByRole('status')).toHaveTextContent(
       "Couldn't save. Free up space and try again.",
@@ -153,7 +200,7 @@ test('Other clay creates a clay and assigns it on Done', async () => {
   await submitAsNewPiece()
   await userEvent.click(await screen.findByRole('button', { name: '+ Other' }))
   await userEvent.type(screen.getByLabelText('Clay name'), 'Speckled buff')
-  await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+  await clickDone()
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const clay = await db.clays.filter((c) => c.name === 'Speckled buff').first()
   expect(clay).toBeTruthy()
@@ -294,7 +341,7 @@ test('a photo that finishes processing after leaving capture is dropped', async 
 test('Done on the new-piece sheet replaces the capture entry, so Back does not return to it', async () => {
   const router = renderRoute('/capture')
   await submitAsNewPiece()
-  await userEvent.click(await screen.findByRole('button', { name: 'Done' }))
+  await clickDone()
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   act(() => router.history.back())
   await new Promise((r) => setTimeout(r, 50))
@@ -343,7 +390,7 @@ test('Done does not write a retired default clay when the user picks nothing', a
   await softDelete('clays', settings?.defaultClayId as string)
   const router = renderRoute('/capture')
   await submitAsNewPiece()
-  await userEvent.click(await screen.findByRole('button', { name: 'Done' }))
+  await clickDone()
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const [piece] = await db.pieces.toArray()
   expect(piece.clayId).toBeUndefined()
@@ -374,7 +421,9 @@ test('Retake on the details sheet shows a toast when the discard fails', async (
   vi.spyOn(ops, 'softDelete').mockRejectedValueOnce(new Error('boom'))
   await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
   expect(
-    await screen.findByText("Couldn't discard the photo. Try again."),
+    await screen.findByText(
+      "Couldn't discard that piece. It's still on your shelf.",
+    ),
   ).toBeVisible()
 })
 
@@ -410,4 +459,40 @@ test('review defaults to New piece when there are no in-progress pieces, Update 
   await createPiece({ name: 'Bowl' })
   await waitFor(async () => expect(await pressed('New piece')).toBe('true'))
   expect(await pressed('Update')).toBe('false')
+})
+
+test('Close on review lands on the piece when capture came from one, and replaces the entry', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = renderRoute(`/capture?pieceId=${id}`)
+  await chooseFile()
+  await userEvent.click(await screen.findByRole('link', { name: 'Close' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  act(() => router.history.back())
+  await new Promise((r) => setTimeout(r, 50))
+  expect(router.state.location.pathname).not.toBe('/capture')
+})
+
+test('Close on review lands on the shelf when capture started there', async () => {
+  const router = renderRoute('/capture')
+  await chooseFile()
+  await userEvent.click(await screen.findByRole('link', { name: 'Close' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+})
+
+test('Close on the stage strip lands on the shelf when the piece was picked after tapping + on the shelf', async () => {
+  await createPiece({ name: 'Mug' })
+  const router = renderRoute('/capture')
+  await chooseFile()
+  await userEvent.click(await screen.findByRole('button', { name: 'Update' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Add to Mug' }),
+  )
+  await userEvent.click(await screen.findByRole('link', { name: 'Close' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  act(() => router.history.back())
+  await new Promise((r) => setTimeout(r, 50))
+  expect(router.state.location.pathname).not.toBe('/capture')
 })

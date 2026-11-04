@@ -26,11 +26,17 @@ interface Props {
 export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
   const url = usePhotoUrl(photo.blob)
   const clays = useOrderedClays()
-  const defaultClayId = useLiveQuery(() => liveDefaultClayId(), [])
+  // Boxed so "no default clay" is distinguishable from "not read yet".
+  const defaults = useLiveQuery(
+    async () => ({ clayId: await liveDefaultClayId() }),
+    [],
+  )
   const [name, setName] = useState('')
   const [form, setForm] = useState<Form>()
-  const clay = useClayPick(defaultClayId)
+  const clay = useClayPick(defaults?.clayId)
   const [saving, setSaving] = useState(false)
+  // The chips and Done wait for both reads, so Done can never drop the default clay.
+  const ready = clays !== undefined && defaults !== undefined
   const [toast, setToast] = useState<{ message: string; id: number }>()
 
   const done = async () => {
@@ -107,12 +113,12 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
         </div>
 
         <FormChips form={form} onChange={setForm} />
-        <ClayChips clays={clays} pick={clay} />
+        <ClayChips clays={ready ? clays : undefined} pick={clay} />
 
         <button
           type="button"
           onClick={done}
-          disabled={saving}
+          disabled={saving || !ready}
           className="mt-auto h-14 rounded-[28px] bg-accent text-[16px] font-semibold text-white disabled:opacity-50"
         >
           Done

@@ -18,10 +18,13 @@ import {
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
+import type { ExitTarget } from './Review'
 
 interface Props {
   pieceId: string
   photo?: ProcessedImage
+  /** Where Close goes: the screen's entry point, not necessarily this piece. */
+  exit: ExitTarget
   /** Shown only when the piece was chosen from the pick step. */
   onChangePiece?: () => void
 }
@@ -65,7 +68,7 @@ async function resolveGlazes(rows: GlazeRow[], cone: string) {
 }
 
 /** Which stage is this photo? Next stage preselected; one tap saves. */
-export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
+export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const navigate = useNavigate()
   const views = usePiecesQuery()
   const view = views?.find((v) => v.piece.id === pieceId)
@@ -103,7 +106,6 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
   const selectable = (s: Stage) =>
     current === 'fired' ? s === 'fired' : STAGES.indexOf(s) >= currentIndex
   const name = displayName(view.piece)
-  const back = { to: '/piece/$id', params: { id: pieceId } } as const
   const days = dayCount(view.piece, new Date())
   const meta = [view.clayName, days ? `Day ${days}` : undefined]
     .filter(Boolean)
@@ -166,7 +168,8 @@ export function StageStrip({ pieceId, photo, onChangePiece }: Props) {
           <img src={url} alt="" className="size-full object-cover" />
         ) : null}
         <Link
-          {...back}
+          {...exit}
+          replace
           aria-label="Close"
           className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
         >

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db, newId } from '../db/db'
 import {
@@ -72,13 +72,13 @@ async function firedPiece() {
 
 test('before/after toggle is absent until a fired entry exists, then shows both labels', async () => {
   const id = await createPiece({ name: 'Mug' })
-  await addStageEntry({ pieceId: id, stage: 'glazed' })
+  await addStageEntry({ pieceId: id, stage: 'glazed', photo: photo('g') })
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Mug' })
   expect(
     screen.queryByRole('button', { name: 'Before firing' }),
   ).not.toBeInTheDocument()
-  await addStageEntry({ pieceId: id, stage: 'fired' })
+  await addStageEntry({ pieceId: id, stage: 'fired', photo: photo('f') })
   const before = await screen.findByRole('button', { name: 'Before firing' })
   const after = screen.getByRole('button', { name: 'Out of the kiln' })
   expect(after).toHaveAttribute('aria-pressed', 'true')
@@ -412,4 +412,95 @@ test('Edit with an empty "+ Other" keeps the current clay', async () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
   )
   expect((await db.pieces.get(id))?.clayId).toBe(clayId)
+})
+
+test('the before/after hero uses the newest photo on each side, skipping photo-less entries', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    photo: photo('glazed'),
+    date: '2026-10-21T12:00:00Z',
+  })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'fired',
+    photo: photo('fired'),
+    date: '2026-10-24T12:00:00Z',
+  })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'fired',
+    date: '2026-10-25T12:00:00Z',
+  })
+  const photoOf = async (stage: string) =>
+    (
+      await db.entries
+        .where('pieceId')
+        .equals(id)
+        .filter((e) => e.stage === stage && !!e.photoId)
+        .first()
+    )?.photoId
+  renderRoute(`/piece/${id}`)
+  const hero = () => screen.getByRole('img', { name: 'Mug' })
+  await waitFor(async () =>
+    expect(hero()).toHaveAttribute('data-photo-id', await photoOf('fired')),
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Before firing' }))
+  await waitFor(async () =>
+    expect(hero()).toHaveAttribute('data-photo-id', await photoOf('glazed')),
+  )
+})
+
+test('no before/after toggle when the piece has no Glazed photo', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'glazed' })
+  await addStageEntry({ pieceId: id, stage: 'fired', photo: photo('fired') })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Mug' })
+  expect(
+    screen.queryByRole('button', { name: 'Before firing' }),
+  ).not.toBeInTheDocument()
+  const firedPhoto = (
+    await db.entries.filter((e) => e.stage === 'fired').first()
+  )?.photoId
+  expect(screen.getByRole('img', { name: 'Mug' })).toHaveAttribute(
+    'data-photo-id',
+    firedPhoto,
+  )
+})
+
+test('the timeline ranks by stage first, like the header: a same-day later Bisqued photo sits below Glazed', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    date: '2026-10-21T09:00:00Z',
+  })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'bisqued',
+    date: '2026-10-21T15:00:00Z',
+  })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Mug' })
+  const rows = within(screen.getByRole('list')).getAllByRole('listitem')
+  expect(rows.map((r) => r.textContent)).toEqual([
+    expect.stringMatching(/^Glazed/),
+    expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Thrown/),
+  ])
+})
+
+test('notes typed but not blurred are saved when the screen is left', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = renderRoute(`/piece/${id}`)
+  await userEvent.type(
+    await screen.findByRole('textbox', { name: 'Notes' }),
+    'Trim the foot',
+  )
+  await act(() => router.navigate({ to: '/' }))
+  await waitFor(async () =>
+    expect((await db.pieces.get(id))?.notes).toBe('Trim the foot'),
+  )
 })

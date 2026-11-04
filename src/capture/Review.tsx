@@ -3,8 +3,14 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { ProcessedImage } from '../photos/process'
 import type { CaptureMode } from './store'
 
+/** Where a cancelled capture goes: the piece it started from, else the Shelf. */
+export type ExitTarget =
+  | { to: '/' }
+  | { to: '/piece/$id'; params: { id: string } }
+
 interface Props {
   photo: ProcessedImage
+  exit: ExitTarget
   /** The New piece / Update toggle is hidden when the piece is already known. */
   showToggle: boolean
   mode: CaptureMode
@@ -20,6 +26,7 @@ const segment =
 /** The dark post-capture screen: look at the photo, then use it or retake. */
 export function Review({
   photo,
+  exit,
   showToggle,
   mode,
   onMode,
@@ -32,7 +39,8 @@ export function Review({
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col bg-camera pt-14 pb-8 text-white">
       <div className="flex items-center justify-between px-5 pb-3">
         <Link
-          to="/"
+          {...exit}
+          replace
           aria-label="Close"
           className="flex size-11 items-center justify-center rounded-full bg-white/12"
         >

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Toast } from '../components/Toast'
 import { markLost, softDelete, updatePiece } from '../db/ops'
@@ -53,9 +53,13 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const [toast, setToast] = useState<{ message: string; id: number }>()
   const [notes, setNotes] = useState(piece.notes ?? '')
 
-  const fired = latestEntry(entries, 'fired')
-  const heroPhotoId = fired
-    ? latestEntry(entries, side)?.photoId
+  // The before/after pair is the newest photo on each side; entries without a photo don't count.
+  const withPhoto = entries.filter((e) => e.photoId)
+  const afterPhoto = latestEntry(withPhoto, 'fired')
+  const beforePhoto = latestEntry(withPhoto, 'glazed')
+  const compare = afterPhoto && beforePhoto
+  const heroPhotoId = compare
+    ? (side === 'fired' ? afterPhoto : beforePhoto).photoId
     : view.latestPhotoId
   const latest = latestEntry(entries)
   const next = nextStage(stage)
@@ -74,11 +78,42 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     }
   }
 
+  // Latest text and last saved text, read through refs so the unmount save is never stale.
+  const notesRef = useRef(notes)
+  notesRef.current = notes
+  const savedNotes = useRef(piece.notes ?? '')
+
   const saveNotes = async () => {
-    if (notes !== (piece.notes ?? '')) {
-      await attempt(() => updatePiece(piece.id, { notes }))
+    const text = notesRef.current
+    if (text === savedNotes.current) return
+    if (await attempt(() => updatePiece(piece.id, { notes: text }))) {
+      savedNotes.current = text
     }
   }
+
+  // Typed-but-not-blurred notes are saved when the screen is left or hidden.
+  const pieceId = piece.id
+  useEffect(() => {
+    const flush = () => {
+      const text = notesRef.current
+      if (text === savedNotes.current) return
+      // No screen left to show a toast on; a failed save is retried by the next flush.
+      void updatePiece(pieceId, { notes: text }).then(
+        () => {
+          savedNotes.current = text
+        },
+        () => {},
+      )
+    }
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      flush()
+    }
+  }, [pieceId])
 
   const confirmDelete = async () => {
     const target = pending
@@ -95,7 +130,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col text-ink">
       <Hero photoId={heroPhotoId} alt={name}>
-        {fired ? <BeforeAfter value={side} onChange={setSide} /> : null}
+        {compare ? <BeforeAfter value={side} onChange={setSide} /> : null}
       </Hero>
 
       <div className="flex flex-col gap-6 px-5 pt-6 pb-12">

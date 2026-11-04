@@ -1,17 +1,13 @@
 import { PhotoImg } from '../components/PhotoImg'
-import { STAGE_LABEL, STAGES } from '../db/stage'
+import { compareEntries, STAGE_LABEL } from '../db/stage'
 import type { StageEntry } from '../db/types'
 
 export const shortDate = (iso: string): string =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
-/** Newest first; entries on the same day keep stage order, later stage first. */
+/** Ranked like the header's current stage: later stage first, then newest date. */
 function newestFirst(entries: StageEntry[]): StageEntry[] {
-  return [...entries].sort(
-    (a, b) =>
-      b.date.localeCompare(a.date) ||
-      STAGES.indexOf(b.stage) - STAGES.indexOf(a.stage),
-  )
+  return [...entries].sort((a, b) => compareEntries(b, a))
 }
 
 interface Props {
