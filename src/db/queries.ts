@@ -132,3 +132,11 @@ export function chipCounts(
   }
   return counts
 }
+
+/** The default clay's id, or undefined when none is set or it has been retired. */
+export async function liveDefaultClayId(): Promise<string | undefined> {
+  const settings = await db.settings.get('app')
+  if (!settings?.defaultClayId) return undefined
+  const clay = await db.clays.get(settings.defaultClayId)
+  return clay && !clay.deletedAt ? clay.id : undefined
+}

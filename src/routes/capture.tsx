@@ -7,8 +7,8 @@ import { Review } from '../capture/Review'
 import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
 import { Toast } from '../components/Toast'
-import { db } from '../db/db'
 import { createPiece } from '../db/ops'
+import { liveDefaultClayId } from '../db/queries'
 import { processImage, UnsupportedImageError } from '../photos/process'
 
 const captureRoute = getRouteApi('/capture')
@@ -81,14 +81,9 @@ export function CaptureScreen() {
     if (!photo || saving) return
     setSaving(true)
     try {
-      const settings = await db.settings.get('app')
-      const defaultClay = settings?.defaultClayId
-        ? await db.clays.get(settings.defaultClayId)
-        : undefined
       const id = await createPiece({
         photo,
-        clayId:
-          defaultClay && !defaultClay.deletedAt ? defaultClay.id : undefined,
+        clayId: await liveDefaultClayId(),
       })
       setStep({ name: 'details', pieceId: id })
     } catch {

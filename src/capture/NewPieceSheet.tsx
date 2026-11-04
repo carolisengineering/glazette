@@ -4,7 +4,7 @@ import { Toast } from '../components/Toast'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { db } from '../db/db'
 import { updatePiece, upsertClay } from '../db/ops'
-import { notDeleted } from '../db/queries'
+import { liveDefaultClayId, notDeleted } from '../db/queries'
 import type { Clay, Piece } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 
@@ -51,14 +51,14 @@ function orderClays(clays: Clay[], pieces: Piece[]): Clay[] {
 export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
   const url = usePhotoUrl(photo.blob)
   const data = useLiveQuery(async () => {
-    const [clays, pieces, settings] = await Promise.all([
+    const [clays, pieces, defaultClayId] = await Promise.all([
       db.clays.toArray(),
       db.pieces.toArray(),
-      db.settings.get('app'),
+      liveDefaultClayId(),
     ])
     return {
       clays: orderClays(clays, pieces.filter(notDeleted)),
-      defaultClayId: settings?.defaultClayId,
+      defaultClayId,
     }
   }, [])
   const [name, setName] = useState('')

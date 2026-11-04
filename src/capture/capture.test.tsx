@@ -337,3 +337,14 @@ test('a repeat failure with the same message restarts the toast timer', async ()
     timers.mockRestore()
   }
 })
+
+test('Done does not write a retired default clay when the user picks nothing', async () => {
+  const settings = await db.settings.get('app')
+  await softDelete('clays', settings?.defaultClayId as string)
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await userEvent.click(await screen.findByRole('button', { name: 'Done' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  const [piece] = await db.pieces.toArray()
+  expect(piece.clayId).toBeUndefined()
+})
