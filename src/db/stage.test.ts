@@ -90,9 +90,14 @@ test('displayName falls back to "Untitled bowl" / "Untitled piece"', () => {
   expect(displayName(piece())).toBe('Untitled piece')
 })
 
-test('dayCount counts whole days since createdAt', () => {
-  const p = piece({ createdAt: '2026-11-01T10:00:00.000Z' })
-  expect(dayCount(p, new Date('2026-11-01T23:00:00.000Z'))).toBe(0)
-  expect(dayCount(p, new Date('2026-11-04T09:00:00.000Z'))).toBe(2)
-  expect(dayCount(p, new Date('2026-10-30T10:00:00.000Z'))).toBe(0)
+test('dayCount is Day 1 on the day it was thrown and counts local calendar days', () => {
+  const p = piece({ createdAt: new Date(2026, 10, 1, 10).toISOString() })
+  expect(dayCount(p, new Date(2026, 10, 1, 23, 30))).toBe(1)
+  expect(dayCount(p, new Date(2026, 10, 2, 0, 5))).toBe(2)
+  expect(dayCount(p, new Date(2026, 10, 3, 9))).toBe(3)
+  expect(dayCount(p, new Date(2026, 9, 30, 10))).toBe(1)
+})
+
+test('dayCount is undefined for an invalid createdAt', () => {
+  expect(dayCount(piece({ createdAt: 'nope' }), new Date())).toBeUndefined()
 })

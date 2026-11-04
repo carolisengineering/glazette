@@ -1,7 +1,10 @@
+import { RouterProvider } from '@tanstack/react-router'
+import { router } from './router'
+
 export default function App() {
   return (
-    <main className="min-h-screen bg-background p-6 font-sans text-ink">
-      <h1 className="font-serif text-[32px] leading-none">My Shelf</h1>
-    </main>
+    <div className="min-h-screen bg-background font-sans text-ink">
+      <RouterProvider router={router} />
+    </div>
   )
 }
