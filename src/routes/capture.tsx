@@ -2,7 +2,9 @@ import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { type CameraHandle, CameraInput } from '../capture/CameraInput'
 import { NewPieceSheet } from '../capture/NewPieceSheet'
+import { PickPieceSheet } from '../capture/PickPieceSheet'
 import { Review } from '../capture/Review'
+import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
 import { Toast } from '../components/Toast'
 import { db } from '../db/db'
@@ -14,9 +16,8 @@ const captureRoute = getRouteApi('/capture')
 type Step =
   | { name: 'review' }
   | { name: 'details'; pieceId: string }
-  // Seams for Task 7: the pick-a-piece sheet and the stage strip replace these.
   | { name: 'pick' }
-  | { name: 'stage' }
+  | { name: 'stage'; pieceId: string; fromPick: boolean }
 
 export function CaptureScreen() {
   const { pieceId } = captureRoute.useSearch()
@@ -71,30 +72,37 @@ export function CaptureScreen() {
 
   const retake = () => {
     useCaptureStore.getState().setPhoto(undefined)
+    setStep({ name: 'review' })
     setError(undefined)
     camera.current?.openCamera()
+  }
+
+  /** Saves the photo as a new Thrown piece with the default clay, then asks for details. */
+  const startNewPiece = async () => {
+    if (!photo || saving) return
+    setSaving(true)
+    try {
+      const settings = await db.settings.get('app')
+      const id = await createPiece({
+        photo,
+        clayId: settings?.defaultClayId,
+      })
+      setStep({ name: 'details', pieceId: id })
+    } catch {
+      setToast("Couldn't save. Free up space and try again.")
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleUsePhoto = async () => {
     if (!photo || saving) return
     if (pieceId) {
-      setStep({ name: 'stage' })
+      setStep({ name: 'stage', pieceId, fromPick: false })
     } else if (mode === 'update') {
       setStep({ name: 'pick' })
     } else {
-      setSaving(true)
-      try {
-        const settings = await db.settings.get('app')
-        const id = await createPiece({
-          photo,
-          clayId: settings?.defaultClayId,
-        })
-        setStep({ name: 'details', pieceId: id })
-      } catch {
-        setToast("Couldn't save. Free up space and try again.")
-      } finally {
-        setSaving(false)
-      }
+      await startNewPiece()
     }
   }
 
@@ -106,8 +114,25 @@ export function CaptureScreen() {
   let body: React.ReactNode
   if (photo && step.name === 'details') {
     body = <NewPieceSheet pieceId={step.pieceId} photo={photo} onDone={done} />
-  } else if (photo && step.name !== 'review') {
-    body = <NextStepPlaceholder />
+  } else if (photo && step.name === 'pick') {
+    body = (
+      <PickPieceSheet
+        photo={photo}
+        onPick={(id) => setStep({ name: 'stage', pieceId: id, fromPick: true })}
+        onNew={startNewPiece}
+        onRetake={retake}
+      />
+    )
+  } else if (photo && step.name === 'stage') {
+    body = (
+      <StageStrip
+        pieceId={step.pieceId}
+        photo={photo}
+        onChangePiece={
+          step.fromPick ? () => setStep({ name: 'pick' }) : undefined
+        }
+      />
+    )
   } else if (photo) {
     body = (
       <Review
@@ -170,12 +195,5 @@ export function CaptureScreen() {
         <Toast message={toast} onDismiss={() => setToast(undefined)} />
       ) : null}
     </>
-  )
-}
-
-/** Task 7 replaces this with the pick-a-piece sheet and the stage strip. */
-function NextStepPlaceholder() {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-[430px] flex-col bg-camera px-5 pt-14 text-white" />
   )
 }

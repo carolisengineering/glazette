@@ -88,7 +88,7 @@ test('Use photo in New mode creates a piece at Thrown with the photo and opens t
   expect(await db.photos.count()).toBe(1)
   expect(screen.getByPlaceholderText('Name it later')).toBeVisible()
   expect(
-    screen.getByRole('button', { name: 'White stoneware' }),
+    await screen.findByRole('button', { name: 'White stoneware' }),
   ).toHaveAttribute('aria-pressed', 'true')
 })
 

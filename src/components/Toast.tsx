@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 interface Props {
   message: string
@@ -9,10 +9,13 @@ interface Props {
 
 /** A short message above the bottom edge that dismisses itself. */
 export function Toast({ message, onDismiss, duration = 4000 }: Props) {
+  // Held in a ref so a parent's inline callback doesn't restart the timer on every render.
+  const dismiss = useRef(onDismiss)
+  dismiss.current = onDismiss
   useEffect(() => {
-    const timer = setTimeout(onDismiss, duration)
+    const timer = setTimeout(() => dismiss.current(), duration)
     return () => clearTimeout(timer)
-  }, [onDismiss, duration])
+  }, [duration])
 
   return (
     <div

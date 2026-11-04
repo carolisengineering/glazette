@@ -8,6 +8,14 @@ export const STAGES = [
   'fired',
 ] as const satisfies readonly Stage[]
 
+export const STAGE_LABEL: Record<Stage, string> = {
+  thrown: 'Thrown',
+  trimmed: 'Trimmed',
+  bisqued: 'Bisqued',
+  glazed: 'Glazed',
+  fired: 'Fired',
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
