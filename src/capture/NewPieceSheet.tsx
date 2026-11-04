@@ -1,22 +1,18 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
+import {
+  ClayChips,
+  type Form,
+  FormChips,
+  fieldLabel,
+  useClayPick,
+  useOrderedClays,
+} from '../components/PieceFields'
 import { Toast } from '../components/Toast'
 import { usePhotoUrl } from '../components/usePhotoUrl'
-import { db } from '../db/db'
-import { updatePiece, upsertClay } from '../db/ops'
-import { liveDefaultClayId, notDeleted } from '../db/queries'
-import type { Clay, Piece } from '../db/types'
+import { updatePiece } from '../db/ops'
+import { liveDefaultClayId } from '../db/queries'
 import type { ProcessedImage } from '../photos/process'
-
-type Form = NonNullable<Piece['form']>
-
-const FORMS: { value: Form; label: string }[] = [
-  { value: 'mug', label: 'Mug' },
-  { value: 'bowl', label: 'Bowl' },
-  { value: 'vase', label: 'Vase' },
-  { value: 'plate', label: 'Plate' },
-  { value: 'jar', label: 'Jar' },
-]
 
 interface Props {
   pieceId: string
@@ -26,52 +22,16 @@ interface Props {
   onRetake: () => void
 }
 
-const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
-const chip = 'h-11 rounded-[22px] px-4 text-[15px] font-medium'
-const chipOn = `${chip} bg-ink text-white`
-const chipOff = `${chip} border border-border bg-surface text-ink`
-
-/** Live clays, most recently used first, then unused ones alphabetically. */
-function orderClays(clays: Clay[], pieces: Piece[]): Clay[] {
-  const lastUsed = new Map<string, string>()
-  for (const p of pieces) {
-    if (!p.clayId) continue
-    const prev = lastUsed.get(p.clayId)
-    if (!prev || p.updatedAt > prev) lastUsed.set(p.clayId, p.updatedAt)
-  }
-  return clays.filter(notDeleted).sort((a, b) => {
-    const ua = lastUsed.get(a.id)
-    const ub = lastUsed.get(b.id)
-    if (ua && ub) return ub.localeCompare(ua)
-    if (ua) return -1
-    if (ub) return 1
-    return a.name.localeCompare(b.name)
-  })
-}
-
 /** Details for a piece that is already saved as Thrown. Skipping every field is fine. */
 export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
   const url = usePhotoUrl(photo.blob)
-  const data = useLiveQuery(async () => {
-    const [clays, pieces, defaultClayId] = await Promise.all([
-      db.clays.toArray(),
-      db.pieces.toArray(),
-      liveDefaultClayId(),
-    ])
-    return {
-      clays: orderClays(clays, pieces.filter(notDeleted)),
-      defaultClayId,
-    }
-  }, [])
+  const clays = useOrderedClays()
+  const defaultClayId = useLiveQuery(() => liveDefaultClayId(), [])
   const [name, setName] = useState('')
   const [form, setForm] = useState<Form>()
-  const [pickedClay, setPickedClay] = useState<string>()
-  const [otherOpen, setOtherOpen] = useState(false)
-  const [otherName, setOtherName] = useState('')
+  const clay = useClayPick(defaultClayId)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; id: number }>()
-
-  const clayId = otherOpen ? undefined : (pickedClay ?? data?.defaultClayId)
 
   const done = async () => {
     if (saving) return
@@ -81,11 +41,8 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
       const trimmed = name.trim()
       if (trimmed) patch.name = trimmed
       if (form) patch.form = form
-      if (otherOpen && otherName.trim()) {
-        patch.clayId = await upsertClay(otherName)
-      } else if (clayId) {
-        patch.clayId = clayId
-      }
+      const clayId = await clay.resolve()
+      if (clayId) patch.clayId = clayId
       await updatePiece(pieceId, patch)
       onDone()
     } catch {
@@ -136,7 +93,7 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="pieceName" className={label}>
+          <label htmlFor="pieceName" className={fieldLabel}>
             Name
           </label>
           <input
@@ -149,63 +106,8 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          <span className={label}>Form</span>
-          <div className="flex flex-wrap gap-2">
-            {FORMS.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                aria-pressed={form === f.value}
-                onClick={() => setForm(form === f.value ? undefined : f.value)}
-                className={form === f.value ? chipOn : chipOff}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <span className={label}>Clay · from your recent</span>
-          <div className="flex flex-wrap gap-2">
-            {data?.clays.map((c) => {
-              const on = !otherOpen && clayId === c.id
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => {
-                    setPickedClay(c.id)
-                    setOtherOpen(false)
-                  }}
-                  className={on ? chipOn : chipOff}
-                >
-                  {c.name}
-                </button>
-              )
-            })}
-            <button
-              type="button"
-              aria-pressed={otherOpen}
-              onClick={() => setOtherOpen(!otherOpen)}
-              className={otherOpen ? chipOn : chipOff}
-            >
-              + Other
-            </button>
-          </div>
-          {otherOpen ? (
-            <input
-              type="text"
-              aria-label="Clay name"
-              value={otherName}
-              onChange={(e) => setOtherName(e.target.value)}
-              placeholder="Clay name"
-              className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent"
-            />
-          ) : null}
-        </div>
+        <FormChips form={form} onChange={setForm} />
+        <ClayChips clays={clays} pick={clay} />
 
         <button
           type="button"
