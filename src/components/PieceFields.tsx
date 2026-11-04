@@ -66,9 +66,14 @@ export function useClayPick(fallbackId?: string) {
     },
     toggleOther: () => setOtherOpen((o) => !o),
     setOtherName,
-    /** The clay id to save; creates the typed clay when "+ Other" has a name. */
-    resolve: async (): Promise<string | undefined> =>
-      otherOpen && otherName.trim() ? upsertClay(otherName) : clayId,
+    /**
+     * The clay id to save. Creates the typed clay when "+ Other" has a name; an
+     * open but empty "+ Other" keeps the picked or current clay.
+     */
+    resolve: async (): Promise<string | undefined> => {
+      if (!otherOpen) return clayId
+      return otherName.trim() ? upsertClay(otherName) : (picked ?? fallbackId)
+    },
   }
 }
 

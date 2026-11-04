@@ -2,7 +2,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { BottomBar } from '../components/BottomBar'
 import { db } from '../db/db'
-import { usePieces } from '../db/queries'
 import { DEFAULT_SETTINGS } from '../db/seed'
 import { GlazeCard } from '../glazes/GlazeCard'
 import { GlazeSheet } from '../glazes/GlazeSheet'
@@ -16,7 +15,6 @@ const addButton =
 
 export function GlazesScreen() {
   const views = useGlazeViews()
-  const pieces = usePieces()
   const settings = useLiveQuery(() => db.settings.get('app'), [])
   const [pickedId, setPickedId] = useState<string>()
   const [sheet, setSheet] = useState<Sheet>()
@@ -66,7 +64,6 @@ export function GlazesScreen() {
         <>
           <GlazeCard
             view={selected}
-            pieces={pieces}
             onEdit={() => setSheet({ glazeId: selected.glaze.id })}
           />
           <SwatchWall

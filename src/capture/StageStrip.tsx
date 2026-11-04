@@ -2,8 +2,8 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
-import { Toast } from '../components/Toast'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { addStageEntry, defaultNoteFor, upsertGlaze } from '../db/ops'
 import { notDeleted, usePiecesQuery } from '../db/queries'
@@ -37,7 +37,6 @@ const NOTE_PLACEHOLDER: Record<Stage, string> = {
   fired: 'Cone 6 oxidation',
 }
 
-const SAVE_ERROR = "Couldn't save. Free up space and try again."
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
 
 /** Match each row to a library glaze (by id, then name ignoring case) or create it once. */
@@ -78,7 +77,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const [note, setNote] = useState<string>()
   const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
   const inFlight = useRef(false)
 
   // Still loading: just the camera background, so nothing else flashes.
@@ -155,7 +154,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
         replace: true,
       })
     } catch {
-      setToast((t) => ({ message: SAVE_ERROR, id: (t?.id ?? 0) + 1 }))
+      showToast(SAVE_ERROR)
       inFlight.current = false
       setSaving(false)
     }
@@ -318,13 +317,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
           {saveLabel}
         </button>
       </div>
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </main>
   )
 }

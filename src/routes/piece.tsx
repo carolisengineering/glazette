@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { Toast } from '../components/Toast'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { markLost, softDelete, updatePiece } from '../db/ops'
 import { type PieceDetail, usePiece } from '../db/queries'
 import { displayName, latestEntry, nextStage, STAGE_LABEL } from '../db/stage'
@@ -50,7 +50,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const [side, setSide] = useState<Side>('fired')
   const [editing, setEditing] = useState(false)
   const [pending, setPending] = useState<Pending>()
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
   const [notes, setNotes] = useState(piece.notes ?? '')
 
   // The before/after pair is the newest photo on each side; entries without a photo don't count.
@@ -70,10 +70,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
       await write()
       return true
     } catch {
-      setToast((t) => ({
-        message: "Couldn't save. Free up space and try again.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast(SAVE_ERROR)
       return false
     }
   }
@@ -217,13 +214,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         </div>
       </div>
 
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
       {editing ? (
         <EditSheet piece={piece} onClose={() => setEditing(false)} />
       ) : null}

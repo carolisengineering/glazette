@@ -1,22 +1,18 @@
 import { Link } from '@tanstack/react-router'
 import { PhotoImg } from '../components/PhotoImg'
-import type { PieceView } from '../db/queries'
 import { displayName } from '../db/stage'
 import { centerCropStyle, type GlazeView } from './swatch'
 
 interface Props {
   view: GlazeView
-  pieces: PieceView[]
   onEdit: () => void
 }
 
 /** The selected glaze: swatch, name, meta line, pieces wearing it, and the tip. */
-export function GlazeCard({ view, pieces, onEdit }: Props) {
-  const { glaze, pieceIds, swatchPhotoId } = view
-  const n = pieceIds.length
+export function GlazeCard({ view, onEdit }: Props) {
+  const { glaze, pieces, swatchPhotoId } = view
+  const n = pieces.length
   const meta = `${glaze.cone ? `Cone ${glaze.cone} · ` : ''}used on ${n} ${n === 1 ? 'piece' : 'pieces'}`
-  const ids = new Set(pieceIds)
-  const used = pieces.filter((p) => ids.has(p.piece.id))
   return (
     <section
       aria-label={glaze.name}
@@ -52,9 +48,9 @@ export function GlazeCard({ view, pieces, onEdit }: Props) {
           Edit
         </button>
       </div>
-      {used.length ? (
+      {pieces.length ? (
         <ul className="flex gap-2 overflow-x-auto">
-          {used.map((p) => (
+          {pieces.map((p) => (
             <li key={p.piece.id} className="flex-none">
               <Link
                 to="/piece/$id"

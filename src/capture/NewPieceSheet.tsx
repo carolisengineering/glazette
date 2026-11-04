@@ -8,8 +8,8 @@ import {
   useClayPick,
   useOrderedClays,
 } from '../components/PieceFields'
-import { Toast } from '../components/Toast'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { updatePiece } from '../db/ops'
 import { liveDefaultClayId } from '../db/queries'
 import type { ProcessedImage } from '../photos/process'
@@ -37,7 +37,7 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
   const [saving, setSaving] = useState(false)
   // The chips and Done wait for both reads, so Done can never drop the default clay.
   const ready = clays !== undefined && defaults !== undefined
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
 
   const done = async () => {
     if (saving) return
@@ -52,10 +52,7 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
       await updatePiece(pieceId, patch)
       onDone()
     } catch {
-      setToast((t) => ({
-        message: "Couldn't save. Free up space and try again.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast(SAVE_ERROR)
     } finally {
       setSaving(false)
     }
@@ -124,13 +121,7 @@ export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
           Done
         </button>
       </div>
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </main>
   )
 }

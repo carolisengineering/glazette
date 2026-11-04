@@ -8,8 +8,8 @@ import {
   useClayPick,
   useOrderedClays,
 } from '../components/PieceFields'
-import { Toast } from '../components/Toast'
 import { useModal } from '../components/useModal'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
 import type { Piece } from '../db/types'
@@ -35,28 +35,20 @@ export function EditSheet({ piece, onClose }: Props) {
   )
   const clay = useClayPick(piece.clayId)
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
 
   const save = async () => {
     if (saving) return
     setSaving(true)
     try {
-      // An empty "+ Other" keeps the current clay rather than clearing it.
-      const clayId =
-        clay.otherOpen && !clay.otherName.trim()
-          ? piece.clayId
-          : await clay.resolve()
       await updatePiece(piece.id, {
         name: name.trim() || undefined,
         form: form ?? (piece.form === 'other' ? 'other' : undefined),
-        clayId,
+        clayId: await clay.resolve(),
       })
       onClose()
     } catch {
-      setToast((t) => ({
-        message: "Couldn't save. Free up space and try again.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast(SAVE_ERROR)
       setSaving(false)
     }
   }
@@ -111,13 +103,7 @@ export function EditSheet({ piece, onClose }: Props) {
           </button>
         </div>
       </div>
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </div>
   )
 }

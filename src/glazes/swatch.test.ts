@@ -65,6 +65,7 @@ test('swatchPhotoId is the newest fired photo among pieces using the glaze, unde
   const celadon = result.find((v) => v.glaze.id === 'g1')
   expect(celadon?.swatchPhotoId).toBe('new')
   expect([...(celadon?.pieceIds ?? [])].sort()).toEqual(['a', 'b'])
+  expect(celadon?.pieces.map((v) => v.piece.id).sort()).toEqual(['a', 'b'])
   const tenmoku = result.find((v) => v.glaze.id === 'g2')
   expect(tenmoku?.swatchPhotoId).toBeUndefined()
 })

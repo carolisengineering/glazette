@@ -9,6 +9,8 @@ export interface GlazeView {
   glaze: Glaze
   /** Live pieces (lost ones included) whose latest Glazed entry uses this glaze. */
   pieceIds: string[]
+  /** The same pieces as views, in shelf order. */
+  pieces: PieceView[]
   /** Photo of the newest Fired entry with a photo among those pieces. */
   swatchPhotoId?: string
 }
@@ -56,6 +58,7 @@ export function buildGlazeViews(
       return {
         glaze,
         pieceIds: views.map((v) => v.piece.id),
+        pieces: views,
         swatchPhotoId: swatch?.photoId,
       }
     })

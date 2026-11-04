@@ -1,8 +1,8 @@
 import { useId, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { fieldLabel } from '../components/PieceFields'
-import { Toast } from '../components/Toast'
 import { useModal } from '../components/useModal'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { softDelete, upsertGlaze } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze } from '../db/types'
@@ -34,7 +34,7 @@ export function GlazeSheet({ glaze, liveGlazes, defaultCone, onClose }: Props) {
   const [color, setColor] = useState(glaze?.color ?? DEFAULT_GLAZE_COLOR)
   const [notes, setNotes] = useState(glaze?.notes ?? '')
   const [busy, setBusy] = useState(false)
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
 
   const trimmed = name.trim()
   const duplicate = liveGlazes.some(
@@ -45,10 +45,7 @@ export function GlazeSheet({ glaze, liveGlazes, defaultCone, onClose }: Props) {
   const canSave = !!trimmed && !duplicate && !busy
 
   const fail = () => {
-    setToast((t) => ({
-      message: "Couldn't save. Free up space and try again.",
-      id: (t?.id ?? 0) + 1,
-    }))
+    showToast(SAVE_ERROR)
     setBusy(false)
   }
 
@@ -191,13 +188,7 @@ export function GlazeSheet({ glaze, liveGlazes, defaultCone, onClose }: Props) {
           onCancel={() => setConfirming(false)}
         />
       ) : null}
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </div>
   )
 }

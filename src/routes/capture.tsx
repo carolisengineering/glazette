@@ -6,7 +6,7 @@ import { inProgress, PickPieceSheet } from '../capture/PickPieceSheet'
 import { type ExitTarget, Review } from '../capture/Review'
 import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
-import { Toast } from '../components/Toast'
+import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
 import { processImage, UnsupportedImageError } from '../photos/process'
@@ -29,7 +29,7 @@ export function CaptureScreen() {
   const [step, setStep] = useState<Step>({ name: 'review' })
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string>()
-  const [toast, setToast] = useState<{ message: string; id: number }>()
+  const { show: showToast, toast } = useToast()
   const [saving, setSaving] = useState(false)
 
   // Start clean. Leaving the screen
@@ -97,10 +97,7 @@ export function CaptureScreen() {
     try {
       await softDelete('pieces', id)
     } catch {
-      setToast((t) => ({
-        message: "Couldn't discard that piece. It's still on your shelf.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast("Couldn't discard that piece. It's still on your shelf.")
     } finally {
       retaking.current = false
     }
@@ -117,10 +114,7 @@ export function CaptureScreen() {
       })
       setStep({ name: 'details', pieceId: id })
     } catch {
-      setToast((t) => ({
-        message: "Couldn't save. Free up space and try again.",
-        id: (t?.id ?? 0) + 1,
-      }))
+      showToast(SAVE_ERROR)
     } finally {
       setSaving(false)
     }
@@ -237,13 +231,7 @@ export function CaptureScreen() {
     <>
       <CameraInput ref={camera} onFile={onFile} />
       {body}
-      {toast ? (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          onDismiss={() => setToast(undefined)}
-        />
-      ) : null}
+      {toast}
     </>
   )
 }
