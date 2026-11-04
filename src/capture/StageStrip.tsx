@@ -7,6 +7,7 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import { db } from '../db/db'
 import { addStageEntry, defaultNoteFor, upsertGlaze } from '../db/ops'
 import { notDeleted, usePiecesQuery } from '../db/queries'
+import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import {
   dayCount,
   displayName,
@@ -49,7 +50,7 @@ async function resolveGlazes(rows: GlazeRow[], cone: string) {
       const key = name.toLowerCase()
       glazeId = byName.get(key)
       if (!glazeId) {
-        glazeId = await upsertGlaze({ name, cone, color: '#9DBBAA' })
+        glazeId = await upsertGlaze({ name, cone, color: DEFAULT_GLAZE_COLOR })
         byName.set(key, glazeId)
       }
     }
