@@ -31,10 +31,17 @@ export function CaptureScreen() {
   const [toast, setToast] = useState<string>()
   const [saving, setSaving] = useState(false)
 
-  // A piece id in the URL is held in the store; leaving the screen drops the photo.
+  // Start clean, then hold the URL's piece id in the store. Leaving the screen
+  // drops the photo, and `mounted` stops a still-processing photo from landing afterward.
+  const mounted = useRef(false)
   useEffect(() => {
+    mounted.current = true
+    useCaptureStore.getState().reset()
     useCaptureStore.getState().setPieceId(pieceId)
-    return () => useCaptureStore.getState().reset()
+    return () => {
+      mounted.current = false
+      useCaptureStore.getState().reset()
+    }
   }, [pieceId])
 
   // Open the camera once on arrival. The ref guard stops StrictMode opening it twice.
@@ -48,15 +55,17 @@ export function CaptureScreen() {
     setError(undefined)
     setProcessing(true)
     try {
-      useCaptureStore.getState().setPhoto(await processImage(file))
+      const processed = await processImage(file)
+      if (mounted.current) useCaptureStore.getState().setPhoto(processed)
     } catch (err) {
+      if (!mounted.current) return
       setError(
         err instanceof UnsupportedImageError
           ? "This photo format isn't supported"
           : "Couldn't open this photo. Try again.",
       )
     } finally {
-      setProcessing(false)
+      if (mounted.current) setProcessing(false)
     }
   }
 

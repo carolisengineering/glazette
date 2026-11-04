@@ -248,3 +248,24 @@ test('leaving the screen resets the store', async () => {
   await act(() => router.navigate({ to: '/' }))
   expect(useCaptureStore.getState().photo).toBeUndefined()
 })
+
+test('a photo that finishes processing after leaving capture is dropped', async () => {
+  let resolve: (p: ProcessedImage) => void = () => {}
+  vi.mocked(processImage).mockReturnValue(
+    new Promise<ProcessedImage>((r) => {
+      resolve = r
+    }),
+  )
+  const router = renderRoute('/capture')
+  await chooseFile()
+  await act(() => router.navigate({ to: '/' }))
+  await act(async () => resolve(processed))
+  expect(useCaptureStore.getState().photo).toBeUndefined()
+  await act(() => router.navigate({ to: '/capture' }))
+  expect(
+    await screen.findByRole('button', { name: 'Take photo' }),
+  ).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Use photo' }),
+  ).not.toBeInTheDocument()
+})
