@@ -47,6 +47,12 @@ export function GlazeRows({ value, onChange }: Props) {
   const update = (index: number, patch: Partial<GlazeRow>) =>
     onChange(value.map((row, i) => (i === index ? { ...row, ...patch } : row)))
 
+  // Removing the only row leaves one empty row, so the list is never blank.
+  const remove = (index: number) => {
+    const rest = value.filter((_, i) => i !== index)
+    onChange(rest.length > 0 ? rest : [newGlazeRow()])
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <span className={label}>Glaze · from your library</span>
@@ -63,16 +69,37 @@ export function GlazeRows({ value, onChange }: Props) {
             key={row.key}
             className="flex flex-col gap-2 rounded-[20px] bg-surface p-3"
           >
-            <input
-              type="text"
-              aria-label={`Glaze ${n}`}
-              value={row.name}
-              onChange={(e) =>
-                update(i, { name: e.target.value, glazeId: undefined })
-              }
-              placeholder="Glaze name"
-              className={input}
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                aria-label={`Glaze ${n}`}
+                value={row.name}
+                onChange={(e) =>
+                  update(i, { name: e.target.value, glazeId: undefined })
+                }
+                placeholder="Glaze name"
+                className={`${input} flex-1`}
+              />
+              <button
+                type="button"
+                aria-label={`Remove glaze ${n}`}
+                onClick={() => remove(i)}
+                className="flex size-12 flex-none items-center justify-center rounded-full"
+              >
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#5B6672"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
             {suggestions.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {suggestions.map((g) => (

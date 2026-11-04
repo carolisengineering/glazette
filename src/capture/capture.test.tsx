@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
@@ -347,4 +347,45 @@ test('Done does not write a retired default clay when the user picks nothing', a
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const [piece] = await db.pieces.toArray()
   expect(piece.clayId).toBeUndefined()
+})
+
+test('Retake on the details sheet soft-deletes the new piece and returns to the camera', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const [piece] = await db.pieces.toArray()
+  clickSpy.mockClear()
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  expect(
+    await screen.findByRole('button', { name: 'Take photo' }),
+  ).toBeVisible()
+  expect(useCaptureStore.getState().photo).toBeUndefined()
+  expect((await db.pieces.get(piece.id))?.deletedAt).toBeTruthy()
+  expect(clickSpy).toHaveBeenCalledTimes(1)
+  expect(clickSpy.mock.contexts[0]).toBe(screen.getByTestId('capture-input'))
+})
+
+test('review defaults to New piece when there are no in-progress pieces, Update when there is one', async () => {
+  const pressed = async (name: string) =>
+    (await screen.findByRole('button', { name })).getAttribute('aria-pressed')
+  renderRoute('/capture')
+  await chooseFile()
+  await waitFor(async () => expect(await pressed('New piece')).toBe('true'))
+  expect(await pressed('Update')).toBe('false')
+  cleanup()
+
+  await createPiece({ name: 'Mug' })
+  useCaptureStore.getState().reset()
+  renderRoute('/capture')
+  await chooseFile()
+  await waitFor(async () => expect(await pressed('Update')).toBe('true'))
+  expect(await pressed('New piece')).toBe('false')
+
+  // A choice the user made is never overridden.
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'New piece' }),
+  )
+  await createPiece({ name: 'Bowl' })
+  await waitFor(async () => expect(await pressed('New piece')).toBe('true'))
+  expect(await pressed('Update')).toBe('false')
 })

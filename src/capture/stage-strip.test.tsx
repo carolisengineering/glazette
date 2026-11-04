@@ -261,3 +261,41 @@ test('a failed save leaves no new glazes behind', async () => {
   expect(router.state.location.pathname).toBe('/capture')
   expect(await db.glazes.count()).toBe(0)
 })
+
+async function openGlazedRows(id: string) {
+  const router = await openStrip(id)
+  await screen.findByRole('button', { name: 'Save to Trimmed' })
+  await userEvent.click(stageBtn('Glazed'))
+  return router
+}
+
+test('removing the first of two glaze rows saves only the second glaze, at order 0', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = await openGlazedRows(id)
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Celadon')
+  await userEvent.click(
+    screen.getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(screen.getByLabelText('Glaze 2'), 'Tenmoku')
+  await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('Tenmoku')
+  expect(screen.queryByLabelText('Glaze 2')).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Glazed' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  const glazes = await db.glazes.toArray()
+  expect(glazes.map((g) => g.name)).toEqual(['Tenmoku'])
+  const apps = await db.glazeApps.toArray()
+  expect(apps).toHaveLength(1)
+  expect(apps[0]).toMatchObject({ glazeId: glazes[0].id, order: 0 })
+})
+
+test('removing the only glaze row leaves one empty row', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await openGlazedRows(id)
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Celadon')
+  await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
+  expect(screen.queryByLabelText('Glaze 2')).toBeNull()
+})

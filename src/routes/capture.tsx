@@ -2,13 +2,13 @@ import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { type CameraHandle, CameraInput } from '../capture/CameraInput'
 import { NewPieceSheet } from '../capture/NewPieceSheet'
-import { PickPieceSheet } from '../capture/PickPieceSheet'
+import { inProgress, PickPieceSheet } from '../capture/PickPieceSheet'
 import { Review } from '../capture/Review'
 import { StageStrip } from '../capture/StageStrip'
 import { useCaptureStore } from '../capture/store'
 import { Toast } from '../components/Toast'
-import { createPiece } from '../db/ops'
-import { liveDefaultClayId } from '../db/queries'
+import { createPiece, softDelete } from '../db/ops'
+import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
 import { processImage, UnsupportedImageError } from '../photos/process'
 
 const captureRoute = getRouteApi('/capture')
@@ -44,6 +44,17 @@ export function CaptureScreen() {
     }
   }, [])
 
+  // Default the New piece / Update toggle once the pieces are known: New when
+  // nothing is in progress. Never overrides a choice the user made.
+  const pieces = usePiecesQuery()
+  const hasPhoto = photo !== undefined
+  useEffect(() => {
+    if (!hasPhoto || pieceId || !pieces) return
+    useCaptureStore
+      .getState()
+      .defaultMode(pieces.some(inProgress) ? 'update' : 'new')
+  }, [hasPhoto, pieceId, pieces])
+
   // Open the camera once on arrival. The ref guard stops StrictMode opening it twice.
   useEffect(() => {
     if (opened.current) return
@@ -74,6 +85,20 @@ export function CaptureScreen() {
     setStep({ name: 'review' })
     setError(undefined)
     camera.current?.openCamera()
+  }
+
+  /** Retake from the details sheet: the piece was already saved, so discard it first. */
+  const retakeNewPiece = async (id: string) => {
+    try {
+      await softDelete('pieces', id)
+    } catch {
+      setToast((t) => ({
+        message: "Couldn't discard the photo. Try again.",
+        id: (t?.id ?? 0) + 1,
+      }))
+      return
+    }
+    retake()
   }
 
   /** Saves the photo as a new Thrown piece with the default clay, then asks for details. */
@@ -113,7 +138,14 @@ export function CaptureScreen() {
 
   let body: React.ReactNode
   if (photo && step.name === 'details') {
-    body = <NewPieceSheet pieceId={step.pieceId} photo={photo} onDone={done} />
+    body = (
+      <NewPieceSheet
+        pieceId={step.pieceId}
+        photo={photo}
+        onDone={done}
+        onRetake={() => void retakeNewPiece(step.pieceId)}
+      />
+    )
   } else if (photo && step.name === 'pick') {
     body = (
       <PickPieceSheet

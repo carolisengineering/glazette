@@ -72,7 +72,11 @@ export function PieceCard({ view, now }: { view: PieceView; now: Date }) {
             />
           ))}
         </div>
-        {stage === 'fired' || !next ? (
+        {piece.lost ? (
+          <span className="py-3 text-[13px] font-semibold text-muted">
+            Lost
+          </span>
+        ) : stage === 'fired' || !next ? (
           <span className="py-3 text-[13px] font-semibold text-accent">
             Out of the kiln
           </span>

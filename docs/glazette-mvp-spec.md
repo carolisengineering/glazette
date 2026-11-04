@@ -57,7 +57,7 @@ Stages are linear. A piece can be marked **Lost** (cracked, collapsed or broken)
 
 Rules:
 - A piece's current stage is the stage of its most recent stage entry. It is never edited directly.
-- A piece never moves backward. A refire is a second **Fired** entry; a reglaze is a second **Glazed** entry followed by another Fired entry.
+- A piece never moves backward. A fired piece can be refired but not reglazed (Carol, 2026-11-02). A refire is a second **Fired** entry.
 - Several entries at the same stage are allowed (a second photo, a refire).
 - The before/after toggle compares the most recent Glazed photo with the most recent Fired photo.
 - Glazes are attached to a specific Glazed entry, so each glazing event has its own list.
@@ -67,7 +67,7 @@ Rules:
 ### 5.1 Shelf (home)
 - A two-column photo grid of pieces in progress. **All** hides Fired pieces 14 days after firing; the **Fired** chip always shows every fired piece.
 - Filter chips: **All · Thrown · Trimmed · Bisqued · Glazed · Fired**, each with a count. A **Lost** chip appears at the end once at least one piece is lost.
-- Each card shows the latest photo, name (serif), clay or glaze + day count, a 5-segment progress bar and an **advance arrow**.
+- Each card shows the latest photo, name (serif), clay or glaze + day count, a 5-segment progress bar and an **advance arrow**. Lost pieces have no advance arrow.
 - Kiln banner: "N pieces ready to bisque" when any piece is Trimmed.
 - Bottom bar: Shelf · **+ (camera)** · Glazes.
 

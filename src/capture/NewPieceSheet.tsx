@@ -22,6 +22,8 @@ interface Props {
   pieceId: string
   photo: ProcessedImage
   onDone: () => void
+  /** Discards the just-saved piece and starts the capture over. */
+  onRetake: () => void
 }
 
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
@@ -48,7 +50,7 @@ function orderClays(clays: Clay[], pieces: Piece[]): Clay[] {
 }
 
 /** Details for a piece that is already saved as Thrown. Skipping every field is fine. */
-export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
+export function NewPieceSheet({ pieceId, photo, onDone, onRetake }: Props) {
   const url = usePhotoUrl(photo.blob)
   const data = useLiveQuery(async () => {
     const [clays, pieces, defaultClayId] = await Promise.all([
@@ -102,6 +104,14 @@ export function NewPieceSheet({ pieceId, photo, onDone }: Props) {
         {url ? (
           <img src={url} alt="" className="size-full object-cover" />
         ) : null}
+        <button
+          type="button"
+          onClick={onRetake}
+          disabled={saving}
+          className="absolute top-12 left-5 h-11 rounded-[22px] bg-camera/60 px-4 text-[15px] font-medium text-white disabled:opacity-50"
+        >
+          Retake
+        </button>
       </div>
       <div className="relative -mt-7 flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-[22px] pb-7">
         <div className="flex items-center gap-2.5">

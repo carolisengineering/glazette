@@ -153,3 +153,15 @@ test('tapping a card opens the piece stub', async () => {
   expect(screen.getByText('Thrown')).toBeVisible()
   expect(screen.getByRole('link', { name: /Shelf/ })).toBeVisible()
 })
+
+test('a lost piece card has no advance link and shows "Lost"', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await markLost(id, true)
+  renderRoute('/')
+  await userEvent.click(await screen.findByRole('button', { name: /^Lost/ }))
+  await screen.findByText('Mug')
+  expect(screen.getByText('Lost', { selector: 'span' })).toBeVisible()
+  expect(
+    screen.queryByRole('link', { name: /^Move Mug/ }),
+  ).not.toBeInTheDocument()
+})
