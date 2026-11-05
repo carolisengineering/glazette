@@ -1,5 +1,13 @@
-import { act, cleanup, screen, waitFor } from '@testing-library/react'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { SAVE_ERROR } from '../components/useToast'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
@@ -10,6 +18,7 @@ import {
   UnsupportedImageError,
 } from '../photos/process'
 import { renderRoute } from '../test/renderRoute'
+import { NewPieceSheet } from './NewPieceSheet'
 import { useCaptureStore } from './store'
 
 vi.mock('../photos/process', async (importOriginal) => ({
@@ -495,4 +504,104 @@ test('Close on the stage strip lands on the shelf when the piece was picked afte
   act(() => router.history.back())
   await new Promise((r) => setTimeout(r, 50))
   expect(router.state.location.pathname).not.toBe('/capture')
+})
+
+const stageBtn = (name: string) =>
+  screen.getByRole('button', { name: new RegExp(`^${name}`) })
+
+test('picking Bisqued on the details sheet restages the saved piece; the line reads "Saved to your shelf as Bisqued"', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(screen.getByText('Stage')).toBeVisible()
+  expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
+  await userEvent.click(stageBtn('Bisqued'))
+  await screen.findByText('Saved to your shelf as Bisqued')
+  const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+  expect(live.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'thrown',
+    'trimmed',
+  ])
+  expect(live.find((e) => e.stage === 'bisqued')?.photoId).toBeTruthy()
+})
+
+test('a failed restage shows a toast and keeps the previous selection', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  vi.spyOn(ops, 'restagePiece').mockRejectedValueOnce(new Error('boom'))
+  await userEvent.click(stageBtn('Bisqued'))
+  await screen.findByText(SAVE_ERROR)
+  expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByText('Saved to your shelf as Thrown')).toBeVisible()
+})
+
+test('details sheet with a photo at Fired saves glazes on the filled Glazed step on Done', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(screen.queryByLabelText('Glaze 1')).toBeNull()
+  await userEvent.click(stageBtn('Fired'))
+  await screen.findByText('Saved to your shelf as Fired')
+  await userEvent.type(await screen.findByLabelText('Glaze 1'), 'Celadon')
+  await clickDone()
+  await waitFor(async () => expect(await db.glazeApps.count()).toBe(1))
+  const glazed = (await db.entries.toArray()).find((e) => e.stage === 'glazed')
+  expect(glazed?.photoId).toBeUndefined()
+  const apps = await db.glazeApps.toArray()
+  expect(apps[0].entryId).toBe(glazed?.id)
+  expect((await db.glazes.toArray()).map((g) => g.name)).toContain('Celadon')
+})
+
+function renderNoPhotoSheet(onDone = vi.fn(), onClose = vi.fn()) {
+  const root = createRootRoute()
+  const sheet = createRoute({
+    getParentRoute: () => root,
+    path: '/',
+    component: () => <NewPieceSheet onDone={onDone} onClose={onClose} />,
+  })
+  const router = createRouter({
+    routeTree: root.addChildren([sheet]),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
+  render(<RouterProvider router={router} />)
+  return { onDone, onClose }
+}
+
+test('details sheet without a photo saves nothing until Done, then writes the piece at the chosen stage', async () => {
+  const { onDone } = renderNoPhotoSheet()
+  expect(await screen.findByText('New piece')).toBeVisible()
+  expect(screen.getByText('No photo')).toBeVisible()
+  expect(screen.queryByText(/Saved to your shelf/)).toBeNull()
+  await userEvent.click(stageBtn('Glazed'))
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Tenmoku')
+  await userEvent.type(screen.getByPlaceholderText('Name it later'), 'Bowl')
+  expect(await db.pieces.count()).toBe(0)
+  await clickDone()
+  await waitFor(() => expect(onDone).toHaveBeenCalled())
+  const pieces = await db.pieces.toArray()
+  expect(pieces).toHaveLength(1)
+  expect(pieces[0].name).toBe('Bowl')
+  expect(pieces[0].clayId).toBeTruthy()
+  const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+  expect(live.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'glazed',
+    'thrown',
+    'trimmed',
+  ])
+  expect(live.every((e) => !e.photoId)).toBe(true)
+  expect(await db.glazeApps.count()).toBe(1)
+  expect(await db.photos.count()).toBe(0)
+})
+
+test('Close on the no-photo details sheet writes nothing', async () => {
+  const { onClose, onDone } = renderNoPhotoSheet()
+  await userEvent.type(await screen.findByLabelText('Name'), 'Bowl')
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(onClose).toHaveBeenCalled()
+  expect(onDone).not.toHaveBeenCalled()
+  expect(await db.pieces.count()).toBe(0)
+  expect(await db.entries.count()).toBe(0)
 })
