@@ -169,3 +169,82 @@ test('a lost piece card has no advance link and shows "Lost"', async () => {
     screen.queryByRole('link', { name: /^Move Mug/ }),
   ).not.toBeInTheDocument()
 })
+
+describe('studio name', () => {
+  const label = () => screen.findByRole('button', { name: /^Edit studio name/ })
+
+  test('shows "Studio" until a name is set', async () => {
+    renderRoute('/')
+    expect(await label()).toHaveTextContent('Studio')
+  })
+
+  test('tapping the label and pressing Return saves the name', async () => {
+    renderRoute('/')
+    const user = userEvent.setup()
+    await user.click(await label())
+    const field = screen.getByRole('textbox', { name: 'Studio name' })
+    expect(field).toHaveFocus()
+    expect(field).toHaveValue('')
+    await user.type(field, 'Penguin Foot{Enter}')
+    expect(await label()).toHaveTextContent('Penguin Foot')
+    expect((await db.settings.get('app'))?.studioName).toBe('Penguin Foot')
+  })
+
+  test('tapping elsewhere saves; the field starts with the current name', async () => {
+    await db.settings.update('app', { studioName: 'Penguin Foot' })
+    renderRoute('/')
+    const user = userEvent.setup()
+    await user.click(await label())
+    const field = screen.getByRole('textbox', { name: 'Studio name' })
+    expect(field).toHaveValue('Penguin Foot')
+    await user.clear(field)
+    await user.type(field, 'Clay Barn')
+    await user.click(screen.getByRole('heading', { name: 'My Shelf' }))
+    expect(await label()).toHaveTextContent('Clay Barn')
+    expect((await db.settings.get('app'))?.studioName).toBe('Clay Barn')
+  })
+
+  test('clearing the name goes back to "Studio"', async () => {
+    await db.settings.update('app', { studioName: 'Penguin Foot' })
+    renderRoute('/')
+    const user = userEvent.setup()
+    await user.click(await label())
+    await user.clear(screen.getByRole('textbox', { name: 'Studio name' }))
+    await user.keyboard('{Enter}')
+    expect(await label()).toHaveTextContent('Studio')
+    const row = await db.settings.get('app')
+    expect(row && 'studioName' in row).toBe(false)
+  })
+
+  test('Escape cancels without saving', async () => {
+    renderRoute('/')
+    const user = userEvent.setup()
+    await user.click(await label())
+    await user.type(
+      screen.getByRole('textbox', { name: 'Studio name' }),
+      'Penguin Foot{Escape}',
+    )
+    expect(await label()).toHaveTextContent('Studio')
+    expect((await db.settings.get('app'))?.studioName).toBeUndefined()
+  })
+
+  test('a failed save shows the save-error toast', async () => {
+    renderRoute('/')
+    const user = userEvent.setup()
+    const update = vi
+      .spyOn(db.settings, 'update')
+      .mockRejectedValueOnce(new Error('full'))
+    try {
+      await user.click(await label())
+      await user.type(
+        screen.getByRole('textbox', { name: 'Studio name' }),
+        'Penguin Foot{Enter}',
+      )
+      expect(
+        await screen.findByText("Couldn't save. Free up space and try again."),
+      ).toBeVisible()
+    } finally {
+      update.mockRestore()
+    }
+  })
+})

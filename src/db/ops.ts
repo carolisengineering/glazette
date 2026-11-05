@@ -34,6 +34,12 @@ export async function ensureDefaults(): Promise<void> {
   })
 }
 
+/** Saves the name shown above My Shelf. A blank name removes it, so the label goes back to "Studio". */
+export async function setStudioName(name: string): Promise<void> {
+  const trimmed = name.trim()
+  await db.settings.update('app', { studioName: trimmed || undefined })
+}
+
 export function defaultNoteFor(stage: Stage, settings: Settings): string {
   if (stage === 'bisqued') return settings.bisqueNote
   if (stage === 'fired') return settings.firedNote
