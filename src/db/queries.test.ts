@@ -142,3 +142,12 @@ describe('buildPieceViews', () => {
     expect(v.latestPhotoId).toBe('ph1')
   })
 })
+
+test('filterShelf all hides a Fired piece whose Fired step has no date; fired still shows it', () => {
+  const undated: PieceView = {
+    ...view('u', [['fired', daysAgo(1)]]),
+    entries: [{ id: 'u-0', pieceId: 'u', stage: 'fired' }],
+  }
+  expect(ids(filterShelf([undated], 'all', NOW))).toEqual([])
+  expect(ids(filterShelf([undated], 'fired', NOW))).toEqual(['u'])
+})

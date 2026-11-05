@@ -107,6 +107,7 @@ function isFadedFromAll(view: PieceView, now: Date): boolean {
   if (view.stage !== 'fired') return false
   const fired = latestEntry(view.entries, 'fired')
   if (!fired) return false
+  if (!fired.date) return true
   return (
     now.getTime() - new Date(fired.date).getTime() > FIRED_FADE_DAYS * DAY_MS
   )

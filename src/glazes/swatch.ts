@@ -51,8 +51,9 @@ export function buildGlazeViews(
           view.entries.filter((e) => e.photoId),
           'fired',
         )
-        if (fired?.photoId && (!swatch || fired.date > swatch.date)) {
-          swatch = { photoId: fired.photoId, date: fired.date }
+        const date = fired?.date ?? ''
+        if (fired?.photoId && (!swatch || date > swatch.date)) {
+          swatch = { photoId: fired.photoId, date }
         }
       }
       return {

@@ -1,17 +1,20 @@
 import {
+  compareEntries,
   currentStage,
   dayCount,
   displayName,
   latestEntry,
+  missingStages,
   nextStage,
   STAGES,
+  stagesBetween,
 } from './stage'
 import type { Piece, StageEntry } from './types'
 
 const entry = (
   id: string,
   stage: StageEntry['stage'],
-  date: string,
+  date: string | undefined,
   deletedAt?: string,
 ): StageEntry => ({
   id,
@@ -100,4 +103,49 @@ test('dayCount is Day 1 on the day it was thrown and counts local calendar days'
 
 test('dayCount is undefined for an invalid createdAt', () => {
   expect(dayCount(piece({ createdAt: 'nope' }), new Date())).toBeUndefined()
+})
+
+const D1 = '2026-11-01T12:00:00.000Z'
+const D2 = '2026-11-02T12:00:00.000Z'
+
+test('stagesBetween lists only the stages strictly between', () => {
+  expect(stagesBetween('thrown', 'bisqued')).toEqual(['trimmed'])
+  expect(stagesBetween(undefined, 'glazed')).toEqual([
+    'thrown',
+    'trimmed',
+    'bisqued',
+  ])
+  expect(stagesBetween('thrown', 'trimmed')).toEqual([])
+  expect(stagesBetween('fired', 'fired')).toEqual([])
+})
+
+test('an undated entry sorts below a dated one of the same stage, above an earlier stage', () => {
+  const sorted = [
+    entry('t', 'thrown', '2026-11-01T00:00:00.000Z'),
+    entry('u', 'trimmed', undefined),
+    entry('d', 'trimmed', '2026-10-01T00:00:00.000Z'),
+  ]
+    .sort((a, b) => compareEntries(b, a))
+    .map((e) => e.id)
+  expect(sorted).toEqual(['d', 'u', 't'])
+  expect(
+    compareEntries(
+      entry('x', 'trimmed', undefined),
+      entry('y', 'trimmed', undefined),
+    ),
+  ).toBe(0)
+})
+
+test('missingStages skips stages that have a deleted entry', () => {
+  const es = [
+    entry('a', 'thrown', D1),
+    entry('b', 'trimmed', D1, D2),
+    entry('c', 'glazed', D2),
+  ]
+  expect(missingStages(es)).toEqual(['bisqued'])
+})
+
+test('missingStages is empty with no live entries', () => {
+  expect(missingStages([])).toEqual([])
+  expect(missingStages([entry('a', 'thrown', D1, D2)])).toEqual([])
 })

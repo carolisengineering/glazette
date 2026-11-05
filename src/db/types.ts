@@ -19,7 +19,7 @@ export interface StageEntry {
   stage: Stage
   photoId?: string
   note?: string // e.g. "Cone 04", "2 dips"
-  date: string // EXIF date for library photos, else capture time
+  date?: string // Photo date, a date the user entered, or none
   deletedAt?: string
 }
 

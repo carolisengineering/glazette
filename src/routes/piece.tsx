@@ -2,6 +2,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SAVE_ERROR, useToast } from '../components/useToast'
+import { shortDate } from '../db/dates'
 import { markLost, softDelete, updatePiece } from '../db/ops'
 import { type PieceDetail, usePiece } from '../db/queries'
 import { displayName, latestEntry, nextStage, STAGE_LABEL } from '../db/stage'
@@ -10,7 +11,7 @@ import { BeforeAfter, type Side } from '../piece/BeforeAfter'
 import { EditSheet } from '../piece/EditSheet'
 import { FactCards } from '../piece/FactCards'
 import { Hero } from '../piece/Hero'
-import { shortDate, Timeline } from '../piece/Timeline'
+import { Timeline } from '../piece/Timeline'
 
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
@@ -134,7 +135,8 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         <div className="flex flex-col gap-1">
           {stage && latest ? (
             <span className="text-[13px] font-semibold tracking-[0.12em] text-accent uppercase">
-              {STAGE_LABEL[stage]} · {shortDate(latest.date)}
+              {STAGE_LABEL[stage]}
+              {latest.date ? ` · ${shortDate(latest.date)}` : null}
             </span>
           ) : null}
           <h1 className="m-0 font-serif text-[32px] leading-[1.05] font-normal break-words">

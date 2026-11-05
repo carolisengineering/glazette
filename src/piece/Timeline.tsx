@@ -1,9 +1,7 @@
 import { PhotoImg } from '../components/PhotoImg'
+import { shortDate } from '../db/dates'
 import { compareEntries, STAGE_LABEL } from '../db/stage'
 import type { StageEntry } from '../db/types'
-
-export const shortDate = (iso: string): string =>
-  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 /** Ranked like the header's current stage: later stage first, then newest date. */
 function newestFirst(entries: StageEntry[]): StageEntry[] {
@@ -37,7 +35,7 @@ export function Timeline({ entries, onDelete }: Props) {
             ) : null}
           </div>
           <span className="flex-none text-[13px] text-muted">
-            {shortDate(e.date)}
+            {e.date ? shortDate(e.date) : null}
           </span>
           <button
             type="button"
