@@ -1,0 +1,409 @@
+import 'fake-indexeddb/auto'
+import { strToU8, zipSync } from 'fflate'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { db } from '../db/db'
+import { ensureDefaults } from '../db/ops'
+import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import type { Photo, Settings } from '../db/types'
+import { lenientBytes } from '../test/bytes'
+import { exportZip as exportStrict } from './export'
+import type { BackupJson, PhotoMeta } from './format'
+import { importZip as importStrict, NotABackupError } from './import'
+
+const exportZip = () => exportStrict(new Date(), lenientBytes)
+const importZip = (file: Blob) => importStrict(file, lenientBytes)
+
+const SETTINGS: Settings = {
+  id: 'app',
+  defaultClayId: 'c1',
+  defaultCone: '10',
+  bisqueNote: 'Cone 04',
+  firedNote: 'Cone 10 reduction',
+  studioName: 'Penguin Foot',
+}
+
+function backup(over: Partial<BackupJson> = {}): BackupJson {
+  return {
+    version: 1,
+    exportedAt: '2026-11-05T12:00:00.000Z',
+    pieces: [],
+    entries: [],
+    glazeApps: [],
+    glazes: [],
+    clays: [],
+    settings: null,
+    photos: [],
+    ...over,
+  }
+}
+
+/** A zip built by hand, with a JPEG pair for each listed hash. */
+function zipOf(json: unknown, imageHashes: string[] = []): Blob {
+  const files: Record<string, Uint8Array> = {
+    'glazette.json': strToU8(JSON.stringify(json)),
+  }
+  for (const h of imageHashes) {
+    files[`photos/${h}.jpg`] = strToU8(`full-${h}`)
+    files[`thumbs/${h}.jpg`] = strToU8(`thumb-${h}`)
+  }
+  return new Blob([zipSync(files) as BlobPart], { type: 'application/zip' })
+}
+
+const photoMeta = (id: string, hash: string): PhotoMeta => ({
+  id,
+  hash,
+  width: 10,
+  height: 20,
+  takenAt: '2026-11-01T10:00:00.000Z',
+})
+
+const photoRow = (id: string, hash: string, deletedAt?: string): Photo => ({
+  ...photoMeta(id, hash),
+  blob: new Blob(['local'], { type: 'image/jpeg' }),
+  thumb: new Blob(['local-t'], { type: 'image/jpeg' }),
+  ...(deletedAt ? { deletedAt } : {}),
+})
+
+const withoutBytes = (photos: Photo[]) =>
+  photos.map(({ blob: _b, thumb: _t, ...meta }) => meta)
+
+async function snapshot() {
+  return {
+    pieces: await db.pieces.toArray(),
+    entries: await db.entries.toArray(),
+    glazeApps: await db.glazeApps.toArray(),
+    glazes: await db.glazes.toArray(),
+    clays: await db.clays.toArray(),
+    settings: await db.settings.toArray(),
+    photos: withoutBytes(await db.photos.toArray()),
+  }
+}
+
+async function clearAll() {
+  await Promise.all(db.tables.map((t) => t.clear()))
+}
+
+async function seedEverything() {
+  await db.pieces.bulkAdd([
+    { id: 'p1', name: 'Mug', createdAt: 'a', updatedAt: 'b', clayId: 'c1' },
+    { id: 'p2', createdAt: 'a', updatedAt: 'a', deletedAt: 'z' },
+  ])
+  await db.entries.bulkAdd([
+    {
+      id: 'e1',
+      pieceId: 'p1',
+      stage: 'thrown',
+      photoId: 'ph1',
+      date: '2026-11-01',
+    },
+    { id: 'e2', pieceId: 'p1', stage: 'trimmed' },
+    { id: 'e3', pieceId: 'p1', stage: 'glazed', deletedAt: 'z' },
+  ])
+  await db.glazeApps.add({
+    id: 'ga1',
+    entryId: 'e3',
+    pieceId: 'p1',
+    glazeId: 'gl1',
+    order: 0,
+    dips: 2,
+  })
+  await db.glazes.add({ id: 'gl1', name: 'Celadon', color: '#9dbbaa' })
+  await db.clays.add({ id: 'c1', name: 'Buff' })
+  await db.settings.add(SETTINGS)
+  await db.photos.bulkAdd([
+    photoRow('ph1', 'h1'),
+    photoRow('ph2', 'h2', '2026-11-03'),
+  ])
+}
+
+beforeEach(clearAll)
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+test('import into an empty database restores every table and photo', async () => {
+  await seedEverything()
+  const before = await snapshot()
+  const zip = await exportZip()
+  await clearAll()
+
+  const result = await importZip(zip)
+
+  // 2 pieces + 3 steps + 1 layer + 1 glaze + 1 clay + 2 photos + settings
+  expect(result).toEqual({ added: 11, updated: 0 })
+  const after = await snapshot()
+  for (const key of Object.keys(before) as (keyof typeof before)[]) {
+    expect(after[key]).toEqual(before[key])
+  }
+  const ph1 = await db.photos.get('ph1')
+  expect(ph1?.blob).toBeDefined()
+  expect(ph1?.thumb).toBeDefined()
+})
+
+test('importing the same zip twice adds nothing the second time', async () => {
+  await seedEverything()
+  const zip = await exportZip()
+  await clearAll()
+  await importZip(zip)
+  expect(await importZip(zip)).toEqual({ added: 0, updated: 0 })
+})
+
+test('restore on a fresh install brings back the studio name and default clay', async () => {
+  await ensureDefaults()
+  const zip = zipOf(
+    backup({ clays: [{ id: 'c1', name: 'Buff' }], settings: SETTINGS }),
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.settings.get('app')).toEqual(SETTINGS)
+  expect(result).toEqual({ added: 1, updated: 1 }) // the clay; the settings
+})
+
+test('a default clay the backup does not contain keeps the current one', async () => {
+  await ensureDefaults()
+  const current = await db.settings.get('app')
+  await importZip(
+    zipOf(backup({ settings: { ...SETTINGS, defaultClayId: 'missing' } })),
+  )
+  const after = await db.settings.get('app')
+  expect(after?.defaultClayId).toBe(current?.defaultClayId)
+  expect(after?.studioName).toBe('Penguin Foot')
+})
+
+test('a photo already stored under another id is reused and steps are rewritten', async () => {
+  await db.photos.add(photoRow('local-ph', 'h1'))
+  const zip = zipOf(
+    backup({
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    ['h1'],
+  )
+
+  const result = await importZip(zip)
+
+  expect((await db.entries.get('e1'))?.photoId).toBe('local-ph')
+  expect(await db.photos.get('ph1')).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+  expect(result).toEqual({ added: 1, updated: 0 })
+})
+
+test('a reused photo that was deleted here comes back for a live incoming step', async () => {
+  await db.photos.add(photoRow('local-ph', 'h1', '2026-11-03'))
+  const zip = zipOf(
+    backup({
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    ['h1'],
+  )
+
+  const result = await importZip(zip)
+
+  expect((await db.photos.get('local-ph'))?.deletedAt).toBeUndefined()
+  expect(result).toEqual({ added: 1, updated: 1 })
+})
+
+test('an incoming photo whose id is taken by a different photo gets a new id', async () => {
+  await db.photos.add(photoRow('ph1', 'other-hash'))
+  const zip = zipOf(
+    backup({
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    ['h1'],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('ph1'))?.hash).toBe('other-hash')
+  const photoId = (await db.entries.get('e1'))?.photoId
+  expect(photoId).not.toBe('ph1')
+  expect((await db.photos.get(photoId as string))?.hash).toBe('h1')
+})
+
+test('two photos with one hash in the zip become one row', async () => {
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' },
+        { id: 'e2', pieceId: 'p1', stage: 'trimmed', photoId: 'ph2' },
+      ],
+      photos: [photoMeta('ph1', 'h1'), photoMeta('ph2', 'h1')],
+    }),
+    ['h1'],
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.photos.count()).toBe(1)
+  expect((await db.entries.get('e2'))?.photoId).toBe('ph1')
+  expect(result).toEqual({ added: 3, updated: 0 })
+})
+
+test('a photo missing from the zip is skipped and the step keeps its photoId', async () => {
+  const zip = zipOf(
+    backup({
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    [],
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.photos.count()).toBe(0)
+  expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  expect(result).toEqual({ added: 1, updated: 0 })
+})
+
+test('an undated step and a tombstoned piece round-trip unchanged', async () => {
+  await db.pieces.add({
+    id: 'p1',
+    createdAt: 'a',
+    updatedAt: 'b',
+    deletedAt: '2026-11-04T00:00:00.000Z',
+  })
+  await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
+  await db.settings.add(SETTINGS)
+  const before = await snapshot()
+  const zip = await exportZip()
+  await clearAll()
+
+  await importZip(zip)
+
+  const after = await snapshot()
+  expect(after.entries[0]).not.toHaveProperty('date')
+  expect(after.entries).toStrictEqual(before.entries)
+  expect(after.pieces).toStrictEqual(before.pieces)
+  expect(after.settings[0].studioName).toBe('Penguin Foot')
+})
+
+test('a piece is replaced only by a newer updatedAt', async () => {
+  await db.pieces.bulkAdd([
+    { id: 'old', name: 'Here', createdAt: 'a', updatedAt: '2026-11-02' },
+    { id: 'new', name: 'Here', createdAt: 'a', updatedAt: '2026-11-04' },
+    { id: 'same', name: 'Here', createdAt: 'a', updatedAt: '2026-11-03' },
+  ])
+  const zip = zipOf(
+    backup({
+      pieces: [
+        {
+          id: 'old',
+          name: 'Backup',
+          createdAt: 'a',
+          updatedAt: '2026-11-03',
+          deletedAt: '2026-11-03',
+        },
+        { id: 'new', name: 'Backup', createdAt: 'a', updatedAt: '2026-11-03' },
+        { id: 'same', name: 'Backup', createdAt: 'a', updatedAt: '2026-11-03' },
+      ],
+    }),
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.pieces.get('old')).toMatchObject({
+    name: 'Backup',
+    deletedAt: '2026-11-03',
+  })
+  expect((await db.pieces.get('new'))?.name).toBe('Here')
+  expect((await db.pieces.get('same'))?.name).toBe('Here')
+  expect(result).toEqual({ added: 0, updated: 1 })
+})
+
+test('an incoming tombstone deletes an existing live step', async () => {
+  await db.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    note: 'local',
+  })
+  await db.glazes.add({ id: 'gl1', name: 'Local', color: '#111111' })
+  const zip = zipOf(
+    backup({
+      entries: [
+        {
+          id: 'e1',
+          pieceId: 'p1',
+          stage: 'thrown',
+          note: 'backup',
+          deletedAt: 'z',
+        },
+      ],
+      glazes: [{ id: 'gl1', name: 'Backup', color: '#222222' }],
+    }),
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.entries.get('e1')).toEqual({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    note: 'local',
+    deletedAt: 'z',
+  })
+  expect(await db.glazes.get('gl1')).toEqual({
+    id: 'gl1',
+    name: 'Local',
+    color: '#111111',
+  })
+  expect(result).toEqual({ added: 0, updated: 1 })
+})
+
+test('a bad glaze color becomes the default color', async () => {
+  const zip = zipOf(
+    backup({
+      glazes: [
+        { id: 'bad', name: 'X', color: 'red; background-image:url(x)' },
+        { id: 'short', name: 'Y', color: '#abc' },
+        { id: 'good', name: 'Z', color: '#A1b2C3' },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('bad'))?.color).toBe(DEFAULT_GLAZE_COLOR)
+  expect((await db.glazes.get('short'))?.color).toBe(DEFAULT_GLAZE_COLOR)
+  expect((await db.glazes.get('good'))?.color).toBe('#A1b2C3')
+})
+
+test('a zip without glazette.json throws NotABackupError and writes nothing', async () => {
+  await ensureDefaults()
+  const before = await snapshot()
+  const noJson = new Blob([zipSync({ 'other.txt': strToU8('hi') }) as BlobPart])
+
+  await expect(importZip(noJson)).rejects.toBeInstanceOf(NotABackupError)
+  await expect(
+    importZip(new Blob(['not a zip at all'])),
+  ).rejects.toBeInstanceOf(NotABackupError)
+  await expect(
+    importZip(zipOf({ ...backup(), version: 2 })),
+  ).rejects.toBeInstanceOf(NotABackupError)
+  await expect(
+    importZip(zipOf({ ...backup(), pieces: 'nope' })),
+  ).rejects.toBeInstanceOf(NotABackupError)
+  const garbled = zipSync({ 'glazette.json': strToU8('{not json') })
+  await expect(
+    importZip(new Blob([garbled as BlobPart])),
+  ).rejects.toBeInstanceOf(NotABackupError)
+
+  expect(await snapshot()).toEqual(before)
+})
+
+test('a failure mid-import writes nothing', async () => {
+  await seedEverything()
+  const zip = await exportZip()
+  await clearAll()
+  await ensureDefaults()
+  const before = await snapshot()
+  // Steps are written after clays, glazes, pieces and photos.
+  vi.spyOn(db.entries, 'bulkPut').mockRejectedValueOnce(new Error('disk full'))
+
+  await expect(importZip(zip)).rejects.toThrow('disk full')
+  expect(db.entries.bulkPut).toHaveBeenCalled()
+  expect(await snapshot()).toEqual(before)
+})

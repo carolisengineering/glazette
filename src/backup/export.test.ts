@@ -2,25 +2,13 @@ import 'fake-indexeddb/auto'
 import { unzipSync } from 'fflate'
 import { beforeEach, expect, test } from 'vitest'
 import { db } from '../db/db'
+import { lenientBytes } from '../test/bytes'
 import {
   backupFileName,
   exportZip as exportStrict,
   readBlobBytes,
 } from './export'
 import type { BackupJson } from './format'
-
-// jsdom's Blob lacks arrayBuffer(), and fake-indexeddb returns stored Blobs as
-// empty plain objects (bytes lost). Tests read bytes leniently; production
-// export is strict (see the last test).
-function lenientBytes(blob: Blob): Promise<Uint8Array> {
-  if (!(blob instanceof Blob)) return Promise.resolve(new Uint8Array(0))
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
-    reader.onerror = () => reject(reader.error)
-    reader.readAsArrayBuffer(blob)
-  })
-}
 
 const exportZip = (now?: Date) => exportStrict(now, lenientBytes)
 
