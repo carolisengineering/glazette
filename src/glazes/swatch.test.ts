@@ -118,3 +118,22 @@ test('centerCropStyle covers a square tile from the center', () => {
     height: '100%',
   })
 })
+
+test.each([
+  ['bare Glazed step first', true],
+  ['bare Glazed step last', false],
+])(
+  'tied undated Glazed steps: glazes come from the one that has them (%s)',
+  (_label, bareFirst) => {
+    const glazes = [glaze('g1', 'Celadon', { color: '#abc' })]
+    const bare: StageEntry = { id: 'bare', pieceId: 'a', stage: 'glazed' }
+    const withGlazes: StageEntry = { id: 'full', pieceId: 'a', stage: 'glazed' }
+    const entries = bareFirst ? [bare, withGlazes] : [withGlazes, bare]
+    const apps = [app('full', 'a', 'g1')]
+    const pieceViews = buildPieceViews([piece('a')], entries, apps, glazes, [])
+    expect(pieceViews[0].glazeNames).toEqual(['Celadon'])
+    expect(pieceViews[0].glazeColor).toBe('#abc')
+    const result = buildGlazeViews(pieceViews, apps, glazes)
+    expect(result[0].pieceIds).toEqual(['a'])
+  },
+)

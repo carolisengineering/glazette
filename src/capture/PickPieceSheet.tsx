@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CloseIcon } from '../components/CloseIcon'
 import { PhotoImg } from '../components/PhotoImg'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { type PieceView, usePieces } from '../db/queries'
@@ -11,6 +12,8 @@ interface Props {
   /** The photo under review, shown above the sheet. */
   photo?: ProcessedImage
   onRetake?: () => void
+  /** Without a photo, the sheet has its own Close at the top left. */
+  onClose?: () => void
 }
 
 /** Pieces still being worked on: not lost, not fired. (Deleted ones never reach a view.) */
@@ -30,7 +33,13 @@ function meta(v: PieceView): string {
 }
 
 /** Which piece does this photo belong to? In-progress pieces, most recently touched first. */
-export function PickPieceSheet({ onPick, onNew, photo, onRetake }: Props) {
+export function PickPieceSheet({
+  onPick,
+  onNew,
+  photo,
+  onRetake,
+  onClose,
+}: Props) {
   const views = usePieces()
   const url = usePhotoUrl(photo?.blob)
   const [query, setQuery] = useState('')
@@ -44,32 +53,47 @@ export function PickPieceSheet({ onPick, onNew, photo, onRetake }: Props) {
 
   return (
     <main className="mx-auto flex h-dvh max-w-[430px] flex-col overflow-hidden bg-camera">
-      <div className="relative h-[250px] flex-none overflow-hidden">
-        {url ? (
-          <img src={url} alt="" className="size-full object-cover" />
-        ) : null}
-        {onRetake ? (
+      {photo ? (
+        <div className="relative h-[250px] flex-none overflow-hidden">
+          {url ? (
+            <img src={url} alt="" className="size-full object-cover" />
+          ) : null}
+          {onRetake ? (
+            <button
+              type="button"
+              onClick={onRetake}
+              className="absolute top-12 left-5 h-11 rounded-[22px] bg-camera/60 px-4 text-[15px] font-medium text-white"
+            >
+              Retake
+            </button>
+          ) : null}
+          <span className="absolute top-14 right-5 rounded-xl bg-camera/60 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
+            Update a piece
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-none items-center px-5 pt-14 pb-5">
           <button
             type="button"
-            onClick={onRetake}
-            className="absolute top-12 left-5 h-11 rounded-[22px] bg-camera/60 px-4 text-[15px] font-medium text-white"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex size-11 items-center justify-center rounded-full bg-white/12"
           >
-            Retake
+            <CloseIcon />
           </button>
-        ) : null}
-        <span className="absolute top-14 right-5 rounded-xl bg-camera/60 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
-          Update a piece
-        </span>
-      </div>
+        </div>
+      )}
 
-      <div className="relative -mt-7 flex min-h-0 flex-1 flex-col gap-4 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink">
+      <div
+        className={`relative flex min-h-0 flex-1 flex-col gap-4 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink ${photo ? '-mt-7' : ''}`}
+      >
         <span
           aria-hidden="true"
           className="h-[5px] w-10 self-center rounded-[3px] bg-[#C5CDD5]"
         />
         <div className="flex flex-col gap-0.5">
           <h1 className="font-serif text-[32px] leading-[1.05] font-normal">
-            Which piece is this?
+            {photo ? 'Which piece is this?' : 'Which piece?'}
           </h1>
           <span className="text-[14px] text-muted">
             Showing pieces still in progress

@@ -84,7 +84,11 @@ test('glazed and fired cards show glaze and clay; fired has no advance arrow', a
     glazes: [{ glazeId: 'g1' }],
   })
   const fired = await createPiece({ name: 'Cup' })
-  await addStageEntry({ pieceId: fired, stage: 'fired' })
+  await addStageEntry({
+    pieceId: fired,
+    stage: 'fired',
+    date: daysAgo(1),
+  })
   renderRoute('/')
   expect(await screen.findByText('Celadon · White stoneware')).toBeVisible()
   expect(screen.getByText('Out of the kiln')).toBeVisible()
@@ -142,7 +146,7 @@ test('the + button goes to /capture without a pieceId, Glazes goes to /glazes', 
 })
 
 test('tapping a card opens the piece screen', async () => {
-  const id = await createPiece({ name: 'Mug' })
+  const id = await createPiece({ name: 'Mug', date: daysAgo(1) })
   const router = renderRoute('/')
   const user = userEvent.setup()
   await user.click(await screen.findByText('Mug'))

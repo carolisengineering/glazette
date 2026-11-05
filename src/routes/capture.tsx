@@ -15,18 +15,19 @@ const captureRoute = getRouteApi('/capture')
 
 type Step =
   | { name: 'review' }
-  | { name: 'details'; pieceId: string }
+  | { name: 'choose' }
+  | { name: 'details'; pieceId?: string }
   | { name: 'pick' }
   | { name: 'stage'; pieceId: string; fromPick: boolean }
 
 export function CaptureScreen() {
-  const { pieceId } = captureRoute.useSearch()
+  const { pieceId, addPhoto } = captureRoute.useSearch()
   const navigate = useNavigate()
   const photo = useCaptureStore((s) => s.photo)
   const mode = useCaptureStore((s) => s.mode)
   const camera = useRef<CameraHandle>(null)
-  const opened = useRef(false)
   const [step, setStep] = useState<Step>({ name: 'review' })
+  const [noPhoto, setNoPhoto] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string>()
   const { show: showToast, toast } = useToast()
@@ -54,13 +55,6 @@ export function CaptureScreen() {
       .getState()
       .defaultMode(pieces.some(inProgress) ? 'update' : 'new')
   }, [hasPhoto, pieceId, pieces])
-
-  // Open the camera once on arrival. The ref guard stops StrictMode opening it twice.
-  useEffect(() => {
-    if (opened.current) return
-    opened.current = true
-    camera.current?.openCamera()
-  }, [])
 
   const onFile = async (file: File) => {
     setError(undefined)
@@ -120,6 +114,17 @@ export function CaptureScreen() {
     }
   }
 
+  const startNoPhoto = () => {
+    setNoPhoto(true)
+    if (pieceId) {
+      setStep({ name: 'stage', pieceId, fromPick: false })
+    } else if (pieces && !pieces.some(inProgress)) {
+      setStep({ name: 'details' })
+    } else {
+      setStep({ name: 'choose' })
+    }
+  }
+
   const handleUsePhoto = async () => {
     if (!photo || saving) return
     if (pieceId) {
@@ -136,30 +141,39 @@ export function CaptureScreen() {
     ? { to: '/piece/$id', params: { id: pieceId } }
     : { to: '/' }
 
+  const close = () => {
+    void navigate({ ...exit, replace: true })
+  }
+
   const done = () => {
     void navigate({ to: '/', replace: true })
   }
 
+  const active = photo !== undefined || noPhoto
   let body: React.ReactNode
-  if (photo && step.name === 'details') {
-    body = (
-      <NewPieceSheet
-        pieceId={step.pieceId}
-        photo={photo}
-        onDone={done}
-        onRetake={() => void retakeNewPiece(step.pieceId)}
-      />
-    )
-  } else if (photo && step.name === 'pick') {
+  if (active && step.name === 'details') {
+    body =
+      photo && step.pieceId ? (
+        <NewPieceSheet
+          pieceId={step.pieceId}
+          photo={photo}
+          onDone={done}
+          onRetake={() => void retakeNewPiece(step.pieceId as string)}
+        />
+      ) : (
+        <NewPieceSheet onDone={done} onClose={close} />
+      )
+  } else if (active && step.name === 'pick') {
     body = (
       <PickPieceSheet
         photo={photo}
         onPick={(id) => setStep({ name: 'stage', pieceId: id, fromPick: true })}
-        onNew={startNewPiece}
-        onRetake={retake}
+        onNew={photo ? startNewPiece : () => setStep({ name: 'details' })}
+        onRetake={photo ? retake : undefined}
+        onClose={close}
       />
     )
-  } else if (photo && step.name === 'stage') {
+  } else if (active && step.name === 'stage') {
     body = (
       <StageStrip
         pieceId={step.pieceId}
@@ -169,6 +183,35 @@ export function CaptureScreen() {
           step.fromPick ? () => setStep({ name: 'pick' }) : undefined
         }
       />
+    )
+  } else if (noPhoto && step.name === 'choose') {
+    body = (
+      <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col items-center justify-center gap-4 bg-camera px-5 text-white">
+        <h1 className="font-serif text-[32px] leading-none font-normal">
+          No photo
+        </h1>
+        <button
+          type="button"
+          onClick={() => setStep({ name: 'pick' })}
+          className="h-14 w-full max-w-[320px] rounded-[28px] bg-accent text-[16px] font-semibold text-white"
+        >
+          Update a piece
+        </button>
+        <button
+          type="button"
+          onClick={() => setStep({ name: 'details' })}
+          className="h-14 w-full max-w-[320px] rounded-[28px] bg-white/12 text-[16px] font-semibold text-white"
+        >
+          New piece
+        </button>
+        <Link
+          {...exit}
+          replace
+          className="flex h-11 items-center text-[15px] text-[#b7c0c9]"
+        >
+          Cancel
+        </Link>
+      </main>
     )
   } else if (photo) {
     body = (
@@ -215,6 +258,16 @@ export function CaptureScreen() {
         >
           Choose from library
         </button>
+        {addPhoto ? null : (
+          <button
+            type="button"
+            disabled={processing || (!pieceId && pieces === undefined)}
+            onClick={startNoPhoto}
+            className="h-14 w-full max-w-[320px] rounded-[28px] border-[1.5px] border-white/35 text-[16px] font-semibold text-white disabled:opacity-50"
+          >
+            No photo
+          </button>
+        )}
         <Link
           {...(pieceId
             ? { to: '/piece/$id', params: { id: pieceId } }

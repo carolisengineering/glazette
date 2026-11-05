@@ -1,15 +1,18 @@
 import type { ProcessedImage } from '../photos/process'
 import { db } from './db'
 import {
+  addGlazesToPiece,
   addStageEntry,
   createPiece,
   defaultNoteFor,
   ensureDefaults,
   removePhoto,
+  restagePiece,
+  setEntryDate,
   softDelete,
   upsertClay,
 } from './ops'
-import { currentStage } from './stage'
+import { currentStage, STAGES } from './stage'
 import type { Settings } from './types'
 
 beforeEach(async () => {
@@ -242,4 +245,172 @@ test('defaultNoteFor bisqued/fired/thrown', () => {
   expect(defaultNoteFor('bisqued', settings)).toBe('Cone 6')
   expect(defaultNoteFor('fired', settings)).toBe('Cone 6 oxidation')
   expect(defaultNoteFor('thrown', settings)).toBe('')
+})
+
+const liveByStage = async (pieceId: string) =>
+  (await db.entries.where('pieceId').equals(pieceId).toArray())
+    .filter((e) => !e.deletedAt)
+    .sort((a, b) => STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage))
+
+test('addStageEntry Thrown→Bisqued fills Trimmed with no photo, date or note', async () => {
+  const pieceId = await createPiece({ date: '2026-11-01T10:00:00.000Z' })
+  await addStageEntry({
+    pieceId,
+    stage: 'bisqued',
+    date: '2026-11-03T10:00:00.000Z',
+  })
+  const entries = await liveByStage(pieceId)
+  expect(entries.map((e) => e.stage)).toEqual(['thrown', 'trimmed', 'bisqued'])
+  expect(entries[0].date).toBe('2026-11-01T10:00:00.000Z')
+  expect(entries[1].photoId).toBeUndefined()
+  expect(entries[1].date).toBeUndefined()
+  expect(entries[1].note).toBeUndefined()
+  expect(entries[2].date).toBe('2026-11-03T10:00:00.000Z')
+})
+
+test('addStageEntry with no photo and no date stores no date', async () => {
+  const pieceId = await createPiece({})
+  const id = await addStageEntry({ pieceId, stage: 'trimmed' })
+  const row = (await db.entries.get(id)) as object
+  expect('date' in row).toBe(false)
+})
+
+test('addStageEntry Bisqued→Fired puts glazes on the filled Glazed step', async () => {
+  const pieceId = await createPiece({ stage: 'bisqued' })
+  const firedId = await addStageEntry({
+    pieceId,
+    stage: 'fired',
+    glazes: [{ glazeId: 'g1' }],
+  })
+  const glazed = (await liveByStage(pieceId)).find((e) => e.stage === 'glazed')
+  const apps = await db.glazeApps.toArray()
+  expect(apps).toHaveLength(1)
+  expect(apps[0].entryId).toBe(glazed?.id)
+  expect(await db.glazeApps.where('entryId').equals(firedId).count()).toBe(0)
+})
+
+test('addStageEntry at the current stage of a Fired piece fills nothing', async () => {
+  const pieceId = await createPiece({ stage: 'fired' })
+  expect(await db.entries.count()).toBe(5)
+  await addStageEntry({ pieceId, stage: 'fired' })
+  expect(await db.entries.count()).toBe(6)
+})
+
+test('addStageEntry does not refill a deleted step behind the current stage', async () => {
+  const pieceId = await createPiece({ stage: 'bisqued' })
+  const trimmed = (await liveByStage(pieceId)).find(
+    (e) => e.stage === 'trimmed',
+  )
+  await softDelete('entries', trimmed?.id as string)
+  await addStageEntry({ pieceId, stage: 'glazed' })
+  const all = await db.entries.where('pieceId').equals(pieceId).toArray()
+  expect(all.filter((e) => e.stage === 'trimmed')).toHaveLength(1)
+  expect(all).toHaveLength(4)
+})
+
+test('createPiece at Bisqued with a photo writes Thrown and Trimmed undated, photo on Bisqued', async () => {
+  const id = await createPiece({
+    photo: photo('c1'),
+    stage: 'bisqued',
+    note: 'n',
+  })
+  const [thrown, trimmed, bisqued] = await liveByStage(id)
+  expect(thrown.date).toBeUndefined()
+  expect(trimmed.date).toBeUndefined()
+  expect(thrown.photoId).toBeUndefined()
+  expect(bisqued.photoId).toBeTruthy()
+  expect(bisqued.note).toBe('n')
+  expect(bisqued.date).toBe('2026-10-31T09:00:00.000Z')
+  expect((await db.pieces.get(id))?.createdAt).toBe(bisqued.date)
+})
+
+test('createPiece with no photo at Glazed: all four steps undated, glazes on Glazed', async () => {
+  const id = await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+  const entries = await liveByStage(id)
+  expect(entries.map((e) => e.stage)).toEqual([
+    'thrown',
+    'trimmed',
+    'bisqued',
+    'glazed',
+  ])
+  expect(entries.every((e) => e.date === undefined)).toBe(true)
+  const apps = await db.glazeApps.toArray()
+  expect(apps.map((a) => a.entryId)).toEqual([entries[3].id])
+})
+
+test('restagePiece Glazed→Thrown→Bisqued leaves one live step per stage, photo on Bisqued', async () => {
+  const id = await createPiece({
+    photo: photo('r1'),
+    stage: 'glazed',
+    glazes: [{ glazeId: 'g1' }],
+  })
+  await restagePiece(id, 'thrown')
+  let entries = await liveByStage(id)
+  expect(entries.map((e) => e.stage)).toEqual(['thrown'])
+  expect(entries[0].photoId).toBeTruthy()
+  expect(await db.glazeApps.count()).toBe(0)
+  await restagePiece(id, 'bisqued')
+  entries = await liveByStage(id)
+  expect(entries.map((e) => e.stage)).toEqual(['thrown', 'trimmed', 'bisqued'])
+  expect(entries[2].photoId).toBeTruthy()
+  expect(entries[0].photoId).toBeUndefined()
+})
+
+test('addGlazesToPiece attaches to the latest Glazed step and ignores empty or missing', async () => {
+  const id = await createPiece({ stage: 'glazed' })
+  await addGlazesToPiece(id, [])
+  expect(await db.glazeApps.count()).toBe(0)
+  await addGlazesToPiece(id, [{ glazeId: 'g1' }])
+  await addGlazesToPiece(id, [{ glazeId: 'g2' }])
+  const apps = (await db.glazeApps.toArray()).sort((a, b) => a.order - b.order)
+  expect(apps.map((a) => [a.glazeId, a.order])).toEqual([
+    ['g1', 0],
+    ['g2', 1],
+  ])
+  const other = await createPiece({ stage: 'bisqued' })
+  await addGlazesToPiece(other, [{ glazeId: 'g3' }])
+  expect(await db.glazeApps.count()).toBe(2)
+})
+
+test('setEntryDate sets, then clears, the date', async () => {
+  const id = await createPiece({})
+  const [entry] = await liveByStage(id)
+  await db.pieces.update(id, { updatedAt: '2026-01-01T00:00:00.000Z' })
+  await setEntryDate(entry.id, '2026-11-03')
+  expect((await db.entries.get(entry.id))?.date).toBe(
+    '2026-11-03T00:00:00.000Z',
+  )
+  expect(((await db.pieces.get(id))?.updatedAt as string) > '2026-01-01').toBe(
+    true,
+  )
+  await setEntryDate(entry.id, undefined)
+  expect('date' in ((await db.entries.get(entry.id)) as object)).toBe(false)
+})
+
+test('restagePiece Fired→Thrown→Fired→Thrown leaves no soft-deleted rows and one live step per stage', async () => {
+  const id = await createPiece({ stage: 'fired' })
+  for (const stage of ['thrown', 'fired', 'thrown'] as const) {
+    await restagePiece(id, stage)
+  }
+  const all = await db.entries.where('pieceId').equals(id).toArray()
+  expect(all.filter((e) => e.deletedAt)).toEqual([])
+  expect(all.map((e) => e.stage)).toEqual(['thrown'])
+  await restagePiece(id, 'fired')
+  const after = await liveByStage(id)
+  expect(after.map((e) => e.stage)).toEqual([
+    'thrown',
+    'trimmed',
+    'bisqued',
+    'glazed',
+    'fired',
+  ])
+})
+
+test('restagePiece soft-deletes a removed step that has a note', async () => {
+  const id = await createPiece({ stage: 'fired' })
+  const glazed = (await liveByStage(id)).find((e) => e.stage === 'glazed')
+  await db.entries.update(glazed?.id as string, { note: 'keep me' })
+  await restagePiece(id, 'thrown')
+  const row = await db.entries.get(glazed?.id as string)
+  expect(row?.deletedAt).toBeDefined()
 })

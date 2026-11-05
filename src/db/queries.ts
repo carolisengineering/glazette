@@ -1,6 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import { currentStage, latestEntry, STAGES } from './stage'
+import {
+  currentStage,
+  glazedStepWithGlazes,
+  latestEntry,
+  STAGES,
+} from './stage'
 import type {
   Clay,
   Glaze,
@@ -56,7 +61,7 @@ export function buildPieceViews(
 
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
-    const glazedEntry = latestEntry(own, 'glazed')
+    const glazedEntry = glazedStepWithGlazes(own, glazeApps)
     const layers = glazedEntry
       ? glazeApps
           .filter(
@@ -107,6 +112,7 @@ function isFadedFromAll(view: PieceView, now: Date): boolean {
   if (view.stage !== 'fired') return false
   const fired = latestEntry(view.entries, 'fired')
   if (!fired) return false
+  if (!fired.date) return true
   return (
     now.getTime() - new Date(fired.date).getTime() > FIRED_FADE_DAYS * DAY_MS
   )

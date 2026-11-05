@@ -1,5 +1,6 @@
 import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { SAVE_ERROR } from '../components/useToast'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
@@ -66,7 +67,7 @@ async function clickDone() {
   await userEvent.click(done)
 }
 
-test('opens the camera input on mount and offers Take photo and Choose from library', async () => {
+test('the camera does not open on arrival; Take photo opens it', async () => {
   renderRoute('/capture')
   expect(
     await screen.findByRole('button', { name: 'Take photo' }),
@@ -74,8 +75,11 @@ test('opens the camera input on mount and offers Take photo and Choose from libr
   expect(
     screen.getByRole('button', { name: 'Choose from library' }),
   ).toBeVisible()
+  expect(clickSpy).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Take photo' }))
   expect(clickSpy).toHaveBeenCalledTimes(1)
   const input = screen.getByTestId('capture-input')
+  expect(clickSpy.mock.contexts[0]).toBe(input)
   expect(input).toHaveAttribute('capture', 'environment')
   expect(input).toHaveAttribute('accept', 'image/*')
   expect(screen.getByTestId('library-input')).not.toHaveAttribute('capture')
@@ -495,4 +499,249 @@ test('Close on the stage strip lands on the shelf when the piece was picked afte
   act(() => router.history.back())
   await new Promise((r) => setTimeout(r, 50))
   expect(router.state.location.pathname).not.toBe('/capture')
+})
+
+const stageBtn = (name: string) =>
+  screen.getByRole('button', { name: new RegExp(`^${name}`) })
+
+test('picking Bisqued on the details sheet restages the saved piece; the line reads "Saved to your shelf as Bisqued"', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(screen.getByText('Stage')).toBeVisible()
+  expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
+  await userEvent.click(stageBtn('Bisqued'))
+  await screen.findByText('Saved to your shelf as Bisqued')
+  const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+  expect(live.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'thrown',
+    'trimmed',
+  ])
+  expect(live.find((e) => e.stage === 'bisqued')?.photoId).toBeTruthy()
+})
+
+test('a failed restage shows a toast and keeps the previous selection', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const spy = vi
+    .spyOn(ops, 'restagePiece')
+    .mockRejectedValueOnce(new Error('boom'))
+  await userEvent.click(stageBtn('Bisqued'))
+  spy.mockRestore()
+  await screen.findByText(SAVE_ERROR)
+  expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByText('Saved to your shelf as Thrown')).toBeVisible()
+})
+
+test('details sheet with a photo at Fired saves glazes on the filled Glazed step on Done', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(screen.queryByLabelText('Glaze 1')).toBeNull()
+  await userEvent.click(stageBtn('Fired'))
+  await screen.findByText('Saved to your shelf as Fired')
+  await userEvent.type(await screen.findByLabelText('Glaze 1'), 'Celadon')
+  await clickDone()
+  await waitFor(async () => expect(await db.glazeApps.count()).toBe(1))
+  const glazed = (await db.entries.toArray()).find((e) => e.stage === 'glazed')
+  expect(glazed?.photoId).toBeUndefined()
+  const apps = await db.glazeApps.toArray()
+  expect(apps[0].entryId).toBe(glazed?.id)
+  expect((await db.glazes.toArray()).map((g) => g.name)).toContain('Celadon')
+})
+
+async function openNewPieceNoPhoto() {
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  return router
+}
+
+test('details sheet without a photo saves nothing until Done, then writes the piece at the chosen stage', async () => {
+  const router = await openNewPieceNoPhoto()
+  expect(await screen.findByText('New piece')).toBeVisible()
+  expect(screen.getByText('No photo')).toBeVisible()
+  expect(screen.queryByText(/Saved to your shelf/)).toBeNull()
+  await userEvent.click(stageBtn('Glazed'))
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Tenmoku')
+  await userEvent.type(screen.getByPlaceholderText('Name it later'), 'Bowl')
+  expect(await db.pieces.count()).toBe(0)
+  await clickDone()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  const pieces = await db.pieces.toArray()
+  expect(pieces).toHaveLength(1)
+  expect(pieces[0].name).toBe('Bowl')
+  expect(pieces[0].clayId).toBeTruthy()
+  const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+  expect(live.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'glazed',
+    'thrown',
+    'trimmed',
+  ])
+  expect(live.every((e) => !e.photoId)).toBe(true)
+  expect(await db.glazeApps.count()).toBe(1)
+  expect(await db.photos.count()).toBe(0)
+})
+
+test('Close on the no-photo details sheet writes nothing and goes to the shelf', async () => {
+  const router = await openNewPieceNoPhoto()
+  await userEvent.type(
+    await screen.findByPlaceholderText('Name it later'),
+    'Bowl',
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  expect(await db.pieces.count()).toBe(0)
+  expect(await db.entries.count()).toBe(0)
+})
+
+test('No photo from a piece opens the stage strip for that piece without a photo', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/capture?pieceId=${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(await screen.findByText('No photo for this update')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Save to Trimmed' })).toBeVisible()
+  expect(await db.entries.count()).toBe(1)
+})
+
+test('No photo is hidden when capture was opened from Add photo', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/capture?pieceId=${id}&addPhoto=true`)
+  await screen.findByRole('button', { name: 'Take photo' })
+  expect(screen.queryByRole('button', { name: 'No photo' })).toBeNull()
+})
+
+test('No photo from + with pieces in progress shows the Update a piece / New piece choice', async () => {
+  await createPiece({ name: 'Mug' })
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(
+    await screen.findByRole('button', { name: 'Update a piece' }),
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'New piece' })).toBeVisible()
+  await userEvent.click(screen.getByRole('link', { name: 'Cancel' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+})
+
+test('No photo from + with nothing in progress goes straight to the new-piece sheet', async () => {
+  renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(await screen.findByPlaceholderText('Name it later')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Update a piece' })).toBeNull()
+})
+
+test('No photo is disabled until the pieces have loaded, then goes straight to New piece', async () => {
+  const spy = vi.spyOn(queries, 'usePiecesQuery').mockReturnValue(undefined)
+  try {
+    renderRoute('/capture')
+    expect(
+      await screen.findByRole('button', { name: 'No photo' }),
+    ).toBeDisabled()
+  } finally {
+    spy.mockRestore()
+  }
+  cleanup()
+  renderRoute('/capture')
+  const button = await screen.findByRole('button', { name: 'No photo' })
+  await waitFor(() => expect(button).toBeEnabled())
+  await userEvent.click(button)
+  expect(await screen.findByPlaceholderText('Name it later')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Update a piece' })).toBeNull()
+})
+
+test('end to end: + → No photo → New piece → Bisqued → Done leaves a Bisqued piece with Thrown and Trimmed slim rows', async () => {
+  await createPiece({ name: 'Mug' })
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'New piece' }),
+  )
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await clickDone()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  const pieces = (await db.pieces.toArray()).filter((p) => p.name !== 'Mug')
+  expect(pieces).toHaveLength(1)
+  const entries = (
+    await db.entries.where('pieceId').equals(pieces[0].id).toArray()
+  ).filter((e) => !e.deletedAt)
+  expect(entries.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'thrown',
+    'trimmed',
+  ])
+  expect(entries.every((e) => !e.photoId)).toBe(true)
+})
+
+test('the stage picker and Done are disabled while a restage is in flight, and the final state matches the selection', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const real = ops.restagePiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const spy = vi.spyOn(ops, 'restagePiece').mockImplementation(async (...a) => {
+    await gate
+    return real(...a)
+  })
+  try {
+    await userEvent.click(stageBtn('Fired'))
+    expect(stageBtn('Bisqued')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+    await userEvent.click(stageBtn('Bisqued'))
+    expect(spy).toHaveBeenCalledTimes(1)
+    release()
+    await screen.findByText('Saved to your shelf as Fired')
+    await waitFor(() => expect(stageBtn('Bisqued')).toBeEnabled())
+    const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+    expect(live.map((e) => e.stage).sort()).toEqual([
+      'bisqued',
+      'fired',
+      'glazed',
+      'thrown',
+      'trimmed',
+    ])
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+test('the stage picker is disabled while Done is saving, so glazes land on the shown stage', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(stageBtn('Glazed'))
+  await screen.findByText('Saved to your shelf as Glazed')
+  await userEvent.type(await screen.findByLabelText('Glaze 1'), 'Celadon')
+  const real = ops.addGlazesToPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const restage = vi.spyOn(ops, 'restagePiece')
+  const add = vi
+    .spyOn(ops, 'addGlazesToPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await clickDone()
+    await waitFor(() => expect(add).toHaveBeenCalled())
+    expect(stageBtn('Bisqued')).toBeDisabled()
+    await userEvent.click(stageBtn('Bisqued'))
+    expect(restage).not.toHaveBeenCalled()
+    release()
+    await waitFor(async () => expect(await db.glazeApps.count()).toBe(1))
+    const glazed = (await db.entries.toArray()).find(
+      (e) => e.stage === 'glazed' && !e.deletedAt,
+    )
+    expect((await db.glazeApps.toArray())[0].entryId).toBe(glazed?.id)
+  } finally {
+    add.mockRestore()
+    restage.mockRestore()
+  }
 })

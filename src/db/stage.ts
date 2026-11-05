@@ -36,11 +36,44 @@ export function latestEntry(
   return latest
 }
 
-/** Ascending rank of two entries: later stage first, then later date. Sort with (a, b) => compareEntries(b, a) for newest first. */
+/**
+ * The step a piece's glaze layers come from: the latest live Glazed step that
+ * has glaze applications. Glazed steps without any are skipped, so a bare
+ * undated Glazed step can't hide the layers on a tied one.
+ */
+export function glazedStepWithGlazes(
+  entries: StageEntry[],
+  glazeApps: { entryId: string }[],
+): StageEntry | undefined {
+  const withApps = new Set(glazeApps.map((a) => a.entryId))
+  return latestEntry(
+    entries.filter((e) => e.stage === 'glazed' && withApps.has(e.id)),
+  )
+}
+
+/** Ascending rank of two entries: later stage first, then later date; within a stage an undated entry ranks below a dated one. Sort with (a, b) => compareEntries(b, a) for newest first. */
 export function compareEntries(a: StageEntry, b: StageEntry): number {
   const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)
   if (byStage !== 0) return byStage
-  return a.date < b.date ? -1 : a.date > b.date ? 1 : 0
+  if (a.date === b.date) return 0
+  if (a.date === undefined) return -1
+  if (b.date === undefined) return 1
+  return a.date < b.date ? -1 : 1
+}
+
+/** Stages strictly after `from` and strictly before `to`, in order. `from` undefined starts before Thrown. */
+export function stagesBetween(from: Stage | undefined, to: Stage): Stage[] {
+  const start = from ? STAGES.indexOf(from) + 1 : 0
+  return STAGES.slice(start, STAGES.indexOf(to))
+}
+
+/** Stages before the current one (from live entries) that have no entry at all, deleted or not. */
+export function missingStages(entries: StageEntry[]): Stage[] {
+  const current = currentStage(entries)
+  if (!current) return []
+  return stagesBetween(undefined, current).filter(
+    (s) => !entries.some((e) => e.stage === s),
+  )
 }
 
 export function currentStage(entries: StageEntry[]): Stage | undefined {

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db, newId } from '../db/db'
 import {
@@ -110,7 +110,11 @@ test('the toggle swaps the hero between the fired and glazed photos', async () =
 
 test('renders when the latest entry has no photo', async () => {
   const id = await createPiece({ name: 'Bare' })
-  await addStageEntry({ pieceId: id, stage: 'trimmed' })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'trimmed',
+    date: '2026-10-09T12:00:00Z',
+  })
   renderRoute(`/piece/${id}`)
   expect(await screen.findByRole('heading', { name: 'Bare' })).toBeVisible()
   expect(screen.getByText(/^Trimmed ·/)).toBeVisible()
@@ -173,7 +177,9 @@ test('timeline lists entries newest first', async () => {
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Fired.*Cone 6 oxidation.*Oct 25/),
     expect.stringMatching(/^Glazed.*Oct 21/),
-    expect.stringMatching(/^Thrown/),
+    expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Trimmed/),
+    expect.stringMatching(/^Thrown.*Oct 8/),
   ])
 })
 
@@ -252,7 +258,7 @@ test('Advance names the next stage and links to capture; hidden when lost or fir
   expect(advance).toHaveAttribute('href', `/capture?pieceId=${id}`)
   expect(screen.getByRole('link', { name: 'Add photo' })).toHaveAttribute(
     'href',
-    `/capture?pieceId=${id}`,
+    `/capture?pieceId=${id}&addPhoto=true`,
   )
   await markLost(id, true)
   await waitFor(() =>
@@ -488,6 +494,8 @@ test('the timeline ranks by stage first, like the header: a same-day later Bisqu
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Glazed/),
     expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Trimmed/),
     expect.stringMatching(/^Thrown/),
   ])
 })
@@ -503,4 +511,155 @@ test('notes typed but not blurred are saved when the screen is left', async () =
   await waitFor(async () =>
     expect((await db.pieces.get(id))?.notes).toBe('Trim the foot'),
   )
+})
+
+/** A piece with a photo-less, undated Trimmed step between a Thrown and a Bisqued photo. */
+async function pieceWithBareTrim() {
+  const id = await createPiece({ name: 'Bare', date: '2026-10-20T12:00:00Z' })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'bisqued',
+    photo: photo('bisque'),
+    date: '2026-11-03T12:00:00Z',
+  })
+  return id
+}
+
+function trimmedRow() {
+  const row = screen.getByText('Trimmed').closest('li')
+  if (!row) throw new Error('no Trimmed row')
+  return row
+}
+
+test('a step with no photo is a slim row with Add date and no thumbnail', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  const row = trimmedRow()
+  expect(row.querySelector('img')).toBeNull()
+  expect(
+    within(row).getByRole('button', { name: 'Add Trimmed date' }),
+  ).toBeVisible()
+  expect(
+    within(row).getByRole('button', { name: 'Delete Trimmed entry' }),
+  ).toBeVisible()
+  const bisqued = screen.getByText('Bisqued', { selector: 'li span' })
+  expect(bisqued.closest('li')?.querySelector('img')).not.toBeNull()
+})
+
+test('Add date saves the chosen date and the row shows "Nov 3"', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '2026-11-03' },
+  })
+  await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+  expect(
+    await within(trimmedRow()).findByRole('button', {
+      name: 'Trimmed date, Nov 3',
+    }),
+  ).toBeVisible()
+  expect(screen.queryByLabelText('Trimmed date')).not.toBeInTheDocument()
+  const saved = (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
+  expect(saved?.date).toBeDefined()
+})
+
+test('an empty change event mid-edit does not clear the stored date', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  const trimmed = async () =>
+    (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '2026-11-03' },
+  })
+  await waitFor(async () => expect((await trimmed())?.date).toBeDefined())
+  const before = (await trimmed())?.date
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '' },
+  })
+  await new Promise((r) => setTimeout(r, 50))
+  expect((await trimmed())?.date).toBe(before)
+})
+
+test('Clear date returns the row to Add date', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '2026-11-03' },
+  })
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Clear date' }),
+  )
+  expect(
+    await within(trimmedRow()).findByRole('button', {
+      name: 'Add Trimmed date',
+    }),
+  ).toBeVisible()
+  const saved = (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
+  expect(saved?.date).toBeUndefined()
+})
+
+test('header shows only the stage when the current step has no date', async () => {
+  const id = await createPiece({ name: 'Bare' })
+  await addStageEntry({ pieceId: id, stage: 'trimmed' })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  expect(
+    screen.getByText('Trimmed', { selector: 'span.uppercase' }),
+  ).toHaveTextContent(/^Trimmed$/)
+})
+
+test('Add photo links to capture with addPhoto', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  expect(
+    await screen.findByRole('link', { name: 'Add photo' }),
+  ).toHaveAttribute('href', `/capture?pieceId=${id}&addPhoto=true`)
+})
+
+test('a failed date save shows the toast', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  const update = vi
+    .spyOn(db.entries, 'update')
+    .mockRejectedValue(new Error('full'))
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '2026-11-03' },
+  })
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+})
+
+test('the date editor writes only complete dates, not every keystroke', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  const update = vi.spyOn(db.entries, 'update')
+  const input = screen.getByLabelText('Trimmed date')
+  fireEvent.change(input, { target: { value: '0002-11-03' } })
+  fireEvent.change(input, { target: { value: '0020-11-03' } })
+  fireEvent.change(input, { target: { value: '0202-11-03' } })
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.change(input, { target: { value: '2026-11-03' } })
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+  update.mockRestore()
 })
