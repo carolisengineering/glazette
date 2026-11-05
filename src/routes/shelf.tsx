@@ -3,6 +3,7 @@ import { BottomBar } from '../components/BottomBar'
 import { KilnBanner } from '../components/KilnBanner'
 import { PieceCard } from '../components/PieceCard'
 import { StageChips } from '../components/StageChips'
+import { StudioName } from '../components/StudioName'
 import {
   chipCounts,
   filterShelf,
@@ -23,9 +24,7 @@ export function ShelfScreen() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col gap-5 px-5 pt-14 pb-32">
       <header className="flex flex-col gap-0.5">
-        <span className="text-[13px] font-semibold tracking-[0.12em] text-muted uppercase">
-          Studio
-        </span>
+        <StudioName />
         <h1 className="font-serif text-[32px] leading-none font-normal">
           My Shelf
         </h1>

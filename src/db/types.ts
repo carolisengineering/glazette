@@ -66,4 +66,5 @@ export interface Settings {
   defaultCone: string
   bisqueNote: string
   firedNote: string
+  studioName?: string // shown above My Shelf; "Studio" when unset
 }

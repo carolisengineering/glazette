@@ -9,6 +9,7 @@ import {
   removePhoto,
   restagePiece,
   setEntryDate,
+  setStudioName,
   softDelete,
   upsertClay,
 } from './ops'
@@ -413,4 +414,13 @@ test('restagePiece soft-deletes a removed step that has a note', async () => {
   await restagePiece(id, 'thrown')
   const row = await db.entries.get(glazed?.id as string)
   expect(row?.deletedAt).toBeDefined()
+})
+
+test('setStudioName stores the trimmed name; a blank name removes it', async () => {
+  await ensureDefaults()
+  await setStudioName('  Penguin Foot ')
+  expect((await db.settings.get('app'))?.studioName).toBe('Penguin Foot')
+  await setStudioName('   ')
+  const row = await db.settings.get('app')
+  expect(row && 'studioName' in row).toBe(false)
 })
