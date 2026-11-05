@@ -110,7 +110,11 @@ test('the toggle swaps the hero between the fired and glazed photos', async () =
 
 test('renders when the latest entry has no photo', async () => {
   const id = await createPiece({ name: 'Bare' })
-  await addStageEntry({ pieceId: id, stage: 'trimmed' })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'trimmed',
+    date: '2026-10-09T12:00:00Z',
+  })
   renderRoute(`/piece/${id}`)
   expect(await screen.findByRole('heading', { name: 'Bare' })).toBeVisible()
   expect(screen.getByText(/^Trimmed ·/)).toBeVisible()
@@ -173,7 +177,9 @@ test('timeline lists entries newest first', async () => {
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Fired.*Cone 6 oxidation.*Oct 25/),
     expect.stringMatching(/^Glazed.*Oct 21/),
-    expect.stringMatching(/^Thrown/),
+    expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Trimmed/),
+    expect.stringMatching(/^Thrown.*Oct 8/),
   ])
 })
 
@@ -488,6 +494,8 @@ test('the timeline ranks by stage first, like the header: a same-day later Bisqu
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Glazed/),
     expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Bisqued/),
+    expect.stringMatching(/^Trimmed/),
     expect.stringMatching(/^Thrown/),
   ])
 })

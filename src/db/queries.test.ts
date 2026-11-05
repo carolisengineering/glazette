@@ -129,7 +129,8 @@ describe('buildPieceViews', () => {
     await softDelete('entries', glazedId)
     const views = await load()
     expect(views.map((v) => v.piece.id)).toEqual([kept])
-    expect(views[0].stage).toBe('thrown')
+    // Deleting the Glazed step leaves the filled Trimmed and Bisqued steps.
+    expect(views[0].stage).toBe('bisqued')
     expect(views[0].glazeNames).toEqual([])
   })
 
