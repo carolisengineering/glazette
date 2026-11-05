@@ -1,11 +1,4 @@
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  RouterProvider,
-} from '@tanstack/react-router'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SAVE_ERROR } from '../components/useToast'
 import { db } from '../db/db'
@@ -18,7 +11,6 @@ import {
   UnsupportedImageError,
 } from '../photos/process'
 import { renderRoute } from '../test/renderRoute'
-import { NewPieceSheet } from './NewPieceSheet'
 import { useCaptureStore } from './store'
 
 vi.mock('../photos/process', async (importOriginal) => ({
@@ -75,7 +67,7 @@ async function clickDone() {
   await userEvent.click(done)
 }
 
-test('opens the camera input on mount and offers Take photo and Choose from library', async () => {
+test('the camera does not open on arrival; Take photo opens it', async () => {
   renderRoute('/capture')
   expect(
     await screen.findByRole('button', { name: 'Take photo' }),
@@ -83,8 +75,11 @@ test('opens the camera input on mount and offers Take photo and Choose from libr
   expect(
     screen.getByRole('button', { name: 'Choose from library' }),
   ).toBeVisible()
+  expect(clickSpy).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: 'Take photo' }))
   expect(clickSpy).toHaveBeenCalledTimes(1)
   const input = screen.getByTestId('capture-input')
+  expect(clickSpy.mock.contexts[0]).toBe(input)
   expect(input).toHaveAttribute('capture', 'environment')
   expect(input).toHaveAttribute('accept', 'image/*')
   expect(screen.getByTestId('library-input')).not.toHaveAttribute('capture')
@@ -557,23 +552,14 @@ test('details sheet with a photo at Fired saves glazes on the filled Glazed step
   expect((await db.glazes.toArray()).map((g) => g.name)).toContain('Celadon')
 })
 
-function renderNoPhotoSheet(onDone = vi.fn(), onClose = vi.fn()) {
-  const root = createRootRoute()
-  const sheet = createRoute({
-    getParentRoute: () => root,
-    path: '/',
-    component: () => <NewPieceSheet onDone={onDone} onClose={onClose} />,
-  })
-  const router = createRouter({
-    routeTree: root.addChildren([sheet]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
-  })
-  render(<RouterProvider router={router} />)
-  return { onDone, onClose }
+async function openNewPieceNoPhoto() {
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  return router
 }
 
 test('details sheet without a photo saves nothing until Done, then writes the piece at the chosen stage', async () => {
-  const { onDone } = renderNoPhotoSheet()
+  const router = await openNewPieceNoPhoto()
   expect(await screen.findByText('New piece')).toBeVisible()
   expect(screen.getByText('No photo')).toBeVisible()
   expect(screen.queryByText(/Saved to your shelf/)).toBeNull()
@@ -582,7 +568,7 @@ test('details sheet without a photo saves nothing until Done, then writes the pi
   await userEvent.type(screen.getByPlaceholderText('Name it later'), 'Bowl')
   expect(await db.pieces.count()).toBe(0)
   await clickDone()
-  await waitFor(() => expect(onDone).toHaveBeenCalled())
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   const pieces = await db.pieces.toArray()
   expect(pieces).toHaveLength(1)
   expect(pieces[0].name).toBe('Bowl')
@@ -599,14 +585,87 @@ test('details sheet without a photo saves nothing until Done, then writes the pi
   expect(await db.photos.count()).toBe(0)
 })
 
-test('Close on the no-photo details sheet writes nothing', async () => {
-  const { onClose, onDone } = renderNoPhotoSheet()
+test('Close on the no-photo details sheet writes nothing and goes to the shelf', async () => {
+  const router = await openNewPieceNoPhoto()
   await userEvent.type(await screen.findByLabelText('Name'), 'Bowl')
   await userEvent.click(screen.getByRole('button', { name: 'Close' }))
-  expect(onClose).toHaveBeenCalled()
-  expect(onDone).not.toHaveBeenCalled()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   expect(await db.pieces.count()).toBe(0)
   expect(await db.entries.count()).toBe(0)
+})
+
+test('No photo from a piece opens the stage strip for that piece without a photo', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/capture?pieceId=${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(await screen.findByText('No photo for this update')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Save to Trimmed' })).toBeVisible()
+  expect(await db.entries.count()).toBe(1)
+})
+
+test('No photo is hidden when capture was opened from Add photo', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/capture?pieceId=${id}&addPhoto=true`)
+  await screen.findByRole('button', { name: 'Take photo' })
+  expect(screen.queryByRole('button', { name: 'No photo' })).toBeNull()
+})
+
+test('No photo from + with pieces in progress shows the Update a piece / New piece choice', async () => {
+  await createPiece({ name: 'Mug' })
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(
+    await screen.findByRole('button', { name: 'Update a piece' }),
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'New piece' })).toBeVisible()
+  await userEvent.click(screen.getByRole('link', { name: 'Cancel' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+})
+
+test('No photo from + with nothing in progress goes straight to the new-piece sheet', async () => {
+  renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  expect(await screen.findByPlaceholderText('Name it later')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Update a piece' })).toBeNull()
+})
+
+test('No photo while pieces are still loading shows the choice', async () => {
+  const spy = vi.spyOn(queries, 'usePiecesQuery').mockReturnValue(undefined)
+  try {
+    renderRoute('/capture')
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'No photo' }),
+    )
+    expect(
+      await screen.findByRole('button', { name: 'Update a piece' }),
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'New piece' })).toBeVisible()
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+test('end to end: + → No photo → New piece → Bisqued → Done leaves a Bisqued piece with Thrown and Trimmed slim rows', async () => {
+  await createPiece({ name: 'Mug' })
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'New piece' }),
+  )
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await clickDone()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  const pieces = (await db.pieces.toArray()).filter((p) => p.name !== 'Mug')
+  expect(pieces).toHaveLength(1)
+  const entries = (
+    await db.entries.where('pieceId').equals(pieces[0].id).toArray()
+  ).filter((e) => !e.deletedAt)
+  expect(entries.map((e) => e.stage).sort()).toEqual([
+    'bisqued',
+    'thrown',
+    'trimmed',
+  ])
+  expect(entries.every((e) => !e.photoId)).toBe(true)
 })
 
 test('the stage picker and Done are disabled while a restage is in flight, and the final state matches the selection', async () => {

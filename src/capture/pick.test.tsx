@@ -71,7 +71,7 @@ test('pick sheet lists only in-progress pieces, newest first, and filters by sea
   await softDelete('pieces', deleted)
 
   const onPick = vi.fn()
-  render(<PickPieceSheet onPick={onPick} onNew={vi.fn()} />)
+  render(<PickPieceSheet onPick={onPick} onNew={vi.fn()} photo={processed} />)
 
   await screen.findByText('New Bowl')
   expect(listed()).toEqual(['New Bowl', 'Old Mug'])
@@ -160,4 +160,24 @@ test('Not here? creates a Thrown piece with the photo and opens the details shee
   )
   await screen.findByText('Saved to your shelf as Thrown')
   await waitFor(async () => expect(await db.pieces.count()).toBe(2))
+})
+
+test('the pick sheet without a photo has Close and "Which piece?", and Not here opens details without saving', async () => {
+  await seed('Mug', '2026-10-01T00:00:00.000Z')
+  const router = renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Update a piece' }),
+  )
+  expect(await screen.findByText('Which piece?')).toBeVisible()
+  expect(screen.queryByText('Which piece is this?')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retake' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Close' })).toBeVisible()
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Not here? Save as a new piece' }),
+  )
+  expect(await screen.findByPlaceholderText('Name it later')).toBeVisible()
+  expect(await db.pieces.count()).toBe(1)
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
 })
