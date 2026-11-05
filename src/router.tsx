@@ -30,10 +30,14 @@ const glazesRoute = createRoute({
 const captureRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/capture',
-  validateSearch: (search: Record<string, unknown>): { pieceId?: string } =>
-    typeof search.pieceId === 'string' && search.pieceId
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { pieceId?: string; addPhoto?: true } => ({
+    ...(typeof search.pieceId === 'string' && search.pieceId
       ? { pieceId: search.pieceId }
-      : {},
+      : {}),
+    ...(search.addPhoto === true ? { addPhoto: true as const } : {}),
+  }),
   component: CaptureScreen,
 })
 

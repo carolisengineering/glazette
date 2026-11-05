@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { shortDate } from '../db/dates'
-import { markLost, softDelete, updatePiece } from '../db/ops'
+import { markLost, setEntryDate, softDelete, updatePiece } from '../db/ops'
 import { type PieceDetail, usePiece } from '../db/queries'
 import { displayName, latestEntry, nextStage, STAGE_LABEL } from '../db/stage'
 import type { StageEntry } from '../db/types'
@@ -159,7 +159,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
           <div className="grid grid-cols-2 gap-3">
             <Link
               to="/capture"
-              search={{ pieceId: piece.id }}
+              search={{ pieceId: piece.id, addPhoto: true }}
               className={secondary}
             >
               Add photo
@@ -180,6 +180,9 @@ function PieceBoard({ view }: { view: PieceDetail }) {
             <Timeline
               entries={entries}
               onDelete={(entry) => setPending({ kind: 'entry', entry })}
+              onSetDate={(entry, date) =>
+                attempt(() => setEntryDate(entry.id, date))
+              }
             />
           </section>
         ) : null}
