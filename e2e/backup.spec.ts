@@ -39,7 +39,7 @@ test('save a backup downloads a zip; restoring it into a fresh context brings th
   await page2
     .locator('input[type="file"][accept*=".zip"]')
     .setInputFiles(zipPath)
-  await expect(page2.getByText(/^Restored \d+ items?$/)).toBeVisible()
+  await expect(page2.getByText(/^Restored \d+ pieces?$/)).toBeVisible()
   await page2.getByRole('button', { name: 'Close' }).click()
   await expect(page2.locator('article')).toHaveCount(1)
   await expect(page2.getByText('Backup Bowl')).toBeVisible()

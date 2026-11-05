@@ -25,7 +25,7 @@
   - Buttons: "Save a backup" and "Restore from a backup".
   - Save caption: "One file with every piece, glaze and photo. Keep it somewhere safe, like iCloud Drive."
   - "Last backup: {Mon D}" or "No backup yet".
-  - Toasts: "Restored {N} items" / "Restored 1 item" / "Already up to date" / "This isn't a Glazette backup".
+  - Toasts: "Restored {N} pieces" / "Restored 1 piece" (changed during build; N counts pieces) / "Already up to date" / "This isn't a Glazette backup".
   - Reload prompt: "New version available" with a "Reload" button.
   - Empty shelf: "Nothing here yet. Tap + to add a piece." (All) and "No pieces at this stage." (any other chip).
 - Text sizes follow the existing rule: nothing under 13px, inputs 16px, touch targets ≥ 44px.

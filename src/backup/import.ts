@@ -35,6 +35,8 @@ export interface ImportResult {
   added: number
   /** Rows replaced by a newer copy, or newly tombstoned. */
   updated: number
+  /** Pieces added, replaced or newly deleted: what the restore message counts. */
+  pieces: number
 }
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
@@ -153,7 +155,7 @@ function isBackup(json: unknown): json is BackupJson {
 }
 
 async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
-  const count: ImportResult = { added: 0, updated: 0 }
+  const count: ImportResult = { added: 0, updated: 0, pieces: 0 }
 
   const clays = await matchByName(db.clays, json.clays)
   await mergeKeepingLocal(db.clays, clays.rows, count)
@@ -333,10 +335,12 @@ async function mergePieces(
     const mine = local[i]
     if (!mine) {
       count.added++
+      count.pieces++
       return true
     }
     if (lastChanged(row) > lastChanged(mine)) {
       count.updated++
+      count.pieces++
       return true
     }
     return false

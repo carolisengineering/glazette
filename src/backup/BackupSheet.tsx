@@ -12,16 +12,9 @@ import { saveFile } from './saveFile'
 const secondary =
   'h-14 rounded-[28px] border border-border bg-surface text-[16px] font-semibold disabled:opacity-50'
 
-function restoredMessage({
-  added,
-  updated,
-}: {
-  added: number
-  updated: number
-}): string {
-  const n = added + updated
-  if (n === 0) return 'Already up to date'
-  return n === 1 ? 'Restored 1 item' : `Restored ${n} items`
+function restoredMessage({ pieces }: { pieces: number }): string {
+  if (pieces === 0) return 'Already up to date'
+  return pieces === 1 ? 'Restored 1 piece' : `Restored ${pieces} pieces`
 }
 
 /** Save everything to one file, or restore from one. */

@@ -134,7 +134,7 @@ test('import into an empty database restores every table and photo', async () =>
   const result = await importZip(zip)
 
   // 2 pieces + 3 steps + 1 layer + 1 glaze + 1 clay + 2 photos + settings
-  expect(result).toEqual({ added: 11, updated: 0 })
+  expect(result).toMatchObject({ added: 11, updated: 0 })
   const after = await snapshot()
   for (const key of Object.keys(before) as (keyof typeof before)[]) {
     expect(after[key]).toEqual(before[key])
@@ -149,7 +149,7 @@ test('importing the same zip twice adds nothing the second time', async () => {
   const zip = await exportZip()
   await clearAll()
   await importZip(zip)
-  expect(await importZip(zip)).toEqual({ added: 0, updated: 0 })
+  expect(await importZip(zip)).toMatchObject({ added: 0, updated: 0 })
 })
 
 test('restore on a fresh install brings back the studio name and default clay', async () => {
@@ -161,7 +161,7 @@ test('restore on a fresh install brings back the studio name and default clay', 
   const result = await importZip(zip)
 
   expect(await db.settings.get('app')).toEqual(SETTINGS)
-  expect(result).toEqual({ added: 1, updated: 1 }) // the clay; the settings
+  expect(result).toMatchObject({ added: 1, updated: 1 }) // the clay; the settings
 })
 
 test('a default clay the backup does not contain keeps the current one', async () => {
@@ -190,7 +190,7 @@ test('a photo already stored under another id is reused and steps are rewritten'
   expect((await db.entries.get('e1'))?.photoId).toBe('local-ph')
   expect(await db.photos.get('ph1')).toBeUndefined()
   expect(await db.photos.count()).toBe(1)
-  expect(result).toEqual({ added: 1, updated: 0 })
+  expect(result).toMatchObject({ added: 1, updated: 0 })
 })
 
 test('a reused photo that was deleted here comes back for a live incoming step', async () => {
@@ -206,7 +206,7 @@ test('a reused photo that was deleted here comes back for a live incoming step',
   const result = await importZip(zip)
 
   expect((await db.photos.get('local-ph'))?.deletedAt).toBeUndefined()
-  expect(result).toEqual({ added: 1, updated: 1 })
+  expect(result).toMatchObject({ added: 1, updated: 1 })
 })
 
 test('an incoming photo whose id is taken by a different photo gets a new id', async () => {
@@ -243,7 +243,7 @@ test('two photos with one hash in the zip become one row', async () => {
 
   expect(await db.photos.count()).toBe(1)
   expect((await db.entries.get('e2'))?.photoId).toBe('ph1')
-  expect(result).toEqual({ added: 3, updated: 0 })
+  expect(result).toMatchObject({ added: 3, updated: 0 })
 })
 
 test('a photo missing from the zip is skipped and the step keeps its photoId', async () => {
@@ -259,7 +259,7 @@ test('a photo missing from the zip is skipped and the step keeps its photoId', a
 
   expect(await db.photos.count()).toBe(0)
   expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
-  expect(result).toEqual({ added: 1, updated: 0 })
+  expect(result).toMatchObject({ added: 1, updated: 0 })
 })
 
 test('an undated step and a tombstoned piece round-trip unchanged', async () => {
@@ -314,7 +314,7 @@ test('a piece is replaced only by a newer last change', async () => {
   })
   expect((await db.pieces.get('new'))?.name).toBe('Here')
   expect((await db.pieces.get('same'))?.name).toBe('Here')
-  expect(result).toEqual({ added: 0, updated: 1 })
+  expect(result).toMatchObject({ added: 0, updated: 1 })
 })
 
 test('an incoming tombstone deletes an existing live step', async () => {
@@ -354,7 +354,7 @@ test('an incoming tombstone deletes an existing live step', async () => {
     name: 'Local',
     color: '#111111',
   })
-  expect(result).toEqual({ added: 0, updated: 1 })
+  expect(result).toMatchObject({ added: 0, updated: 1 })
 })
 
 test('a bad glaze color becomes the default color', async () => {
@@ -430,8 +430,8 @@ test('restore on a fresh install leaves one White stoneware that pieces and sett
   expect(live[0].id).toBe(localClayId)
   expect((await db.pieces.get('p1'))?.clayId).toBe(localClayId)
   expect((await db.settings.get('app'))?.defaultClayId).toBe(localClayId)
-  expect(result).toEqual({ added: 1, updated: 1 }) // the piece; the settings
-  expect(await importZip(zip)).toEqual({ added: 0, updated: 0 })
+  expect(result).toMatchObject({ added: 1, updated: 1 }) // the piece; the settings
+  expect(await importZip(zip)).toMatchObject({ added: 0, updated: 0 })
 })
 
 test('a glaze made on both devices becomes one glaze that the layers use', async () => {
@@ -480,7 +480,7 @@ test('glaze layers come in only with a step this import adds', async () => {
 
   expect(await db.glazeApps.get('old-layer')).toBeUndefined()
   expect(await db.glazeApps.get('new-layer')).toBeDefined()
-  expect(result).toEqual({ added: 2, updated: 0 }) // new step + its layer
+  expect(result).toMatchObject({ added: 2, updated: 0 }) // new step + its layer
 })
 
 test('the later lastBackupAt wins', async () => {
@@ -494,7 +494,7 @@ test('the later lastBackupAt wins', async () => {
       settings: { ...SETTINGS, lastBackupAt: '2026-11-01T00:00:00.000Z' },
     }),
   )
-  expect(await importZip(older)).toEqual({ added: 0, updated: 0 })
+  expect(await importZip(older)).toMatchObject({ added: 0, updated: 0 })
   expect(await db.settings.get('app')).toMatchObject({
     lastBackupAt: '2026-11-04T00:00:00.000Z',
   })
@@ -504,8 +504,8 @@ test('the later lastBackupAt wins', async () => {
       settings: { ...SETTINGS, lastBackupAt: '2026-11-05T00:00:00.000Z' },
     }),
   )
-  expect(await importZip(newer)).toEqual({ added: 0, updated: 1 })
-  expect(await importZip(newer)).toEqual({ added: 0, updated: 0 })
+  expect(await importZip(newer)).toMatchObject({ added: 0, updated: 1 })
+  expect(await importZip(newer)).toMatchObject({ added: 0, updated: 0 })
   expect(await db.settings.get('app')).toMatchObject({
     lastBackupAt: '2026-11-05T00:00:00.000Z',
   })
@@ -521,7 +521,7 @@ test('a backup cannot set persistRequested', async () => {
 test('an old local persistRequested flag does not count as a settings change', async () => {
   await db.clays.add({ id: 'c1', name: 'Buff' })
   await db.settings.add({ ...SETTINGS, persistRequested: true })
-  expect(await importZip(zipOf(backup({ settings: SETTINGS })))).toEqual({
+  expect(await importZip(zipOf(backup({ settings: SETTINGS })))).toMatchObject({
     added: 0,
     updated: 0,
   })
@@ -600,7 +600,7 @@ test('a piece deleted here stays deleted when the backup copy is live and not ne
   const result = await importZip(zip)
 
   expect((await db.pieces.get(id))?.deletedAt).toBeTruthy()
-  expect(result).toEqual({ added: 0, updated: 0 })
+  expect(result).toMatchObject({ added: 0, updated: 0 })
 })
 
 test('a piece deleted with the app in the backup deletes the live local copy', async () => {
@@ -612,7 +612,7 @@ test('a piece deleted with the app in the backup deletes the live local copy', a
   const result = await importZip(zip)
 
   expect((await db.pieces.get(id))?.deletedAt).toBe(deletedAt)
-  expect(result).toEqual({ added: 0, updated: 1 })
+  expect(result).toMatchObject({ added: 0, updated: 1 })
 })
 
 test('an incoming step tombstone releases its photo when no other live step uses it', async () => {
@@ -768,4 +768,29 @@ test.each([
     NotABackupError,
   )
   expect(await snapshot()).toEqual(before)
+})
+
+test('the result counts pieces added, replaced and newly deleted, not other rows', async () => {
+  await db.pieces.bulkAdd([
+    { id: 'old', createdAt: 'a', updatedAt: '2026-11-02' },
+    { id: 'same', createdAt: 'a', updatedAt: '2026-11-03' },
+  ])
+  const zip = zipOf(
+    backup({
+      pieces: [
+        { id: 'old', createdAt: 'a', updatedAt: '2026-11-03' },
+        { id: 'same', createdAt: 'a', updatedAt: '2026-11-03' },
+        { id: 'new', createdAt: 'a', updatedAt: '2026-11-03' },
+      ],
+      entries: [
+        { id: 'e1', pieceId: 'new', stage: 'thrown' },
+        { id: 'e2', pieceId: 'new', stage: 'trimmed' },
+      ],
+      clays: [{ id: 'c1', name: 'Buff' }],
+    }),
+  )
+  const result = await importZip(zip)
+  expect(result.pieces).toBe(2)
+  expect(result.added).toBe(4)
+  expect((await importZip(zip)).pieces).toBe(0)
 })

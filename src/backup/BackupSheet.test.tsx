@@ -139,24 +139,24 @@ const pick = async (user: ReturnType<typeof userEvent.setup>) => {
   )
 }
 
-test('Restore shows "Restored 3 items"', async () => {
-  vi.mocked(importZip).mockResolvedValue({ added: 2, updated: 1 })
+test('Restore shows "Restored 3 pieces"', async () => {
+  vi.mocked(importZip).mockResolvedValue({ added: 9, updated: 1, pieces: 3 })
   const user = userEvent.setup()
   render(<BackupSheet onClose={() => {}} />)
   await pick(user)
-  expect(await screen.findByText('Restored 3 items')).toBeVisible()
+  expect(await screen.findByText('Restored 3 pieces')).toBeVisible()
 })
 
-test('Restore says "Restored 1 item" for one', async () => {
-  vi.mocked(importZip).mockResolvedValue({ added: 1, updated: 0 })
+test('Restore says "Restored 1 piece" for one', async () => {
+  vi.mocked(importZip).mockResolvedValue({ added: 5, updated: 0, pieces: 1 })
   const user = userEvent.setup()
   render(<BackupSheet onClose={() => {}} />)
   await pick(user)
-  expect(await screen.findByText('Restored 1 item')).toBeVisible()
+  expect(await screen.findByText('Restored 1 piece')).toBeVisible()
 })
 
 test('Restore with nothing new shows "Already up to date"', async () => {
-  vi.mocked(importZip).mockResolvedValue({ added: 0, updated: 0 })
+  vi.mocked(importZip).mockResolvedValue({ added: 4, updated: 0, pieces: 0 })
   const user = userEvent.setup()
   render(<BackupSheet onClose={() => {}} />)
   await pick(user)
@@ -207,7 +207,7 @@ test('both buttons are disabled while an action runs', async () => {
 
 test('a successful restore clears a kept backup file', async () => {
   vi.mocked(saveFile).mockResolvedValue('blocked')
-  vi.mocked(importZip).mockResolvedValue({ added: 1, updated: 0 })
+  vi.mocked(importZip).mockResolvedValue({ added: 5, updated: 0, pieces: 1 })
   const user = userEvent.setup()
   render(<BackupSheet onClose={() => {}} />)
   await user.click(screen.getByRole('button', { name: 'Save a backup' }))
@@ -215,6 +215,6 @@ test('a successful restore clears a kept backup file', async () => {
     await screen.findByRole('button', { name: 'Save backup file' }),
   ).toBeVisible()
   await pick(user)
-  await screen.findByText('Restored 1 item')
+  await screen.findByText('Restored 1 piece')
   expect(screen.getByRole('button', { name: 'Save a backup' })).toBeVisible()
 })
