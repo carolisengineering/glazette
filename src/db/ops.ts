@@ -40,6 +40,11 @@ export async function setStudioName(name: string): Promise<void> {
   await db.settings.update('app', { studioName: trimmed || undefined })
 }
 
+/** Records when a backup was last saved (an ISO time). */
+export async function setLastBackupAt(iso: string): Promise<void> {
+  await db.settings.update('app', { lastBackupAt: iso })
+}
+
 export function defaultNoteFor(stage: Stage, settings: Settings): string {
   if (stage === 'bisqued') return settings.bisqueNote
   if (stage === 'fired') return settings.firedNote
@@ -296,7 +301,12 @@ export async function updatePiece(
   id: string,
   patch: Partial<Pick<Piece, 'name' | 'form' | 'clayId' | 'notes'>>,
 ): Promise<void> {
-  await db.pieces.update(id, { ...patch, updatedAt: nowIso() })
+  // The notes flush on unmount can run after a delete; don't touch such a piece.
+  await db.transaction('rw', db.pieces, async () => {
+    const piece = await db.pieces.get(id)
+    if (!piece || piece.deletedAt) return
+    await db.pieces.update(id, { ...patch, updatedAt: nowIso() })
+  })
 }
 
 export async function markLost(id: string, lost: boolean): Promise<void> {

@@ -248,3 +248,37 @@ describe('studio name', () => {
     }
   })
 })
+
+test('empty shelf says to tap + to add a piece', async () => {
+  renderRoute('/')
+  expect(
+    await screen.findByText('Nothing here yet. Tap + to add a piece.'),
+  ).toBeVisible()
+})
+
+test('a stage chip with no pieces says so', async () => {
+  const a = await createPiece({ name: 'Round' })
+  await addStageEntry({ pieceId: a, stage: 'trimmed' })
+  renderRoute('/')
+  await screen.findByText('Round')
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: /^Thrown\s*0$/ }))
+  expect(screen.getByText('No pieces at this stage.')).toBeVisible()
+  expect(
+    screen.queryByText('Nothing here yet. Tap + to add a piece.'),
+  ).not.toBeInTheDocument()
+})
+
+test('empty shelf says to add a piece; hidden pieces get a different message', async () => {
+  renderRoute('/')
+  expect(
+    await screen.findByText('Nothing here yet. Tap + to add a piece.'),
+  ).toBeVisible()
+  const id = await createPiece({ name: 'A' })
+  await markLost(id, true)
+  expect(
+    await screen.findByText(
+      'Nothing in progress. Fired and lost pieces are under their chips.',
+    ),
+  ).toBeVisible()
+})

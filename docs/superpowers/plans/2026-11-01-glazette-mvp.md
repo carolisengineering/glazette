@@ -27,7 +27,7 @@ Task 13's Playwright step runs only the specs that exist at that point; Task 12 
 
 - Stages are exactly `'thrown' | 'trimmed' | 'bisqued' | 'glazed' | 'fired'`, in that order. A piece never moves backward; its current stage is derived from its latest `StageEntry`, never stored.
 - Nothing is required: every form field is optional and every screen has a working default.
-- Deletes are soft (`deletedAt` ISO string). Deleted rows never appear in the UI and are stripped on export.
+- Deletes are soft (`deletedAt` ISO string). Deleted rows never appear in the UI and are kept as tombstones on export (Carol, 2026-11-02).
 - Photos: JPEG at quality 0.8, max 2000px long edge, plus a ~400px thumbnail, content-addressed by SHA-256 hash.
 - Design tokens (section 7): Background `#EEF1F4`, Surface `#FFFFFF`, Ink `#16202A`, Muted `#5B6672`, Border `#D5DBE1`, Accent `#175474`, Accent tint `#E3ECF1`, Camera `#0E151C`. Fonts: Instrument Serif for names and screen titles, Inter elsewhere. Card radius 20–24px, pill chips, touch targets ≥ 44px.
 - Defaults (section 2.1): clay "White stoneware"; Bisqued note "Cone 6"; glaze cone "6"; Fired note "Cone 6 oxidation". Pre-filled, never locked.

@@ -7,7 +7,7 @@ export function BottomBar() {
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-5 bottom-7 mx-auto flex h-[68px] max-w-[430px] items-center justify-around rounded-[34px] bg-ink/95 px-2.5"
+      className="fixed inset-x-5 bottom-[max(1.75rem,env(safe-area-inset-bottom))] mx-auto flex h-[68px] max-w-[430px] items-center justify-around rounded-[34px] bg-ink/95 px-2.5"
     >
       <Link
         to="/"

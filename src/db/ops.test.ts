@@ -11,6 +11,7 @@ import {
   setEntryDate,
   setStudioName,
   softDelete,
+  updatePiece,
   upsertClay,
 } from './ops'
 import { currentStage, STAGES } from './stage'
@@ -423,4 +424,18 @@ test('setStudioName stores the trimmed name; a blank name removes it', async () 
   await setStudioName('   ')
   const row = await db.settings.get('app')
   expect(row && 'studioName' in row).toBe(false)
+})
+
+test('updatePiece on a soft-deleted piece leaves it untouched', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await softDelete('pieces', id)
+  const before = await db.pieces.get(id)
+  await new Promise((r) => setTimeout(r, 5))
+  await updatePiece(id, { notes: 'late flush' })
+  expect(await db.pieces.get(id)).toEqual(before)
+})
+
+test('updatePiece on a missing piece resolves and creates nothing', async () => {
+  await updatePiece('nope', { notes: 'x' })
+  expect(await db.pieces.get('nope')).toBeUndefined()
 })
