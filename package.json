@@ -11,6 +11,7 @@
     "test": "vitest run",
     "lint": "biome check",
     "typecheck": "tsc -b",
+    "icons": "node scripts/make-icons.mjs",
     "deploy": "pnpm build && wrangler deploy"
   },
   "dependencies": {
