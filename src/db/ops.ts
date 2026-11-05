@@ -40,6 +40,11 @@ export async function setStudioName(name: string): Promise<void> {
   await db.settings.update('app', { studioName: trimmed || undefined })
 }
 
+/** Records when a backup was last saved (an ISO time). */
+export async function setLastBackupAt(iso: string): Promise<void> {
+  await db.settings.update('app', { lastBackupAt: iso })
+}
+
 export function defaultNoteFor(stage: Stage, settings: Settings): string {
   if (stage === 'bisqued') return settings.bisqueNote
   if (stage === 'fired') return settings.firedNote
