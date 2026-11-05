@@ -68,5 +68,5 @@ export interface Settings {
   firedNote: string
   studioName?: string // shown above My Shelf; "Studio" when unset
   lastBackupAt?: string // ISO time of the last saved backup
-  persistRequested?: boolean // persistent storage asked for once per install
+  persistRequested?: boolean // unused; kept so old rows and backups still type-check
 }

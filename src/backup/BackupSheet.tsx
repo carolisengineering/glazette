@@ -6,7 +6,7 @@ import { shortDate } from '../db/dates'
 import { db } from '../db/db'
 import { setLastBackupAt } from '../db/ops'
 import { backupFileName, exportZip } from './export'
-import { importZip, NotABackupError } from './import'
+import { importZip, NewerBackupError, NotABackupError } from './import'
 import { saveFile } from './saveFile'
 
 const secondary =
@@ -52,7 +52,9 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
       showToast(
         err instanceof NotABackupError
           ? "This isn't a Glazette backup"
-          : SAVE_ERROR,
+          : err instanceof NewerBackupError
+            ? 'This backup is from a newer version of Glazette'
+            : SAVE_ERROR,
       )
     } finally {
       setBusy(false)
@@ -63,6 +65,7 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     const result = await saveFile(blob, name)
     if (result === 'blocked') {
       setReady({ blob, name })
+      showToast('Your backup is ready. Tap Save backup file to save it.')
       return
     }
     if (result === 'canceled') return

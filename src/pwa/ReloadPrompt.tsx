@@ -1,18 +1,28 @@
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { useEffect, useRef } from 'react'
 
 /** Stays on screen until the user taps Reload, since a waiting update shouldn't be missed. */
 export function ReloadPrompt() {
+  const registration = useRef<ServiceWorkerRegistration | undefined>(undefined)
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegisteredSW(_url, registration) {
-      // Look for a new version whenever the app comes back to the foreground.
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') void registration?.update()
-      })
+    onRegisteredSW(_url, r) {
+      registration.current = r
     },
   })
+
+  // Look for a new version whenever the app comes back to the foreground.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== 'visible') return
+      // Offline, the check fails; that's fine, the next one will work.
+      registration.current?.update()?.catch(() => {})
+    }
+    document.addEventListener('visibilitychange', check)
+    return () => document.removeEventListener('visibilitychange', check)
+  }, [])
 
   if (!needRefresh) return null
 

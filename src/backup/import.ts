@@ -2,6 +2,7 @@ import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
 import { db, newId } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import { STAGES } from '../db/stage'
 import type { Photo, Settings } from '../db/types'
 import type { ReadBytes } from './export'
 import {
@@ -18,6 +19,14 @@ export class NotABackupError extends Error {
   constructor() {
     super('This is not a Glazette backup')
     this.name = 'NotABackupError'
+  }
+}
+
+/** The backup was made by a newer version of the app than this one. */
+export class NewerBackupError extends Error {
+  constructor() {
+    super('This backup is from a newer version of Glazette')
+    this.name = 'NewerBackupError'
   }
 }
 
@@ -79,6 +88,9 @@ function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
     throw new NotABackupError()
   }
   if (!isBackup(json)) throw new NotABackupError()
+  if (json.dbVersion !== undefined && json.dbVersion > db.verno) {
+    throw new NewerBackupError()
+  }
   return { json, files }
 }
 
@@ -92,14 +104,25 @@ const isStringOrAbsent = (v: unknown) =>
  * Rows must be objects with a string id and the other listed string keys, and
  * `deletedAt` must be a string or absent.
  */
-const areRows = (v: unknown, ...stringKeys: string[]) =>
+const areRows = (
+  v: unknown,
+  stringKeys: string[] = [],
+  extra: (row: Record<string, unknown>) => boolean = () => true,
+) =>
   Array.isArray(v) &&
   v.every(
     (row) =>
       isObject(row) &&
       ['id', ...stringKeys].every((k) => typeof row[k] === 'string') &&
-      isStringOrAbsent(row.deletedAt),
+      isStringOrAbsent(row.deletedAt) &&
+      extra(row),
   )
+
+const isEntry = (row: Record<string, unknown>) =>
+  STAGES.includes(row.stage as never) &&
+  ['photoId', 'date', 'note'].every((k) => isStringOrAbsent(row[k]))
+
+const isLayer = (row: Record<string, unknown>) => typeof row.order === 'number'
 
 function areSettings(v: unknown): boolean {
   if (v == null) return true
@@ -118,12 +141,13 @@ function isBackup(json: unknown): json is BackupJson {
   return (
     isObject(json) &&
     json.version === BACKUP_VERSION &&
-    areRows(json.pieces, 'updatedAt') &&
-    areRows(json.entries) &&
-    areRows(json.glazeApps) &&
-    areRows(json.glazes, 'name') &&
-    areRows(json.clays, 'name') &&
-    areRows(json.photos, 'hash') &&
+    (json.dbVersion === undefined || typeof json.dbVersion === 'number') &&
+    areRows(json.pieces, ['updatedAt', 'createdAt']) &&
+    areRows(json.entries, ['pieceId'], isEntry) &&
+    areRows(json.glazeApps, ['entryId', 'pieceId', 'glazeId'], isLayer) &&
+    areRows(json.glazes, ['name']) &&
+    areRows(json.clays, ['name']) &&
+    areRows(json.photos, ['hash']) &&
     areSettings(json.settings)
   )
 }
@@ -156,8 +180,11 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
     const photoId = e.photoId && photos.idMap.get(e.photoId)
     return photoId ? { ...e, photoId } : e
   })
+  const releases = await photosOfTombstonedSteps(entries)
+  for (const [id, deletedAt] of photos.tombstones) releases.set(id, deletedAt)
   const addedEntries = await mergeKeepingLocal(db.entries, entries, count)
   await reviveReusedPhotos(addedEntries, photos.matched, count)
+  await releaseUnusedPhotos(releases)
 
   // Layers belong to their step: they come in only with a step added here,
   // so layers the app removed from an existing step never come back.
@@ -174,6 +201,46 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
   )
   await mergeSettings(json.settings, clays.idMap, count)
   return count
+}
+
+/**
+ * Photos of local live steps that an incoming tombstone is about to delete,
+ * with the tombstone's date. Read before the steps are written.
+ */
+async function photosOfTombstonedSteps(
+  incoming: BackupJson['entries'],
+): Promise<Map<string, string>> {
+  const rows = uniqueById(incoming)
+  const local = await db.entries.bulkGet(rows.map((r) => r.id))
+  const photos = new Map<string, string>()
+  rows.forEach((row, i) => {
+    const mine = local[i]
+    if (row.deletedAt && mine && !mine.deletedAt && mine.photoId) {
+      photos.set(mine.photoId, row.deletedAt)
+    }
+  })
+  return photos
+}
+
+/**
+ * As removePhoto does in the app: a photo is deleted only when no live step
+ * shows it, because identical photos share one row. Runs after the steps are
+ * written, so it sees the merged state.
+ */
+async function releaseUnusedPhotos(candidates: Map<string, string>) {
+  if (candidates.size === 0) return
+  const used = new Set<string>()
+  await db.entries
+    .filter((e) => !e.deletedAt && e.photoId !== undefined)
+    .each((e) => used.add(e.photoId as string))
+  const ids = [...candidates.keys()]
+  const photos = await db.photos.bulkGet(ids)
+  const changes = ids.flatMap((id, i) =>
+    photos[i] && !photos[i].deletedAt && !used.has(id)
+      ? [{ key: id, changes: { deletedAt: candidates.get(id) } }]
+      : [],
+  )
+  if (changes.length > 0) await db.photos.bulkUpdate(changes)
 }
 
 const uniqueById = <T extends { id: string }>(rows: T[]): T[] => [
@@ -294,7 +361,9 @@ async function mergePhotos(
 ) {
   const idMap = new Map<string, string>()
   const matched = new Set<string>()
-  if (incoming.length === 0) return { idMap, matched }
+  // Local photo id -> date of an incoming tombstone for the same hash.
+  const tombstones = new Map<string, string>()
+  if (incoming.length === 0) return { idMap, matched, tombstones }
 
   const localByHash = new Map<string, Photo>()
   const sameHash = await db.photos
@@ -320,6 +389,9 @@ async function mergePhotos(
       // Only photos stored before this import; a duplicate hash in the zip
       // just maps to the copy added a moment ago.
       if (!writes.includes(local)) matched.add(local.id)
+      if (meta.deletedAt && !local.deletedAt) {
+        tombstones.set(local.id, meta.deletedAt)
+      }
       continue
     }
     const full = files[photoPath(meta.hash)]
@@ -341,7 +413,7 @@ async function mergePhotos(
   }
   count.added += writes.length
   if (writes.length > 0) await db.photos.bulkPut(writes)
-  return { idMap, matched }
+  return { idMap, matched, tombstones }
 }
 
 /**
@@ -358,19 +430,24 @@ async function reviveReusedPhotos(
       .filter((e) => !e.deletedAt && e.photoId && matched.has(e.photoId))
       .map((e) => e.photoId as string),
   )
-  for (const photo of await db.photos.bulkGet([...ids])) {
-    if (photo?.deletedAt) {
-      await db.photos.update(photo.id, { deletedAt: undefined })
-      count.updated++
-    }
-  }
+  const deleted = (await db.photos.bulkGet([...ids])).filter(
+    (p) => p?.deletedAt,
+  )
+  if (deleted.length === 0) return
+  await db.photos.bulkUpdate(
+    deleted.map((p) => ({
+      key: (p as Photo).id,
+      changes: { deletedAt: undefined },
+    })),
+  )
+  count.updated += deleted.length
 }
 
 /**
  * The backup's settings win, with three exceptions. A default clay that names
  * no live clay after the import keeps the current default. The later
- * lastBackupAt is kept. persistRequested belongs to this install and never
- * comes from a backup.
+ * lastBackupAt is kept. The retired persistRequested flag is never taken from
+ * a backup.
  */
 async function mergeSettings(
   incoming: Settings | null | undefined,
@@ -379,7 +456,8 @@ async function mergeSettings(
 ) {
   if (!incoming) return
   const current = await db.settings.get('app')
-  const next: Settings = { ...incoming, id: 'app' }
+  const { persistRequested: _ignored, ...rest } = incoming
+  const next: Settings = { ...rest, id: 'app' }
 
   if (next.defaultClayId) {
     next.defaultClayId = clayIdMap.get(next.defaultClayId) ?? next.defaultClayId
@@ -399,11 +477,10 @@ async function mergeSettings(
   if (latest) next.lastBackupAt = latest
   else delete next.lastBackupAt
 
-  if (current?.persistRequested !== undefined) {
-    next.persistRequested = current.persistRequested
-  } else delete next.persistRequested
-
-  if (current && sameFields(current, next)) return
+  if (current) {
+    const { persistRequested: _old, ...same } = current
+    if (sameFields(same, next)) return
+  }
   if (current) count.updated++
   else count.added++
   await db.settings.put(next)

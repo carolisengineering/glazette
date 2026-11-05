@@ -5,7 +5,7 @@ import { ensureDefaults } from '../db/ops'
 import { renderRoute } from '../test/renderRoute'
 import { BackupSheet } from './BackupSheet'
 import { exportZip } from './export'
-import { importZip, NotABackupError } from './import'
+import { importZip, NewerBackupError, NotABackupError } from './import'
 import { saveFile } from './saveFile'
 
 vi.mock('./export', async (orig) => ({
@@ -72,6 +72,9 @@ test('a blocked share offers Save backup file, which shares the same zip', async
   const again = await screen.findByRole('button', { name: 'Save backup file' })
   expect(await lastBackup()).toBeUndefined()
   expect(screen.queryByText(/Couldn't save/)).not.toBeInTheDocument()
+  expect(
+    screen.getByText('Your backup is ready. Tap Save backup file to save it.'),
+  ).toBeVisible()
 
   vi.mocked(saveFile).mockResolvedValueOnce('shared')
   await user.click(again)
@@ -166,6 +169,16 @@ test('Restore of a non-backup shows "This isn\'t a Glazette backup"', async () =
   render(<BackupSheet onClose={() => {}} />)
   await pick(user)
   expect(await screen.findByText("This isn't a Glazette backup")).toBeVisible()
+})
+
+test('Restore of a newer backup says it is from a newer version', async () => {
+  vi.mocked(importZip).mockRejectedValue(new NewerBackupError())
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await pick(user)
+  expect(
+    await screen.findByText('This backup is from a newer version of Glazette'),
+  ).toBeVisible()
 })
 
 test('Restore failing otherwise shows the save error', async () => {

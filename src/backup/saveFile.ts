@@ -1,13 +1,16 @@
 /**
- * Hands the backup to the user. Where files can be shared (iPhone), this opens
- * the share sheet, which has "Save to Files". Elsewhere it downloads the file.
+ * Hands the backup to the user. On touch devices that can share files (iPhone),
+ * this opens the share sheet, which has "Save to Files". Desktop browsers can
+ * share files too, but their share sheet is a poor fit for a backup, so
+ * anywhere without a coarse pointer the file is downloaded.
  */
 export async function saveFile(
   blob: Blob,
   name: string,
 ): Promise<'shared' | 'downloaded' | 'canceled' | 'blocked'> {
   const file = new File([blob], name, { type: 'application/zip' })
-  if (navigator.canShare?.({ files: [file] })) {
+  const touch = window.matchMedia?.('(pointer: coarse)').matches
+  if (touch && navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file] })
       return 'shared'

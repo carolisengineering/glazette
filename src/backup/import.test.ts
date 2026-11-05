@@ -8,7 +8,11 @@ import type { Photo, Piece, Settings } from '../db/types'
 import { lenientBytes } from '../test/bytes'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
-import { importZip as importStrict, NotABackupError } from './import'
+import {
+  importZip as importStrict,
+  NewerBackupError,
+  NotABackupError,
+} from './import'
 
 const exportZip = () => exportStrict(new Date(), lenientBytes)
 const importZip = (file: Blob) => importStrict(file, lenientBytes)
@@ -479,26 +483,20 @@ test('glaze layers come in only with a step this import adds', async () => {
   expect(result).toEqual({ added: 2, updated: 0 }) // new step + its layer
 })
 
-test('the later lastBackupAt wins and persistRequested stays local', async () => {
+test('the later lastBackupAt wins', async () => {
   await db.clays.add({ id: 'c1', name: 'Buff' })
   await db.settings.add({
     ...SETTINGS,
     lastBackupAt: '2026-11-04T00:00:00.000Z',
-    persistRequested: true,
   })
   const older = zipOf(
     backup({
-      settings: {
-        ...SETTINGS,
-        lastBackupAt: '2026-11-01T00:00:00.000Z',
-        persistRequested: false,
-      },
+      settings: { ...SETTINGS, lastBackupAt: '2026-11-01T00:00:00.000Z' },
     }),
   )
   expect(await importZip(older)).toEqual({ added: 0, updated: 0 })
   expect(await db.settings.get('app')).toMatchObject({
     lastBackupAt: '2026-11-04T00:00:00.000Z',
-    persistRequested: true,
   })
 
   const newer = zipOf(
@@ -510,15 +508,23 @@ test('the later lastBackupAt wins and persistRequested stays local', async () =>
   expect(await importZip(newer)).toEqual({ added: 0, updated: 0 })
   expect(await db.settings.get('app')).toMatchObject({
     lastBackupAt: '2026-11-05T00:00:00.000Z',
-    persistRequested: true,
   })
 })
 
-test('a backup never brings persistRequested to a device without it', async () => {
+test('a backup cannot set persistRequested', async () => {
   await importZip(
     zipOf(backup({ settings: { ...SETTINGS, persistRequested: true } })),
   )
   expect(await db.settings.get('app')).not.toHaveProperty('persistRequested')
+})
+
+test('an old local persistRequested flag does not count as a settings change', async () => {
+  await db.clays.add({ id: 'c1', name: 'Buff' })
+  await db.settings.add({ ...SETTINGS, persistRequested: true })
+  expect(await importZip(zipOf(backup({ settings: SETTINGS })))).toEqual({
+    added: 0,
+    updated: 0,
+  })
 })
 
 test('a tombstoned default clay keeps the current one', async () => {
@@ -607,4 +613,159 @@ test('a piece deleted with the app in the backup deletes the live local copy', a
 
   expect((await db.pieces.get(id))?.deletedAt).toBe(deletedAt)
   expect(result).toEqual({ added: 0, updated: 1 })
+})
+
+test('an incoming step tombstone releases its photo when no other live step uses it', async () => {
+  await db.photos.add(photoRow('ph1', 'h1'))
+  await db.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'ph1',
+  })
+  const zip = zipOf(
+    backup({
+      entries: [
+        {
+          id: 'e1',
+          pieceId: 'p1',
+          stage: 'thrown',
+          photoId: 'ph1',
+          deletedAt: '2026-11-04T09:00:00.000Z',
+        },
+      ],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    ['h1'],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('ph1'))?.deletedAt).toBe(
+    '2026-11-04T09:00:00.000Z',
+  )
+})
+
+test('an incoming step tombstone keeps a photo another live step still uses', async () => {
+  await db.photos.add(photoRow('ph1', 'h1'))
+  await db.entries.bulkAdd([
+    { id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' },
+    { id: 'e2', pieceId: 'p1', stage: 'trimmed', photoId: 'ph1' },
+  ])
+  const zip = zipOf(
+    backup({
+      entries: [
+        {
+          id: 'e1',
+          pieceId: 'p1',
+          stage: 'thrown',
+          photoId: 'ph1',
+          deletedAt: 'z',
+        },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.entries.get('e1'))?.deletedAt).toBe('z')
+  expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+})
+
+test('an incoming photo tombstone applies to a local photo with the same hash that no live step uses', async () => {
+  await db.photos.add(photoRow('local-ph', 'h1'))
+  const zip = zipOf(
+    backup({
+      photos: [
+        { ...photoMeta('ph1', 'h1'), deletedAt: '2026-11-04T09:00:00.000Z' },
+      ],
+    }),
+    ['h1'],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('local-ph'))?.deletedAt).toBe(
+    '2026-11-04T09:00:00.000Z',
+  )
+})
+
+test('an incoming photo tombstone does not delete a local photo a live step uses', async () => {
+  await db.photos.add(photoRow('local-ph', 'h1'))
+  await db.entries.add({
+    id: 'e9',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'local-ph',
+  })
+  const zip = zipOf(
+    backup({
+      photos: [{ ...photoMeta('ph1', 'h1'), deletedAt: 'z' }],
+    }),
+    ['h1'],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('local-ph'))?.deletedAt).toBeUndefined()
+})
+
+test('a backup from a newer database version is refused and writes nothing', async () => {
+  await ensureDefaults()
+  const before = await snapshot()
+  await expect(
+    importZip(zipOf({ ...backup(), dbVersion: db.verno + 1 })),
+  ).rejects.toBeInstanceOf(NewerBackupError)
+  expect(await snapshot()).toEqual(before)
+  await expect(
+    importZip(zipOf({ ...backup(), dbVersion: db.verno })),
+  ).resolves.toBeDefined()
+})
+
+test.each([
+  ['an entry without pieceId', { entries: [{ id: 'e', stage: 'thrown' }] }],
+  [
+    'an entry with an unknown stage',
+    { entries: [{ id: 'e', pieceId: 'p', stage: 'baked' }] },
+  ],
+  [
+    'an entry with a numeric note',
+    { entries: [{ id: 'e', pieceId: 'p', stage: 'thrown', note: 5 }] },
+  ],
+  [
+    'an entry with a numeric date',
+    { entries: [{ id: 'e', pieceId: 'p', stage: 'thrown', date: 5 }] },
+  ],
+  [
+    'an entry with a numeric photoId',
+    { entries: [{ id: 'e', pieceId: 'p', stage: 'thrown', photoId: 5 }] },
+  ],
+  [
+    'a layer without entryId',
+    { glazeApps: [{ id: 'a', pieceId: 'p', glazeId: 'g', order: 0 }] },
+  ],
+  [
+    'a layer without pieceId',
+    { glazeApps: [{ id: 'a', entryId: 'e', glazeId: 'g', order: 0 }] },
+  ],
+  [
+    'a layer without glazeId',
+    { glazeApps: [{ id: 'a', entryId: 'e', pieceId: 'p', order: 0 }] },
+  ],
+  [
+    'a layer with a non-numeric order',
+    {
+      glazeApps: [
+        { id: 'a', entryId: 'e', pieceId: 'p', glazeId: 'g', order: '0' },
+      ],
+    },
+  ],
+  ['a piece without createdAt', { pieces: [{ id: 'p', updatedAt: 'a' }] }],
+])('a backup with %s is not a backup', async (_name, over) => {
+  await ensureDefaults()
+  const before = await snapshot()
+  await expect(importZip(zipOf(backup(over as never)))).rejects.toBeInstanceOf(
+    NotABackupError,
+  )
+  expect(await snapshot()).toEqual(before)
 })
