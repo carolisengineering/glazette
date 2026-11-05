@@ -407,3 +407,176 @@ test('a failure mid-import writes nothing', async () => {
   expect(db.entries.bulkPut).toHaveBeenCalled()
   expect(await snapshot()).toEqual(before)
 })
+
+test('restore on a fresh install leaves one White stoneware that pieces and settings use', async () => {
+  await ensureDefaults()
+  const localClayId = (await db.settings.get('app'))?.defaultClayId
+  const zip = zipOf(
+    backup({
+      clays: [{ id: 'w', name: 'White Stoneware ' }],
+      pieces: [{ id: 'p1', createdAt: 'a', updatedAt: 'a', clayId: 'w' }],
+      settings: { ...SETTINGS, defaultClayId: 'w' },
+    }),
+  )
+
+  const result = await importZip(zip)
+
+  const live = (await db.clays.toArray()).filter((c) => !c.deletedAt)
+  expect(live).toHaveLength(1)
+  expect(live[0].id).toBe(localClayId)
+  expect((await db.pieces.get('p1'))?.clayId).toBe(localClayId)
+  expect((await db.settings.get('app'))?.defaultClayId).toBe(localClayId)
+  expect(result).toEqual({ added: 1, updated: 1 }) // the piece; the settings
+  expect(await importZip(zip)).toEqual({ added: 0, updated: 0 })
+})
+
+test('a glaze made on both devices becomes one glaze that the layers use', async () => {
+  await db.glazes.add({ id: 'local-gl', name: 'Celadon', color: '#111111' })
+  const zip = zipOf(
+    backup({
+      glazes: [{ id: 'b-gl', name: 'celadon', color: '#222222' }],
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'glazed' }],
+      glazeApps: [
+        { id: 'ga1', entryId: 'e1', pieceId: 'p1', glazeId: 'b-gl', order: 0 },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect(await db.glazes.toArray()).toEqual([
+    { id: 'local-gl', name: 'Celadon', color: '#111111' },
+  ])
+  expect((await db.glazeApps.get('ga1'))?.glazeId).toBe('local-gl')
+})
+
+test('glaze layers come in only with a step this import adds', async () => {
+  await db.entries.add({ id: 'local-step', pieceId: 'p1', stage: 'glazed' })
+  const layer = (id: string, entryId: string) => ({
+    id,
+    entryId,
+    pieceId: 'p1',
+    glazeId: 'gl1',
+    order: 0,
+  })
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'local-step', pieceId: 'p1', stage: 'glazed' },
+        { id: 'new-step', pieceId: 'p1', stage: 'glazed' },
+      ],
+      glazeApps: [
+        layer('old-layer', 'local-step'),
+        layer('new-layer', 'new-step'),
+      ],
+    }),
+  )
+
+  const result = await importZip(zip)
+
+  expect(await db.glazeApps.get('old-layer')).toBeUndefined()
+  expect(await db.glazeApps.get('new-layer')).toBeDefined()
+  expect(result).toEqual({ added: 2, updated: 0 }) // new step + its layer
+})
+
+test('the later lastBackupAt wins and persistRequested stays local', async () => {
+  await db.clays.add({ id: 'c1', name: 'Buff' })
+  await db.settings.add({
+    ...SETTINGS,
+    lastBackupAt: '2026-11-04T00:00:00.000Z',
+    persistRequested: true,
+  })
+  const older = zipOf(
+    backup({
+      settings: {
+        ...SETTINGS,
+        lastBackupAt: '2026-11-01T00:00:00.000Z',
+        persistRequested: false,
+      },
+    }),
+  )
+  expect(await importZip(older)).toEqual({ added: 0, updated: 0 })
+  expect(await db.settings.get('app')).toMatchObject({
+    lastBackupAt: '2026-11-04T00:00:00.000Z',
+    persistRequested: true,
+  })
+
+  const newer = zipOf(
+    backup({
+      settings: { ...SETTINGS, lastBackupAt: '2026-11-05T00:00:00.000Z' },
+    }),
+  )
+  expect(await importZip(newer)).toEqual({ added: 0, updated: 1 })
+  expect(await importZip(newer)).toEqual({ added: 0, updated: 0 })
+  expect(await db.settings.get('app')).toMatchObject({
+    lastBackupAt: '2026-11-05T00:00:00.000Z',
+    persistRequested: true,
+  })
+})
+
+test('a backup never brings persistRequested to a device without it', async () => {
+  await importZip(
+    zipOf(backup({ settings: { ...SETTINGS, persistRequested: true } })),
+  )
+  expect(await db.settings.get('app')).not.toHaveProperty('persistRequested')
+})
+
+test('a tombstoned default clay keeps the current one', async () => {
+  await ensureDefaults()
+  const current = (await db.settings.get('app'))?.defaultClayId
+  await importZip(
+    zipOf(
+      backup({
+        clays: [{ id: 'c1', name: 'Buff', deletedAt: 'z' }],
+        settings: SETTINGS,
+      }),
+    ),
+  )
+  expect((await db.settings.get('app'))?.defaultClayId).toBe(current)
+})
+
+test('a missing photo whose id belongs to another photo here shows a placeholder', async () => {
+  await db.photos.add(photoRow('ph1', 'other-hash'))
+  const zip = zipOf(
+    backup({
+      entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+      photos: [photoMeta('ph1', 'h1')],
+    }),
+    [],
+  )
+
+  await importZip(zip)
+
+  const photoId = (await db.entries.get('e1'))?.photoId
+  expect(photoId).toBeDefined()
+  expect(photoId).not.toBe('ph1')
+  expect(await db.photos.get(photoId as string)).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+})
+
+test('malformed rows and settings are not a backup', async () => {
+  const bad: unknown[] = [
+    { ...backup(), clays: [{ id: 'c1', name: 7 }] },
+    { ...backup(), glazes: [{ id: 'g1', color: '#111111' }] },
+    { ...backup(), entries: [{ id: 'e1', stage: 'thrown', deletedAt: null }] },
+    { ...backup(), pieces: [{ id: 'p1', updatedAt: 'a', deletedAt: 5 }] },
+    { ...backup(), settings: { ...SETTINGS, bisqueNote: undefined } },
+    { ...backup(), settings: { ...SETTINGS, studioName: 5 } },
+    { ...backup(), settings: { ...SETTINGS, defaultClayId: ['c1'] } },
+  ]
+  for (const json of bad) {
+    await expect(importZip(zipOf(json))).rejects.toBeInstanceOf(NotABackupError)
+  }
+  expect(await db.clays.count()).toBe(0)
+  expect(await db.settings.count()).toBe(0)
+})
+
+test('a file without the zip signature is not a backup', async () => {
+  const bytes = await lenientBytes(zipOf(backup({ settings: SETTINGS })))
+  bytes[0] = 0x58
+  bytes[1] = 0x58
+  await expect(importZip(new Blob([bytes as BlobPart]))).rejects.toBeInstanceOf(
+    NotABackupError,
+  )
+  expect(await db.settings.count()).toBe(0)
+})

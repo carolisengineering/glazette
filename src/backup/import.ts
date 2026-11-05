@@ -61,6 +61,9 @@ export async function importZip(
 }
 
 function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
+  // fflate reads from the central directory at the end and can open a file
+  // whose start isn't a zip, so check the "PK" signature first.
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new NotABackupError()
   let files: Unzipped
   let json: unknown
   try {
@@ -82,14 +85,34 @@ function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
-/** Rows must be objects with string ids (and any other listed string keys) for the merge to work. */
+const isStringOrAbsent = (v: unknown) =>
+  v === undefined || typeof v === 'string'
+
+/**
+ * Rows must be objects with a string id and the other listed string keys, and
+ * `deletedAt` must be a string or absent.
+ */
 const areRows = (v: unknown, ...stringKeys: string[]) =>
   Array.isArray(v) &&
   v.every(
     (row) =>
       isObject(row) &&
-      ['id', ...stringKeys].every((k) => typeof row[k] === 'string'),
+      ['id', ...stringKeys].every((k) => typeof row[k] === 'string') &&
+      isStringOrAbsent(row.deletedAt),
   )
+
+function areSettings(v: unknown): boolean {
+  if (v == null) return true
+  return (
+    isObject(v) &&
+    ['defaultCone', 'bisqueNote', 'firedNote'].every(
+      (k) => typeof v[k] === 'string',
+    ) &&
+    ['studioName', 'defaultClayId', 'lastBackupAt'].every((k) =>
+      isStringOrAbsent(v[k]),
+    )
+  )
+}
 
 function isBackup(json: unknown): json is BackupJson {
   return (
@@ -98,44 +121,106 @@ function isBackup(json: unknown): json is BackupJson {
     areRows(json.pieces, 'updatedAt') &&
     areRows(json.entries) &&
     areRows(json.glazeApps) &&
-    areRows(json.glazes) &&
-    areRows(json.clays) &&
+    areRows(json.glazes, 'name') &&
+    areRows(json.clays, 'name') &&
     areRows(json.photos, 'hash') &&
-    (json.settings == null || isObject(json.settings))
+    areSettings(json.settings)
   )
 }
 
 async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
   const count: ImportResult = { added: 0, updated: 0 }
 
-  await mergeKeepingLocal(db.clays, json.clays, count)
-  await mergeKeepingLocal(
+  const clays = await matchByName(db.clays, json.clays)
+  await mergeKeepingLocal(db.clays, clays.rows, count)
+  const glazes = await matchByName(
     db.glazes,
     json.glazes.map((g) =>
       typeof g.color === 'string' && HEX_COLOR.test(g.color)
         ? g
         : { ...g, color: DEFAULT_GLAZE_COLOR },
     ),
+  )
+  await mergeKeepingLocal(db.glazes, glazes.rows, count)
+
+  await mergePieces(
+    json.pieces.map((p) => {
+      const clayId = p.clayId && clays.idMap.get(p.clayId)
+      return clayId ? { ...p, clayId } : p
+    }),
     count,
   )
-  await mergePieces(json.pieces, count)
-  const { idMap, matched } = await mergePhotos(json.photos, files, count)
+  const photos = await mergePhotos(json.photos, files, count)
 
   const entries = json.entries.map((e) => {
-    const photoId = e.photoId && idMap.get(e.photoId)
+    const photoId = e.photoId && photos.idMap.get(e.photoId)
     return photoId ? { ...e, photoId } : e
   })
   const addedEntries = await mergeKeepingLocal(db.entries, entries, count)
-  await reviveReusedPhotos(addedEntries, matched, count)
+  await reviveReusedPhotos(addedEntries, photos.matched, count)
 
-  await mergeKeepingLocal(db.glazeApps, json.glazeApps, count)
-  await mergeSettings(json.settings, count)
+  // Layers belong to their step: they come in only with a step added here,
+  // so layers the app removed from an existing step never come back.
+  const addedEntryIds = new Set(addedEntries.map((e) => e.id))
+  await mergeKeepingLocal(
+    db.glazeApps,
+    json.glazeApps
+      .filter((a) => addedEntryIds.has(a.entryId))
+      .map((a) => {
+        const glazeId = glazes.idMap.get(a.glazeId)
+        return glazeId ? { ...a, glazeId } : a
+      }),
+    count,
+  )
+  await mergeSettings(json.settings, clays.idMap, count)
   return count
 }
 
 const uniqueById = <T extends { id: string }>(rows: T[]): T[] => [
   ...new Map(rows.map((r) => [r.id, r])).values(),
 ]
+
+const nameKey = (name: string) => name.trim().toLowerCase()
+
+/**
+ * Clays and glazes match by id, then by live name ignoring case, as the app
+ * does when one is typed in. A live incoming row with a new id whose name
+ * matches a live row here (or one earlier in this import) isn't added: its id
+ * maps to that row. Returns the id map and the rows left for the id merge.
+ */
+async function matchByName<
+  T extends { id: string; name: string; deletedAt?: string },
+>(table: EntityTable<T, 'id'>, incoming: T[]) {
+  const idMap = new Map<string, string>()
+  const rows = uniqueById(incoming)
+  const known = new Set(
+    (await table.bulkGet(rows.map((r) => r.id) as IDType<T, 'id'>[]))
+      .filter((r) => r !== undefined)
+      .map((r) => r.id),
+  )
+  const byName = new Map(
+    (await table.filter((r) => !r.deletedAt).toArray()).map((r) => [
+      nameKey(r.name),
+      r.id,
+    ]),
+  )
+  const left: T[] = []
+  for (const row of rows) {
+    if (known.has(row.id) || row.deletedAt) {
+      left.push(row)
+      continue
+    }
+    const key = nameKey(row.name)
+    const match = byName.get(key)
+    if (match) {
+      idMap.set(row.id, match)
+      continue
+    }
+    byName.set(key, row.id)
+    left.push(row)
+  }
+  return { idMap, rows: left }
+}
 
 /**
  * For tables without updatedAt. Unknown ids are added. Known ids keep the
@@ -234,7 +319,12 @@ async function mergePhotos(
       continue
     }
     const full = files[photoPath(meta.hash)]
-    if (!full) continue
+    if (!full) {
+      // The step keeps a photoId that shows the placeholder. If that id
+      // belongs to a different photo here, point the step at an unused id.
+      if (usedIds.has(meta.id)) idMap.set(meta.id, newId())
+      continue
+    }
     // A missing thumbnail falls back to the full image rather than losing the photo.
     const thumb = files[thumbPath(meta.hash)] ?? full
     // An id taken by a different photo gets a fresh one, never an overwrite.
@@ -273,23 +363,42 @@ async function reviveReusedPhotos(
 }
 
 /**
- * The backup's settings win, except a default clay that names no clay after
- * the import: then the current default stays.
+ * The backup's settings win, with three exceptions. A default clay that names
+ * no live clay after the import keeps the current default. The later
+ * lastBackupAt is kept. persistRequested belongs to this install and never
+ * comes from a backup.
  */
 async function mergeSettings(
   incoming: Settings | null | undefined,
+  clayIdMap: Map<string, string>,
   count: ImportResult,
 ) {
   if (!incoming) return
   const current = await db.settings.get('app')
   const next: Settings = { ...incoming, id: 'app' }
-  const clayExists =
-    next.defaultClayId !== undefined &&
-    (await db.clays.get(next.defaultClayId)) !== undefined
-  if (!clayExists) {
+
+  if (next.defaultClayId) {
+    next.defaultClayId = clayIdMap.get(next.defaultClayId) ?? next.defaultClayId
+  }
+  const clay = next.defaultClayId
+    ? await db.clays.get(next.defaultClayId)
+    : undefined
+  if (!clay || clay.deletedAt) {
     if (current?.defaultClayId) next.defaultClayId = current.defaultClayId
     else delete next.defaultClayId
   }
+
+  const latest = [current?.lastBackupAt, incoming.lastBackupAt]
+    .filter((t): t is string => typeof t === 'string')
+    .sort()
+    .pop()
+  if (latest) next.lastBackupAt = latest
+  else delete next.lastBackupAt
+
+  if (current?.persistRequested !== undefined) {
+    next.persistRequested = current.persistRequested
+  } else delete next.persistRequested
+
   if (current && sameFields(current, next)) return
   if (current) count.updated++
   else count.added++

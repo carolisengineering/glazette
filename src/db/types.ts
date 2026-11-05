@@ -67,4 +67,6 @@ export interface Settings {
   bisqueNote: string
   firedNote: string
   studioName?: string // shown above My Shelf; "Studio" when unset
+  lastBackupAt?: string // ISO time of the last saved backup
+  persistRequested?: boolean // persistent storage asked for once per install
 }
