@@ -8,10 +8,18 @@ interface Props {
   current?: Stage
   /** Show the Done/Now/Next captions. */
   captions: boolean
+  /** Disables every stage, e.g. while a save is in flight. */
+  disabled?: boolean
 }
 
 /** Five stage buttons with progress bars. */
-export function StagePicker({ value, onChange, current, captions }: Props) {
+export function StagePicker({
+  value,
+  onChange,
+  current,
+  captions,
+  disabled,
+}: Props) {
   const currentIndex = current ? STAGES.indexOf(current) : 0
   const selectable = (s: Stage) =>
     current === 'fired' ? s === 'fired' : STAGES.indexOf(s) >= currentIndex
@@ -37,7 +45,7 @@ export function StagePicker({ value, onChange, current, captions }: Props) {
           <button
             key={s}
             type="button"
-            disabled={!ok}
+            disabled={!ok || disabled}
             aria-pressed={on}
             onClick={() => {
               onChange(s)

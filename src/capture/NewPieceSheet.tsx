@@ -60,6 +60,8 @@ export function NewPieceSheet({
   const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
   const [saving, setSaving] = useState(false)
   const restaging = useRef(false)
+  // Mirrors the ref so the picker and Done visibly disable during a move.
+  const [moving, setMoving] = useState(false)
   // The chips and Done wait for both reads, so Done can never drop the default clay.
   const ready = clays !== undefined && defaults !== undefined
   const { show: showToast, toast } = useToast()
@@ -73,8 +75,9 @@ export function NewPieceSheet({
       setStage(next)
       return
     }
-    if (restaging.current) return
+    if (restaging.current || saving) return
     restaging.current = true
+    setMoving(true)
     try {
       await restagePiece(pieceId, next)
       setStage(next)
@@ -82,6 +85,7 @@ export function NewPieceSheet({
       showToast(SAVE_ERROR)
     } finally {
       restaging.current = false
+      setMoving(false)
     }
   }
 
@@ -200,7 +204,12 @@ export function NewPieceSheet({
 
         <div className="flex flex-col gap-2.5">
           <span className={fieldLabel}>Stage</span>
-          <StagePicker value={stage} onChange={pickStage} captions={false} />
+          <StagePicker
+            value={stage}
+            onChange={pickStage}
+            captions={false}
+            disabled={saving || moving}
+          />
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -225,7 +234,7 @@ export function NewPieceSheet({
         <button
           type="button"
           onClick={done}
-          disabled={saving || !ready}
+          disabled={saving || moving || !ready}
           className="mt-auto h-14 rounded-[28px] bg-accent text-[16px] font-semibold text-white disabled:opacity-50"
         >
           Done

@@ -530,8 +530,11 @@ test('a failed restage shows a toast and keeps the previous selection', async ()
   renderRoute('/capture')
   await submitAsNewPiece()
   await screen.findByText('Saved to your shelf as Thrown')
-  vi.spyOn(ops, 'restagePiece').mockRejectedValueOnce(new Error('boom'))
+  const spy = vi
+    .spyOn(ops, 'restagePiece')
+    .mockRejectedValueOnce(new Error('boom'))
   await userEvent.click(stageBtn('Bisqued'))
+  spy.mockRestore()
   await screen.findByText(SAVE_ERROR)
   expect(stageBtn('Thrown')).toHaveAttribute('aria-pressed', 'true')
   expect(screen.getByText('Saved to your shelf as Thrown')).toBeVisible()
@@ -604,4 +607,76 @@ test('Close on the no-photo details sheet writes nothing', async () => {
   expect(onDone).not.toHaveBeenCalled()
   expect(await db.pieces.count()).toBe(0)
   expect(await db.entries.count()).toBe(0)
+})
+
+test('the stage picker and Done are disabled while a restage is in flight, and the final state matches the selection', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  const real = ops.restagePiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const spy = vi.spyOn(ops, 'restagePiece').mockImplementation(async (...a) => {
+    await gate
+    return real(...a)
+  })
+  try {
+    await userEvent.click(stageBtn('Fired'))
+    expect(stageBtn('Bisqued')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+    await userEvent.click(stageBtn('Bisqued'))
+    expect(spy).toHaveBeenCalledTimes(1)
+    release()
+    await screen.findByText('Saved to your shelf as Fired')
+    await waitFor(() => expect(stageBtn('Bisqued')).toBeEnabled())
+    const live = (await db.entries.toArray()).filter((e) => !e.deletedAt)
+    expect(live.map((e) => e.stage).sort()).toEqual([
+      'bisqued',
+      'fired',
+      'glazed',
+      'thrown',
+      'trimmed',
+    ])
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+test('the stage picker is disabled while Done is saving, so glazes land on the shown stage', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(stageBtn('Glazed'))
+  await screen.findByText('Saved to your shelf as Glazed')
+  await userEvent.type(await screen.findByLabelText('Glaze 1'), 'Celadon')
+  const real = ops.addGlazesToPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const restage = vi.spyOn(ops, 'restagePiece')
+  const add = vi
+    .spyOn(ops, 'addGlazesToPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await clickDone()
+    await waitFor(() => expect(add).toHaveBeenCalled())
+    expect(stageBtn('Bisqued')).toBeDisabled()
+    await userEvent.click(stageBtn('Bisqued'))
+    expect(restage).not.toHaveBeenCalled()
+    release()
+    await waitFor(async () => expect(await db.glazeApps.count()).toBe(1))
+    const glazed = (await db.entries.toArray()).find(
+      (e) => e.stage === 'glazed' && !e.deletedAt,
+    )
+    expect((await db.glazeApps.toArray())[0].entryId).toBe(glazed?.id)
+  } finally {
+    add.mockRestore()
+    restage.mockRestore()
+  }
 })
