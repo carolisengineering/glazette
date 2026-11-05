@@ -2,11 +2,30 @@ import 'fake-indexeddb/auto'
 import { unzipSync } from 'fflate'
 import { beforeEach, expect, test } from 'vitest'
 import { db } from '../db/db'
-import { backupFileName, blobBytes, exportZip } from './export'
+import {
+  backupFileName,
+  exportZip as exportStrict,
+  readBlobBytes,
+} from './export'
 import type { BackupJson } from './format'
 
+// jsdom's Blob lacks arrayBuffer(), and fake-indexeddb returns stored Blobs as
+// empty plain objects (bytes lost). Tests read bytes leniently; production
+// export is strict (see the last test).
+function lenientBytes(blob: Blob): Promise<Uint8Array> {
+  if (!(blob instanceof Blob)) return Promise.resolve(new Uint8Array(0))
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsArrayBuffer(blob)
+  })
+}
+
+const exportZip = (now?: Date) => exportStrict(now, lenientBytes)
+
 async function unpack(blob: Blob) {
-  const files = unzipSync(await blobBytes(blob))
+  const files = unzipSync(await lenientBytes(blob))
   const json = JSON.parse(
     new TextDecoder().decode(files['glazette.json']),
   ) as BackupJson
@@ -112,4 +131,19 @@ test('backupFileName uses the local day', () => {
   expect(backupFileName(new Date(2026, 10, 5, 23, 30))).toBe(
     'glazette-2026-11-05.zip',
   )
+})
+
+test('the default reader rejects a non-Blob instead of exporting nothing', async () => {
+  await expect(readBlobBytes({} as Blob)).rejects.toThrow(/not a Blob/)
+  await db.photos.add({
+    id: 'ph1',
+    blob: new Blob(['x'], { type: 'image/jpeg' }),
+    thumb: new Blob(['t'], { type: 'image/jpeg' }),
+    hash: 'h1',
+    width: 1,
+    height: 1,
+    takenAt: 't',
+  })
+  // fake-indexeddb hands back plain objects, so the strict default must fail.
+  await expect(exportStrict()).rejects.toThrow(/not a Blob/)
 })
