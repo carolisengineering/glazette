@@ -8,6 +8,7 @@ import type {
   Settings,
   StageEntry,
 } from './types'
+import { fillSkippedStages } from './upgrade'
 
 class GlazetteDB extends Dexie {
   pieces!: EntityTable<Piece, 'id'>
@@ -20,7 +21,7 @@ class GlazetteDB extends Dexie {
 
   constructor() {
     super('glazette')
-    this.version(1).stores({
+    const stores = {
       pieces: 'id, updatedAt, deletedAt',
       entries: 'id, pieceId, [pieceId+date], stage, deletedAt',
       glazeApps: 'id, entryId, pieceId, glazeId',
@@ -28,7 +29,10 @@ class GlazetteDB extends Dexie {
       clays: 'id, name, deletedAt',
       photos: 'id, hash',
       settings: 'id',
-    })
+    }
+    this.version(1).stores(stores)
+    // Same stores: version 2 exists only to run the one-time fill.
+    this.version(2).stores(stores).upgrade(fillSkippedStages)
   }
 }
 
