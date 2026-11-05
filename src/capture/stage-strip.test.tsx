@@ -1,10 +1,18 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import * as ops from '../db/ops'
 import * as queries from '../db/queries'
 import { type ProcessedImage, processImage } from '../photos/process'
 import { renderRoute } from '../test/renderRoute'
+import { StageStrip } from './StageStrip'
 import { useCaptureStore } from './store'
 
 const { addStageEntry, createPiece, ensureDefaults, upsertGlaze } = ops
@@ -323,4 +331,100 @@ test('removing the only filled glaze row leaves one empty row', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
   expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
   expect(screen.queryByLabelText('Glaze 2')).toBeNull()
+})
+
+// Task 7 adds the No photo button; until then render the strip directly.
+function openNoPhotoStrip(pieceId: string) {
+  const root = createRootRoute()
+  const strip = createRoute({
+    getParentRoute: () => root,
+    path: '/strip',
+    component: () => <StageStrip pieceId={pieceId} exit={{ to: '/' }} />,
+  })
+  const home = createRoute({
+    getParentRoute: () => root,
+    path: '/',
+    component: () => null,
+  })
+  const piece = createRoute({
+    getParentRoute: () => root,
+    path: '/piece/$id',
+    component: () => null,
+  })
+  const router = createRouter({
+    routeTree: root.addChildren([strip, home, piece]),
+    history: createMemoryHistory({ initialEntries: ['/strip'] }),
+  })
+  render(<RouterProvider router={router} />)
+  return router
+}
+
+test('without a photo the strip shows "No photo for this update" and a Date field', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  openNoPhotoStrip(id)
+  expect(await screen.findByText('No photo for this update')).toBeVisible()
+  expect(screen.getByLabelText('Date · optional')).toHaveAttribute(
+    'type',
+    'date',
+  )
+  expect(screen.getByRole('link', { name: 'Close' })).toBeVisible()
+  expect(screen.getByText('Update a piece')).toBeVisible()
+})
+
+test('saving with no photo and no date writes an undated step and fills skipped stages', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Fired/ }))
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Fired' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  const entries = await db.entries.where('pieceId').equals(id).toArray()
+  expect(entries.map((e) => e.stage).sort()).toEqual(
+    ['bisqued', 'fired', 'glazed', 'thrown', 'trimmed'].sort(),
+  )
+  for (const e of entries.filter((e) => e.stage !== 'thrown')) {
+    expect(e.photoId).toBeUndefined()
+    expect(e.date).toBeUndefined()
+  }
+})
+
+test('a date entered in the field is saved on the step', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = openNoPhotoStrip(id)
+  const date = await screen.findByLabelText('Date · optional')
+  await userEvent.type(date, '2026-10-20')
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Trimmed' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  const entries = await db.entries.where('pieceId').equals(id).toArray()
+  const trimmed = entries.find((e) => e.stage === 'trimmed')
+  expect(trimmed?.date).toBe(new Date(2026, 9, 20, 12).toISOString())
+})
+
+test('Bisqued → Fired shows glaze rows; saved glazes land on the filled Glazed step', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'bisqued' })
+  const router = openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Fired/ }))
+  expect(screen.getByText('Glazes')).toBeVisible()
+  await userEvent.type(screen.getByLabelText('Glaze 1'), 'Celadon')
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Fired' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  const entries = await db.entries.where('pieceId').equals(id).toArray()
+  const glazed = entries.find((e) => e.stage === 'glazed')
+  const apps = await db.glazeApps.toArray()
+  expect(apps).toHaveLength(1)
+  expect(apps[0].entryId).toBe(glazed?.id)
+})
+
+test('without a photo, the current stage labels the button Save', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  openNoPhotoStrip(id)
+  await screen.findByRole('button', { name: 'Save to Trimmed' })
+  await userEvent.click(stageBtn('Thrown'))
+  expect(screen.getByRole('button', { name: 'Save' })).toBeVisible()
 })

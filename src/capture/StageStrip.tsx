@@ -4,21 +4,24 @@ import { useRef, useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { SAVE_ERROR, useToast } from '../components/useToast'
+import { fromDateInput } from '../db/dates'
 import { db } from '../db/db'
-import { addStageEntry, defaultNoteFor, upsertGlaze } from '../db/ops'
-import { notDeleted, usePiecesQuery } from '../db/queries'
-import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import { addStageEntry, defaultNoteFor } from '../db/ops'
+import { usePiecesQuery } from '../db/queries'
 import {
   dayCount,
   displayName,
   nextStage,
   STAGE_LABEL,
-  STAGES,
+  stagesBetween,
 } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
+import { NoPhoto } from './NoPhoto'
 import type { ExitTarget } from './Review'
+import { resolveGlazes } from './resolveGlazes'
+import { StagePicker } from './StagePicker'
 
 interface Props {
   pieceId: string
@@ -39,33 +42,6 @@ const NOTE_PLACEHOLDER: Record<Stage, string> = {
 
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
 
-/** Match each row to a library glaze (by id, then name ignoring case) or create it once. */
-async function resolveGlazes(rows: GlazeRow[], cone: string) {
-  const live = (await db.glazes.toArray()).filter(notDeleted)
-  const byName = new Map(live.map((g) => [g.name.trim().toLowerCase(), g.id]))
-  const out: Parameters<typeof addStageEntry>[0]['glazes'] = []
-  for (const row of rows) {
-    const name = row.name.trim()
-    if (!name) continue
-    let glazeId = row.glazeId
-    if (!glazeId) {
-      const key = name.toLowerCase()
-      glazeId = byName.get(key)
-      if (!glazeId) {
-        glazeId = await upsertGlaze({ name, cone, color: DEFAULT_GLAZE_COLOR })
-        byName.set(key, glazeId)
-      }
-    }
-    out.push({
-      glazeId,
-      dips: row.dips,
-      method: row.method,
-      note: row.note?.trim() || undefined,
-    })
-  }
-  return out
-}
-
 /** Which stage is this photo? Next stage preselected; one tap saves. */
 export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const navigate = useNavigate()
@@ -76,6 +52,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const [picked, setPicked] = useState<Stage>()
   const [note, setNote] = useState<string>()
   const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
+  const [dateValue, setDateValue] = useState('')
   const [saving, setSaving] = useState(false)
   const { show: showToast, toast } = useToast()
   const inFlight = useRef(false)
@@ -97,13 +74,10 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   }
 
   const current = view.stage
-  const currentIndex = current ? STAGES.indexOf(current) : 0
   // A lost piece doesn't advance from the arrow: preselect where it already is.
   const stage: Stage =
     picked ??
     (view.piece.lost && current ? current : (nextStage(current) ?? 'fired'))
-  const selectable = (s: Stage) =>
-    current === 'fired' ? s === 'fired' : STAGES.indexOf(s) >= currentIndex
   const name = displayName(view.piece)
   const days = dayCount(view.piece, new Date())
   const meta = [view.clayName, days ? `Day ${days}` : undefined]
@@ -113,8 +87,19 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   // Until the user types, the note follows the selected stage's default.
   const noteValue = note ?? (settings ? defaultNoteFor(stage, settings) : '')
 
+  // Glaze rows show for Glazed itself, or when skipping past it.
+  const skipsGlazed =
+    stage !== 'glazed' &&
+    current !== undefined &&
+    stagesBetween(current, stage).includes('glazed')
+  const showGlazes = stage === 'glazed' || skipsGlazed
+
   const saveLabel =
-    stage === current ? 'Save photo' : `Save to ${STAGE_LABEL[stage]}`
+    stage === current
+      ? photo
+        ? 'Save photo'
+        : 'Save'
+      : `Save to ${STAGE_LABEL[stage]}`
   const summary = !current
     ? `Saves ${name} as ${STAGE_LABEL[stage]}`
     : stage === current
@@ -135,14 +120,14 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
         db.pieces,
         db.photos,
         async () => {
-          const glazes =
-            stage === 'glazed'
-              ? await resolveGlazes(rows, settings?.defaultCone ?? '6')
-              : undefined
+          const glazes = showGlazes
+            ? await resolveGlazes(rows, settings?.defaultCone ?? '6')
+            : undefined
           await addStageEntry({
             pieceId,
             stage,
             photo,
+            date: photo ? undefined : fromDateInput(dateValue),
             note: noteValue.trim() || undefined,
             glazes,
           })
@@ -162,35 +147,67 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col bg-camera">
-      <div className="relative h-[250px] flex-none overflow-hidden">
-        {url ? (
-          <img src={url} alt="" className="size-full object-cover" />
-        ) : null}
-        <Link
-          {...exit}
-          replace
-          aria-label="Close"
-          className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
-        >
-          <svg
-            aria-hidden="true"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#fff"
-            strokeWidth="2"
-            strokeLinecap="round"
+      {photo ? (
+        <div className="relative h-[250px] flex-none overflow-hidden">
+          {url ? (
+            <img src={url} alt="" className="size-full object-cover" />
+          ) : null}
+          <Link
+            {...exit}
+            replace
+            aria-label="Close"
+            className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
           >
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </Link>
-        <span className="absolute top-14 right-5 rounded-xl bg-camera/60 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
-          Update a piece
-        </span>
-      </div>
+            <svg
+              aria-hidden="true"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#fff"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </Link>
+          <span className="absolute top-14 right-5 rounded-xl bg-camera/60 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
+            Update a piece
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-none flex-col gap-4 px-5 pt-12 pb-6">
+          <div className="flex items-center justify-between">
+            <Link
+              {...exit}
+              replace
+              aria-label="Close"
+              className="flex size-11 items-center justify-center rounded-full bg-camera/60"
+            >
+              <svg
+                aria-hidden="true"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#fff"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </Link>
+            <span className="rounded-xl bg-white/15 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
+              Update a piece
+            </span>
+          </div>
+          <NoPhoto label="No photo for this update" />
+        </div>
+      )}
 
-      <div className="relative -mt-7 flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink">
+      <div
+        className={`relative ${photo ? '-mt-7' : ''} flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink`}
+      >
         <span
           aria-hidden="true"
           className="h-[5px] w-10 self-center rounded-[3px] bg-[#C5CDD5]"
@@ -221,56 +238,12 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
 
         <div className="flex flex-col gap-2.5">
           <span className={label}>Stage for this photo</span>
-          <fieldset
-            aria-label="Stage"
-            className="m-0 grid min-w-0 grid-cols-5 gap-1 rounded-[18px] border-0 bg-surface p-1.5"
-          >
-            {STAGES.map((s) => {
-              const on = s === stage
-              const ok = selectable(s)
-              const past = !ok && STAGES.indexOf(s) < currentIndex
-              const caption = past
-                ? 'Done'
-                : s === current
-                  ? 'Now'
-                  : s === nextStage(current)
-                    ? 'Next'
-                    : ''
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!ok}
-                  aria-pressed={on}
-                  onClick={() => {
-                    setPicked(s)
-                  }}
-                  className={`flex min-h-[72px] flex-col items-center gap-1.5 rounded-[13px] px-0.5 pt-2.5 pb-2 ${
-                    on ? 'bg-accent text-white' : ok ? 'text-ink' : 'text-muted'
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`h-1 w-6 rounded-sm ${
-                      on
-                        ? 'bg-white'
-                        : STAGES.indexOf(s) <= STAGES.indexOf(stage)
-                          ? 'bg-accent'
-                          : 'bg-border'
-                    }`}
-                  />
-                  <span className="text-[13px] font-semibold">
-                    {STAGE_LABEL[s]}
-                  </span>
-                  <span
-                    className={`h-4 text-[13px] ${on ? 'text-white/85' : 'text-muted'}`}
-                  >
-                    {caption}
-                  </span>
-                </button>
-              )
-            })}
-          </fieldset>
+          <StagePicker
+            value={stage}
+            onChange={setPicked}
+            current={current}
+            captions
+          />
           <span className="flex items-center gap-2 text-[15px]">
             <svg
               aria-hidden="true"
@@ -290,9 +263,27 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
           </span>
         </div>
 
-        {stage === 'glazed' ? (
-          <GlazeRows value={rows} onChange={setRows} />
+        {showGlazes ? (
+          <div className="flex flex-col gap-2.5">
+            {skipsGlazed ? <span className={label}>Glazes</span> : null}
+            <GlazeRows value={rows} onChange={setRows} />
+          </div>
         ) : null}
+
+        {photo ? null : (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="stageDate" className={label}>
+              Date · optional
+            </label>
+            <input
+              id="stageDate"
+              type="date"
+              value={dateValue}
+              onChange={(e) => setDateValue(e.target.value)}
+              className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent"
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="stageNote" className={label}>
