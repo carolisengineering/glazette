@@ -5,7 +5,14 @@ export function ReloadPrompt() {
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
-  } = useRegisterSW()
+  } = useRegisterSW({
+    onRegisteredSW(_url, registration) {
+      // Look for a new version whenever the app comes back to the foreground.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void registration?.update()
+      })
+    },
+  })
 
   if (!needRefresh) return null
 

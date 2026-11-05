@@ -86,7 +86,10 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     // Clear so choosing the same file again still fires a change.
     e.target.value = ''
     if (!file) return
-    void run(async () => showToast(restoredMessage(await importZip(file))))
+    void run(async () => {
+      showToast(restoredMessage(await importZip(file)))
+      setReady(undefined)
+    })
   }
 
   return (
@@ -102,7 +105,7 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative flex max-h-dvh w-full max-w-[430px] flex-col gap-6 overflow-y-auto rounded-t-[28px] bg-background px-5 pt-6 pb-7 text-ink"
+        className="relative flex max-h-dvh w-full max-w-[430px] flex-col gap-6 overflow-y-auto rounded-t-[28px] bg-background px-5 pt-6 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-ink"
       >
         <h2
           id={titleId}

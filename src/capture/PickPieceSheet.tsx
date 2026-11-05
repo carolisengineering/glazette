@@ -85,7 +85,7 @@ export function PickPieceSheet({
       )}
 
       <div
-        className={`relative flex min-h-0 flex-1 flex-col gap-4 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink ${photo ? '-mt-7' : ''}`}
+        className={`relative flex min-h-0 flex-1 flex-col gap-4 rounded-t-[28px] bg-background px-5 pt-2.5 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-ink ${photo ? '-mt-7' : ''}`}
       >
         <span
           aria-hidden="true"

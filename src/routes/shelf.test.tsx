@@ -268,3 +268,17 @@ test('a stage chip with no pieces says so', async () => {
     screen.queryByText('Nothing here yet. Tap + to add a piece.'),
   ).not.toBeInTheDocument()
 })
+
+test('empty shelf says to add a piece; hidden pieces get a different message', async () => {
+  renderRoute('/')
+  expect(
+    await screen.findByText('Nothing here yet. Tap + to add a piece.'),
+  ).toBeVisible()
+  const id = await createPiece({ name: 'A' })
+  await markLost(id, true)
+  expect(
+    await screen.findByText(
+      'Nothing in progress. Fired and lost pieces are under their chips.',
+    ),
+  ).toBeVisible()
+})

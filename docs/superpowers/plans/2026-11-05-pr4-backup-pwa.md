@@ -119,14 +119,16 @@ test('backupFileName uses the local day', ...)   // new Date(2026, 10, 5, 23, 30
 
 **Rules.** These are Claude's calls, recorded for Carol:
 
-- **Not a backup.** Throw `NotABackupError` when the zip won't open, has no `glazette.json`, or `version !== 1`. Nothing is written.
-- **Pieces.** Match by `id`. An unknown id is added. A known id is replaced only when the incoming `updatedAt` is newer. A newer tombstone counts as newer.
+- **Not a backup.** Throw `NotABackupError` when the zip won't open, has no `glazette.json`, or `version !== 1`. Nothing is written. (changed during build) Validation also checks the zip signature and that string fields are strings.
+- **Pieces.** Match by `id`. An unknown id is added. A known id is replaced only when the incoming copy changed later, comparing the later of `updatedAt` and `deletedAt` on each side, because the generic soft delete sets only `deletedAt`. (changed during build)
 - **Steps, glaze layers, glazes, clays.** These have no `updatedAt`. Unknown ids are added. For a known id, keep the existing row, except that an incoming `deletedAt` is applied when the existing row has none. Deletions spread; edits never overwrite.
+  - (changed during build) Clays and glazes also dedupe by live name, case-insensitive: an incoming clay or glaze whose name matches a live local one is not added, and references to it are remapped to the local row.
+  - (changed during build) Glaze layers are added only along with steps this import adds.
 - **Photos.** Match by `hash`.
   - When the hash exists locally under another id, map the incoming id to the local one and rewrite the incoming steps' `photoId` to match.
   - When it's new, add the photo with its blob and thumbnail from the zip.
   - When the zip lacks the image file, skip the photo row. The step keeps its `photoId`, and the app already shows a placeholder for that.
-- **Settings.** The backup's settings win, since a restore is a deliberate act. The exception is a `defaultClayId` that names no clay after the import: then keep the current one.
+- **Settings.** The backup's settings win, since a restore is a deliberate act. The exceptions are `lastBackupAt`, which keeps the later value, `persistRequested`, which stays local, and a `defaultClayId` that names no live clay after the import, which keeps the current one. (changed during build)
 - **Glaze colors.** A `glaze.color` that doesn't match `/^#[0-9a-f]{6}$/i` becomes `DEFAULT_GLAZE_COLOR`.
 - **One transaction.** All writes happen in a single `db.transaction('rw', all tables, …)`. Unzip and parse before it starts.
 - **Counts.** `added` counts new rows across all tables; `updated` counts replaced or newly tombstoned rows. The sheet shows `added + updated` as N.

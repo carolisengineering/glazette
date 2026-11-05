@@ -17,6 +17,8 @@ export type PhotoMeta = Omit<Photo, 'blob' | 'thumb'>
 
 export interface BackupJson {
   version: 1
+  /** Dexie schema version of the exporting app. Older backups lack it. */
+  dbVersion?: number
   exportedAt: string
   pieces: Piece[]
   entries: StageEntry[]

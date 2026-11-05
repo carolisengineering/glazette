@@ -59,9 +59,11 @@ export function ShelfScreen() {
       <StageChips counts={counts} active={active} onPick={setChip} />
       {loaded && shown.length === 0 ? (
         <p className="py-10 text-center text-[16px] text-muted">
-          {active === 'all'
-            ? 'Nothing here yet. Tap + to add a piece.'
-            : 'No pieces at this stage.'}
+          {active !== 'all'
+            ? 'No pieces at this stage.'
+            : views.length === 0
+              ? 'Nothing here yet. Tap + to add a piece.'
+              : 'Nothing in progress. Fired and lost pieces are under their chips.'}
         </p>
       ) : (
         <div className="shelf-grid">

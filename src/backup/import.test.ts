@@ -2,9 +2,9 @@ import 'fake-indexeddb/auto'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { db } from '../db/db'
-import { ensureDefaults } from '../db/ops'
+import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { Photo, Settings } from '../db/types'
+import type { Photo, Piece, Settings } from '../db/types'
 import { lenientBytes } from '../test/bytes'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
@@ -280,7 +280,7 @@ test('an undated step and a tombstoned piece round-trip unchanged', async () => 
   expect(after.settings[0].studioName).toBe('Penguin Foot')
 })
 
-test('a piece is replaced only by a newer updatedAt', async () => {
+test('a piece is replaced only by a newer last change', async () => {
   await db.pieces.bulkAdd([
     { id: 'old', name: 'Here', createdAt: 'a', updatedAt: '2026-11-02' },
     { id: 'new', name: 'Here', createdAt: 'a', updatedAt: '2026-11-04' },
@@ -294,7 +294,7 @@ test('a piece is replaced only by a newer updatedAt', async () => {
           name: 'Backup',
           createdAt: 'a',
           updatedAt: '2026-11-03',
-          deletedAt: '2026-11-03',
+          deletedAt: '2026-11-03T10:00:00.000Z',
         },
         { id: 'new', name: 'Backup', createdAt: 'a', updatedAt: '2026-11-03' },
         { id: 'same', name: 'Backup', createdAt: 'a', updatedAt: '2026-11-03' },
@@ -306,7 +306,7 @@ test('a piece is replaced only by a newer updatedAt', async () => {
 
   expect(await db.pieces.get('old')).toMatchObject({
     name: 'Backup',
-    deletedAt: '2026-11-03',
+    deletedAt: '2026-11-03T10:00:00.000Z',
   })
   expect((await db.pieces.get('new'))?.name).toBe('Here')
   expect((await db.pieces.get('same'))?.name).toBe('Here')
@@ -579,4 +579,32 @@ test('a file without the zip signature is not a backup', async () => {
     NotABackupError,
   )
   expect(await db.settings.count()).toBe(0)
+})
+
+test('a piece deleted here stays deleted when the backup copy is live and not newer', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const created = (await db.pieces.get(id))?.updatedAt as string
+  await softDelete('pieces', id)
+  const zip = zipOf(
+    backup({
+      pieces: [{ id, name: 'Mug', createdAt: created, updatedAt: created }],
+    }),
+  )
+
+  const result = await importZip(zip)
+
+  expect((await db.pieces.get(id))?.deletedAt).toBeTruthy()
+  expect(result).toEqual({ added: 0, updated: 0 })
+})
+
+test('a piece deleted with the app in the backup deletes the live local copy', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const live = (await db.pieces.get(id)) as Piece
+  const deletedAt = new Date(Date.parse(live.updatedAt) + 60_000).toISOString()
+  const zip = zipOf(backup({ pieces: [{ ...live, deletedAt }] }))
+
+  const result = await importZip(zip)
+
+  expect((await db.pieces.get(id))?.deletedAt).toBe(deletedAt)
+  expect(result).toEqual({ added: 0, updated: 1 })
 })

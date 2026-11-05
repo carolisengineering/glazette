@@ -66,6 +66,7 @@ export async function exportZip(
 
   const json: BackupJson = {
     version: BACKUP_VERSION,
+    dbVersion: db.verno,
     exportedAt: now.toISOString(),
     pieces,
     entries,

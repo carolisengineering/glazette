@@ -251,7 +251,11 @@ async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
   return added
 }
 
-/** A known piece is replaced only by a newer updatedAt (a newer tombstone included). */
+/** The later of updatedAt and deletedAt: the generic soft delete sets only deletedAt. */
+const lastChanged = (p: { updatedAt: string; deletedAt?: string }) =>
+  p.deletedAt && p.deletedAt > p.updatedAt ? p.deletedAt : p.updatedAt
+
+/** A known piece is replaced only when the incoming copy changed later (a delete included). */
 async function mergePieces(
   incoming: BackupJson['pieces'],
   count: ImportResult,
@@ -264,7 +268,7 @@ async function mergePieces(
       count.added++
       return true
     }
-    if (row.updatedAt > mine.updatedAt) {
+    if (lastChanged(row) > lastChanged(mine)) {
       count.updated++
       return true
     }

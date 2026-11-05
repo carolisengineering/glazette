@@ -191,3 +191,17 @@ test('both buttons are disabled while an action runs', async () => {
     expect(screen.getByRole('button', { name: 'Save a backup' })).toBeEnabled(),
   )
 })
+
+test('a successful restore clears a kept backup file', async () => {
+  vi.mocked(saveFile).mockResolvedValue('blocked')
+  vi.mocked(importZip).mockResolvedValue({ added: 1, updated: 0 })
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  expect(
+    await screen.findByRole('button', { name: 'Save backup file' }),
+  ).toBeVisible()
+  await pick(user)
+  await screen.findByText('Restored 1 item')
+  expect(screen.getByRole('button', { name: 'Save a backup' })).toBeVisible()
+})

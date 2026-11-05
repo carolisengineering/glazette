@@ -189,7 +189,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
       )}
 
       <div
-        className={`relative ${photo ? '-mt-7' : ''} flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-2.5 pb-7 text-ink`}
+        className={`relative ${photo ? '-mt-7' : ''} flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-2.5 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-ink`}
       >
         <span
           aria-hidden="true"

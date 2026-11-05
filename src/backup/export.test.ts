@@ -77,6 +77,7 @@ test('export holds every table, tombstones included, and photos by hash', async 
   expect(out.type).toBe('application/zip')
   const { files, json } = await unpack(out)
   expect(json.version).toBe(1)
+  expect(json.dbVersion).toBe(db.verno)
   expect(json.exportedAt).toBe('2026-11-05T12:00:00.000Z')
   expect(json.pieces.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
   expect(json.entries[0].deletedAt).toBe('z')

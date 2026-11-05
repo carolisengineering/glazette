@@ -165,7 +165,7 @@ export function NewPieceSheet({
         </div>
       )}
       <div
-        className={`relative ${photo ? '-mt-7' : ''} flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-[22px] pb-7`}
+        className={`relative ${photo ? '-mt-7' : ''} flex flex-1 flex-col gap-5 rounded-t-[28px] bg-background px-5 pt-[22px] pb-[max(1.75rem,env(safe-area-inset-bottom))]`}
       >
         {photo ? (
           <div className="flex items-center gap-2.5">
