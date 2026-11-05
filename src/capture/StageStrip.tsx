@@ -89,10 +89,12 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
 
   // Glaze rows show for Glazed itself, or when skipping past it.
   const skipsGlazed =
-    stage !== 'glazed' &&
-    current !== undefined &&
-    stagesBetween(current, stage).includes('glazed')
-  const showGlazes = stage === 'glazed' || skipsGlazed
+    stage !== 'glazed' && stagesBetween(current, stage).includes('glazed')
+  // Without a photo, re-saving Glazed makes an undated step that ranks below the
+  // dated one, so its glazes would never show anywhere.
+  const showGlazes =
+    skipsGlazed ||
+    (stage === 'glazed' && (photo !== undefined || current !== 'glazed'))
 
   const saveLabel =
     stage === current
@@ -103,7 +105,9 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const summary = !current
     ? `Saves ${name} as ${STAGE_LABEL[stage]}`
     : stage === current
-      ? `Adds a photo to ${STAGE_LABEL[stage]}`
+      ? photo
+        ? `Adds a photo to ${STAGE_LABEL[stage]}`
+        : `Adds to ${STAGE_LABEL[stage]}`
       : `Moves ${name} from ${STAGE_LABEL[current]} to ${STAGE_LABEL[stage]}`
 
   const save = async () => {

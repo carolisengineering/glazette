@@ -50,6 +50,56 @@ function TrashButton({
 const linkButton =
   'flex min-h-11 flex-none items-center text-[13px] font-semibold text-accent'
 
+/** Edits a step's date. Saves only a cleared field or a complete date, not each keystroke. */
+function DateEditor({
+  entry,
+  onSetDate,
+  onDone,
+}: {
+  entry: StageEntry
+  onSetDate: Props['onSetDate']
+  onDone: () => void
+}) {
+  const [draft, setDraft] = useState(toDateInput(entry.date))
+  const change = (value: string) => {
+    setDraft(value)
+    if (value === toDateInput(entry.date)) return
+    if (value === '') {
+      void onSetDate(entry, undefined)
+      return
+    }
+    const year = Number(value.split('-')[0])
+    const iso = fromDateInput(value)
+    if (iso && year >= 1000) void onSetDate(entry, iso)
+  }
+  return (
+    <div className="flex items-center gap-3 pb-2 pl-11">
+      <input
+        type="date"
+        aria-label={`${STAGE_LABEL[entry.stage]} date`}
+        value={draft}
+        onChange={(ev) => change(ev.target.value)}
+        className="h-11 rounded-xl border border-border bg-surface px-3 text-[16px] text-ink"
+      />
+      {entry.date ? (
+        <button
+          type="button"
+          onClick={() => {
+            setDraft('')
+            void onSetDate(entry, undefined)
+          }}
+          className={linkButton}
+        >
+          Clear date
+        </button>
+      ) : null}
+      <button type="button" onClick={onDone} className={linkButton}>
+        Done
+      </button>
+    </div>
+  )
+}
+
 /** The piece's journey, one row per entry. Steps without a photo are slim rows with an editable date. */
 export function Timeline({ entries, onDelete, onSetDate }: Props) {
   const [editingId, setEditingId] = useState<string>()
@@ -102,6 +152,11 @@ export function Timeline({ entries, onDelete, onSetDate }: Props) {
                 onClick={() =>
                   setEditingId(editingId === e.id ? undefined : e.id)
                 }
+                aria-label={
+                  e.date
+                    ? `${STAGE_LABEL[e.stage]} date, ${shortDate(e.date)}`
+                    : `Add ${STAGE_LABEL[e.stage]} date`
+                }
                 className={linkButton}
               >
                 {e.date ? shortDate(e.date) : 'Add date'}
@@ -109,33 +164,11 @@ export function Timeline({ entries, onDelete, onSetDate }: Props) {
               <TrashButton entry={e} onDelete={onDelete} />
             </div>
             {editingId === e.id ? (
-              <div className="flex items-center gap-3 pb-2 pl-11">
-                <input
-                  type="date"
-                  aria-label={`${STAGE_LABEL[e.stage]} date`}
-                  value={toDateInput(e.date)}
-                  onChange={(ev) =>
-                    void onSetDate(e, fromDateInput(ev.target.value))
-                  }
-                  className="h-11 rounded-xl border border-border bg-surface px-3 text-[16px] text-ink"
-                />
-                {e.date ? (
-                  <button
-                    type="button"
-                    onClick={() => void onSetDate(e, undefined)}
-                    className={linkButton}
-                  >
-                    Clear date
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setEditingId(undefined)}
-                  className={linkButton}
-                >
-                  Done
-                </button>
-              </div>
+              <DateEditor
+                entry={e}
+                onSetDate={onSetDate}
+                onDone={() => setEditingId(undefined)}
+              />
             ) : null}
           </li>
         ),

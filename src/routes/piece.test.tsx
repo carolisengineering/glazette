@@ -537,7 +537,9 @@ test('a step with no photo is a slim row with Add date and no thumbnail', async 
   await screen.findByRole('heading', { name: 'Bare' })
   const row = trimmedRow()
   expect(row.querySelector('img')).toBeNull()
-  expect(within(row).getByRole('button', { name: 'Add date' })).toBeVisible()
+  expect(
+    within(row).getByRole('button', { name: 'Add Trimmed date' }),
+  ).toBeVisible()
   expect(
     within(row).getByRole('button', { name: 'Delete Trimmed entry' }),
   ).toBeVisible()
@@ -550,14 +552,16 @@ test('Add date saves the chosen date and the row shows "Nov 3"', async () => {
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Bare' })
   await userEvent.click(
-    within(trimmedRow()).getByRole('button', { name: 'Add date' }),
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
   )
   fireEvent.change(screen.getByLabelText('Trimmed date'), {
     target: { value: '2026-11-03' },
   })
   await userEvent.click(screen.getByRole('button', { name: 'Done' }))
   expect(
-    await within(trimmedRow()).findByRole('button', { name: 'Nov 3' }),
+    await within(trimmedRow()).findByRole('button', {
+      name: 'Trimmed date, Nov 3',
+    }),
   ).toBeVisible()
   expect(screen.queryByLabelText('Trimmed date')).not.toBeInTheDocument()
   const saved = (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
@@ -569,7 +573,7 @@ test('Clear date returns the row to Add date', async () => {
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Bare' })
   await userEvent.click(
-    within(trimmedRow()).getByRole('button', { name: 'Add date' }),
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
   )
   fireEvent.change(screen.getByLabelText('Trimmed date'), {
     target: { value: '2026-11-03' },
@@ -578,7 +582,9 @@ test('Clear date returns the row to Add date', async () => {
     await screen.findByRole('button', { name: 'Clear date' }),
   )
   expect(
-    await within(trimmedRow()).findByRole('button', { name: 'Add date' }),
+    await within(trimmedRow()).findByRole('button', {
+      name: 'Add Trimmed date',
+    }),
   ).toBeVisible()
   const saved = (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
   expect(saved?.date).toBeUndefined()
@@ -607,7 +613,7 @@ test('a failed date save shows the toast', async () => {
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Bare' })
   await userEvent.click(
-    within(trimmedRow()).getByRole('button', { name: 'Add date' }),
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
   )
   const update = vi
     .spyOn(db.entries, 'update')
@@ -616,5 +622,23 @@ test('a failed date save shows the toast', async () => {
     target: { value: '2026-11-03' },
   })
   expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+})
+
+test('the date editor writes only complete dates, not every keystroke', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  const update = vi.spyOn(db.entries, 'update')
+  const input = screen.getByLabelText('Trimmed date')
+  fireEvent.change(input, { target: { value: '0002-11-03' } })
+  fireEvent.change(input, { target: { value: '0020-11-03' } })
+  fireEvent.change(input, { target: { value: '0202-11-03' } })
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.change(input, { target: { value: '2026-11-03' } })
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
   update.mockRestore()
 })

@@ -403,3 +403,39 @@ test('without a photo, the current stage labels the button Save', async () => {
   await userEvent.click(stageBtn('Thrown'))
   expect(screen.getByRole('button', { name: 'Save' })).toBeVisible()
 })
+
+test('without a photo, saving at the current Glazed stage shows no glaze rows', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'glazed', photo: processed })
+  await openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Glazed/ }))
+  expect(screen.queryByLabelText('Glaze 1')).toBeNull()
+})
+
+test('with a photo, the current Glazed stage still shows glaze rows', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'glazed', photo: processed })
+  await openStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Glazed/ }))
+  expect(screen.getByLabelText('Glaze 1')).toBeVisible()
+})
+
+test('without a photo, the current stage summary reads "Adds to Trimmed"', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'trimmed', photo: processed })
+  await openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Trimmed/ }))
+  expect(screen.getByText('Adds to Trimmed')).toBeVisible()
+  expect(screen.queryByText(/Adds a photo/)).toBeNull()
+})
+
+test('a piece with no live steps moved past Glazed shows the glaze rows', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await db.entries
+    .where('pieceId')
+    .equals(id)
+    .modify({ deletedAt: new Date().toISOString() })
+  await openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Fired/ }))
+  expect(screen.getByLabelText('Glaze 1')).toBeVisible()
+})
