@@ -183,7 +183,7 @@ interface Photo {
 
 ### Deleting
 
-- Pieces, stage entries and photos can be deleted, with a confirmation. Deletes are soft (`deletedAt`), since v2 sync needs tombstones. Deleted rows are excluded everywhere in the UI and purged on export.
+- Pieces, stage entries and photos can be deleted, with a confirmation. Deletes are soft (`deletedAt`), since v2 sync needs tombstones. Deleted rows are excluded everywhere in the UI and kept on export as tombstones.
 - Glazes and clays can be deleted. Pieces that reference them keep the reference and show the name with "(retired)".
 - Lost is not a delete; it's a flag.
 

@@ -8,11 +8,12 @@ import {
   chipCounts,
   filterShelf,
   type ShelfChip,
-  usePieces,
+  usePiecesQuery,
 } from '../db/queries'
 
 export function ShelfScreen() {
-  const views = usePieces()
+  const loaded = usePiecesQuery()
+  const views = loaded ?? []
   const [chip, setChip] = useState<ShelfChip>('all')
   const now = new Date()
   const counts = chipCounts(views, now)
@@ -31,11 +32,19 @@ export function ShelfScreen() {
       </header>
       <KilnBanner count={ready} />
       <StageChips counts={counts} active={active} onPick={setChip} />
-      <div className="shelf-grid">
-        {shown.map((view) => (
-          <PieceCard key={view.piece.id} view={view} now={now} />
-        ))}
-      </div>
+      {loaded && shown.length === 0 ? (
+        <p className="py-10 text-center text-[16px] text-muted">
+          {active === 'all'
+            ? 'Nothing here yet. Tap + to add a piece.'
+            : 'No pieces at this stage.'}
+        </p>
+      ) : (
+        <div className="shelf-grid">
+          {shown.map((view) => (
+            <PieceCard key={view.piece.id} view={view} now={now} />
+          ))}
+        </div>
+      )}
       <BottomBar />
     </main>
   )
