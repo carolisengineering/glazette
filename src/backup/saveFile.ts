@@ -5,7 +5,7 @@
 export async function saveFile(
   blob: Blob,
   name: string,
-): Promise<'shared' | 'downloaded' | 'canceled'> {
+): Promise<'shared' | 'downloaded' | 'canceled' | 'blocked'> {
   const file = new File([blob], name, { type: 'application/zip' })
   if (navigator.canShare?.({ files: [file] })) {
     try {
@@ -14,6 +14,10 @@ export async function saveFile(
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return 'canceled'
+      }
+      // Safari refuses to share once the tap's permission has lapsed.
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        return 'blocked'
       }
       throw err
     }
@@ -25,7 +29,8 @@ export async function saveFile(
     a.download = name
     a.click()
   } finally {
-    URL.revokeObjectURL(url)
+    // Some browsers read the URL after click returns, so revoke later.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   return 'downloaded'
 }

@@ -54,6 +54,62 @@ test('Save a backup shares the zip and records the backup date', async () => {
   expect(await screen.findByText(/^Last backup: /)).toBeVisible()
 })
 
+test('a download also records the backup date', async () => {
+  vi.mocked(saveFile).mockResolvedValue('downloaded')
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  await waitFor(async () => expect(await lastBackup()).toBeDefined())
+})
+
+test('a blocked share offers Save backup file, which shares the same zip', async () => {
+  const zip = new Blob(['x'])
+  vi.mocked(exportZip).mockResolvedValue(zip)
+  vi.mocked(saveFile).mockResolvedValueOnce('blocked')
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  const again = await screen.findByRole('button', { name: 'Save backup file' })
+  expect(await lastBackup()).toBeUndefined()
+  expect(screen.queryByText(/Couldn't save/)).not.toBeInTheDocument()
+
+  vi.mocked(saveFile).mockResolvedValueOnce('shared')
+  await user.click(again)
+  await waitFor(async () => expect(await lastBackup()).toBeDefined())
+  expect(exportZip).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(saveFile).mock.calls[1][0]).toBe(zip)
+  expect(
+    await screen.findByRole('button', { name: 'Save a backup' }),
+  ).toBeVisible()
+})
+
+test('a canceled share from the ready button keeps it', async () => {
+  vi.mocked(saveFile)
+    .mockResolvedValueOnce('blocked')
+    .mockResolvedValueOnce('canceled')
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  await user.click(
+    await screen.findByRole('button', { name: 'Save backup file' }),
+  )
+  await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2))
+  expect(
+    await screen.findByRole('button', { name: 'Save backup file' }),
+  ).toBeEnabled()
+  expect(await lastBackup()).toBeUndefined()
+})
+
+test('Escape does not close the sheet while an action runs', async () => {
+  vi.mocked(saveFile).mockReturnValue(new Promise(() => {}))
+  const onClose = vi.fn()
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={onClose} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  await user.keyboard('{Escape}')
+  expect(onClose).not.toHaveBeenCalled()
+})
+
 test('a canceled share does not record a backup date', async () => {
   vi.mocked(saveFile).mockResolvedValue('canceled')
   const user = userEvent.setup()

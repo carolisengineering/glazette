@@ -29,12 +29,18 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  useModal(titleRef, onClose)
   const lastBackupAt = useLiveQuery(
     () => db.settings.get('app'),
     [],
   )?.lastBackupAt
   const [busy, setBusy] = useState(false)
+  // A built zip kept when the share sheet was blocked, so a fresh tap can share it.
+  const [ready, setReady] = useState<{ blob: Blob; name: string }>()
+  // Closing mid-action would hide the result toast.
+  const close = () => {
+    if (!busy) onClose()
+  }
+  useModal(titleRef, close)
   const { show: showToast, toast } = useToast()
 
   const run = async (action: () => Promise<void>) => {
@@ -53,12 +59,27 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const share = async (blob: Blob, name: string) => {
+    const result = await saveFile(blob, name)
+    if (result === 'blocked') {
+      setReady({ blob, name })
+      return
+    }
+    if (result === 'canceled') return
+    setReady(undefined)
+    await setLastBackupAt(new Date().toISOString())
+  }
+
   const save = () =>
     run(async () => {
       const now = new Date()
-      const result = await saveFile(await exportZip(now), backupFileName(now))
-      if (result !== 'canceled') await setLastBackupAt(now.toISOString())
+      await share(await exportZip(now), backupFileName(now))
     })
+
+  // No awaits before sharing: iOS needs the share to follow the tap directly.
+  const saveReady = () => {
+    if (ready) void run(() => share(ready.blob, ready.name))
+  }
 
   const restore = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -72,9 +93,9 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40">
       <button
         type="button"
-        aria-label="Close backup"
+        aria-hidden="true"
         tabIndex={-1}
-        onClick={onClose}
+        onClick={close}
         className="absolute inset-0 cursor-default"
       />
       <div
@@ -94,11 +115,11 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
         <section className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={save}
+            onClick={ready ? saveReady : save}
             disabled={busy}
             className="h-14 rounded-[28px] bg-accent text-[16px] font-semibold text-white disabled:opacity-50"
           >
-            Save a backup
+            {ready ? 'Save backup file' : 'Save a backup'}
           </button>
           <p className="text-[13px] text-muted">
             One file with every piece, glaze and photo. Keep it somewhere safe,
@@ -127,7 +148,7 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
             onChange={restore}
           />
         </section>
-        <button type="button" onClick={onClose} className={secondary}>
+        <button type="button" onClick={close} className={secondary}>
           Close
         </button>
       </div>

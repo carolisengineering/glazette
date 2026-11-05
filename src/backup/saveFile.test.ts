@@ -1,6 +1,11 @@
 import { saveFile } from './saveFile'
 
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -44,5 +49,15 @@ test('saveFile falls back to a download when files cannot be shared', async () =
     })
   expect(await saveFile(blob, 'a.zip')).toBe('downloaded')
   expect(click).toHaveBeenCalled()
+  expect(revoke).not.toHaveBeenCalled()
+  vi.advanceTimersByTime(1000)
   expect(revoke).toHaveBeenCalledWith('blob:x')
+})
+
+test('saveFile reports a refused share (lapsed tap) as blocked', async () => {
+  const share = vi
+    .fn()
+    .mockRejectedValue(new DOMException('no', 'NotAllowedError'))
+  vi.stubGlobal('navigator', { share, canShare: () => true })
+  expect(await saveFile(blob, 'a.zip')).toBe('blocked')
 })
