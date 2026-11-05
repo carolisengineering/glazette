@@ -439,3 +439,21 @@ test('a piece with no live steps moved past Glazed shows the glaze rows', async 
   await userEvent.click(await screen.findByRole('button', { name: /^Fired/ }))
   expect(screen.getByLabelText('Glaze 1')).toBeVisible()
 })
+
+test('stage buttons are disabled while a save is in flight', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await openNoPhotoStrip(id)
+  let release: () => void = () => {}
+  vi.spyOn(ops, 'addStageEntry').mockImplementationOnce(
+    () =>
+      new Promise<string>((resolve) => {
+        release = () => resolve('x')
+      }),
+  )
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Save to Trimmed' }),
+  )
+  await waitFor(() => expect(stageBtn('Thrown')).toBeDisabled())
+  expect(stageBtn('Trimmed')).toBeDisabled()
+  release()
+})

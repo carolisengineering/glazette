@@ -261,7 +261,7 @@ export function CaptureScreen() {
         {addPhoto ? null : (
           <button
             type="button"
-            disabled={processing}
+            disabled={processing || (!pieceId && pieces === undefined)}
             onClick={startNoPhoto}
             className="h-14 w-full max-w-[320px] rounded-[28px] border-[1.5px] border-white/35 text-[16px] font-semibold text-white disabled:opacity-50"
           >

@@ -587,7 +587,10 @@ test('details sheet without a photo saves nothing until Done, then writes the pi
 
 test('Close on the no-photo details sheet writes nothing and goes to the shelf', async () => {
   const router = await openNewPieceNoPhoto()
-  await userEvent.type(await screen.findByLabelText('Name'), 'Bowl')
+  await userEvent.type(
+    await screen.findByPlaceholderText('Name it later'),
+    'Bowl',
+  )
   await userEvent.click(screen.getByRole('button', { name: 'Close' }))
   await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   expect(await db.pieces.count()).toBe(0)
@@ -629,20 +632,23 @@ test('No photo from + with nothing in progress goes straight to the new-piece sh
   expect(screen.queryByRole('button', { name: 'Update a piece' })).toBeNull()
 })
 
-test('No photo while pieces are still loading shows the choice', async () => {
+test('No photo is disabled until the pieces have loaded, then goes straight to New piece', async () => {
   const spy = vi.spyOn(queries, 'usePiecesQuery').mockReturnValue(undefined)
   try {
     renderRoute('/capture')
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'No photo' }),
-    )
     expect(
-      await screen.findByRole('button', { name: 'Update a piece' }),
-    ).toBeVisible()
-    expect(screen.getByRole('button', { name: 'New piece' })).toBeVisible()
+      await screen.findByRole('button', { name: 'No photo' }),
+    ).toBeDisabled()
   } finally {
     spy.mockRestore()
   }
+  cleanup()
+  renderRoute('/capture')
+  const button = await screen.findByRole('button', { name: 'No photo' })
+  await waitFor(() => expect(button).toBeEnabled())
+  await userEvent.click(button)
+  expect(await screen.findByPlaceholderText('Name it later')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Update a piece' })).toBeNull()
 })
 
 test('end to end: + → No photo → New piece → Bisqued → Done leaves a Bisqued piece with Thrown and Trimmed slim rows', async () => {

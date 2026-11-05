@@ -203,20 +203,44 @@ export async function restagePiece(
     const moved = live.find((e) => e.photoId) ?? latestEntry(live)
     if (!moved) return
     const dropGlazesFor: string[] = []
+    const softDeletes: string[] = []
+    const hardDeletes: string[] = []
+    const updates: { key: string; changes: Partial<StageEntry> }[] = []
     if (moved.stage !== stage) {
-      await db.entries.update(moved.id, { stage })
+      updates.push({ key: moved.id, changes: { stage } })
       if (moved.stage === 'glazed') dropGlazesFor.push(moved.id)
     }
     const covered = new Set<Stage>([stage])
+    const withGlazes = new Set(
+      (
+        await db.glazeApps
+          .where('entryId')
+          .anyOf(live.map((e) => e.id))
+          .toArray()
+      ).map((a) => a.entryId),
+    )
     for (const e of live) {
       if (e.id === moved.id) continue
       if (!e.photoId && STAGES.indexOf(e.stage) >= STAGES.indexOf(stage)) {
-        await db.entries.update(e.id, { deletedAt: now })
+        // A blank step was made moments ago on the unfinished new-piece sheet:
+        // drop it outright so it doesn't linger as a tombstone in backups.
+        const blank = !e.date && !e.note && !withGlazes.has(e.id)
+        if (blank) hardDeletes.push(e.id)
+        else softDeletes.push(e.id)
         dropGlazesFor.push(e.id)
       } else {
         covered.add(e.stage)
       }
     }
+    if (updates.length > 0) {
+      await db.entries.bulkUpdate(updates)
+    }
+    if (softDeletes.length > 0) {
+      await db.entries.bulkUpdate(
+        softDeletes.map((key) => ({ key, changes: { deletedAt: now } })),
+      )
+    }
+    if (hardDeletes.length > 0) await db.entries.bulkDelete(hardDeletes)
     const fills = stagesBetween(undefined, stage)
       .filter((s) => !covered.has(s))
       .map((s) => filledEntry(pieceId, s))

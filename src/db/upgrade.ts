@@ -1,4 +1,5 @@
 import type { Transaction } from 'dexie'
+import { newId } from './db'
 import { missingStages } from './stage'
 import type { Piece, StageEntry } from './types'
 
@@ -21,7 +22,7 @@ export async function fillSkippedStages(tx: Transaction): Promise<void> {
   for (const p of pieces) {
     if (p.deletedAt) continue
     for (const stage of missingStages(byPiece.get(p.id) ?? [])) {
-      added.push({ id: crypto.randomUUID(), pieceId: p.id, stage })
+      added.push({ id: newId(), pieceId: p.id, stage })
     }
   }
   if (added.length > 0) await tx.table('entries').bulkAdd(added)

@@ -36,6 +36,21 @@ export function latestEntry(
   return latest
 }
 
+/**
+ * The step a piece's glaze layers come from: the latest live Glazed step that
+ * has glaze applications. Glazed steps without any are skipped, so a bare
+ * undated Glazed step can't hide the layers on a tied one.
+ */
+export function glazedStepWithGlazes(
+  entries: StageEntry[],
+  glazeApps: { entryId: string }[],
+): StageEntry | undefined {
+  const withApps = new Set(glazeApps.map((a) => a.entryId))
+  return latestEntry(
+    entries.filter((e) => e.stage === 'glazed' && withApps.has(e.id)),
+  )
+}
+
 /** Ascending rank of two entries: later stage first, then later date; within a stage an undated entry ranks below a dated one. Sort with (a, b) => compareEntries(b, a) for newest first. */
 export function compareEntries(a: StageEntry, b: StageEntry): number {
   const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)

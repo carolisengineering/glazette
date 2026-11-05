@@ -386,3 +386,31 @@ test('setEntryDate sets, then clears, the date', async () => {
   await setEntryDate(entry.id, undefined)
   expect('date' in ((await db.entries.get(entry.id)) as object)).toBe(false)
 })
+
+test('restagePiece Fired→Thrown→Fired→Thrown leaves no soft-deleted rows and one live step per stage', async () => {
+  const id = await createPiece({ stage: 'fired' })
+  for (const stage of ['thrown', 'fired', 'thrown'] as const) {
+    await restagePiece(id, stage)
+  }
+  const all = await db.entries.where('pieceId').equals(id).toArray()
+  expect(all.filter((e) => e.deletedAt)).toEqual([])
+  expect(all.map((e) => e.stage)).toEqual(['thrown'])
+  await restagePiece(id, 'fired')
+  const after = await liveByStage(id)
+  expect(after.map((e) => e.stage)).toEqual([
+    'thrown',
+    'trimmed',
+    'bisqued',
+    'glazed',
+    'fired',
+  ])
+})
+
+test('restagePiece soft-deletes a removed step that has a note', async () => {
+  const id = await createPiece({ stage: 'fired' })
+  const glazed = (await liveByStage(id)).find((e) => e.stage === 'glazed')
+  await db.entries.update(glazed?.id as string, { note: 'keep me' })
+  await restagePiece(id, 'thrown')
+  const row = await db.entries.get(glazed?.id as string)
+  expect(row?.deletedAt).toBeDefined()
+})

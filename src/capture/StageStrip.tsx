@@ -1,6 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
+import { CloseIcon } from '../components/CloseIcon'
 import { PhotoImg } from '../components/PhotoImg'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { SAVE_ERROR, useToast } from '../components/useToast'
@@ -90,8 +91,9 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   // Glaze rows show for Glazed itself, or when skipping past it.
   const skipsGlazed =
     stage !== 'glazed' && stagesBetween(current, stage).includes('glazed')
-  // Without a photo, re-saving Glazed makes an undated step that ranks below the
-  // dated one, so its glazes would never show anywhere.
+  // Without a photo, re-saving Glazed adds an undated step with no glazes of its
+  // own. Glaze layers come from the latest Glazed step that has some, so the new
+  // rows would be hidden or ambiguous, and the strip doesn't offer them.
   const showGlazes =
     skipsGlazed ||
     (stage === 'glazed' && (photo !== undefined || current !== 'glazed'))
@@ -162,18 +164,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
             aria-label="Close"
             className="absolute top-12 left-5 flex size-11 items-center justify-center rounded-full bg-camera/60"
           >
-            <svg
-              aria-hidden="true"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#fff"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
+            <CloseIcon />
           </Link>
           <span className="absolute top-14 right-5 rounded-xl bg-camera/60 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
             Update a piece
@@ -188,18 +179,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
               aria-label="Close"
               className="flex size-11 items-center justify-center rounded-full bg-white/15"
             >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#fff"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
+              <CloseIcon />
             </Link>
             <span className="rounded-xl bg-white/15 px-3 py-1.5 text-[13px] font-semibold tracking-[0.06em] text-white">
               Update a piece
@@ -250,6 +230,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
             onChange={setPicked}
             current={current}
             captions
+            disabled={saving}
           />
           <span className="flex items-center gap-2 text-[15px]">
             <svg

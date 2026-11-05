@@ -568,6 +568,27 @@ test('Add date saves the chosen date and the row shows "Nov 3"', async () => {
   expect(saved?.date).toBeDefined()
 })
 
+test('an empty change event mid-edit does not clear the stored date', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  const trimmed = async () =>
+    (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '2026-11-03' },
+  })
+  await waitFor(async () => expect((await trimmed())?.date).toBeDefined())
+  const before = (await trimmed())?.date
+  fireEvent.change(screen.getByLabelText('Trimmed date'), {
+    target: { value: '' },
+  })
+  await new Promise((r) => setTimeout(r, 50))
+  expect((await trimmed())?.date).toBe(before)
+})
+
 test('Clear date returns the row to Add date', async () => {
   const id = await pieceWithBareTrim()
   renderRoute(`/piece/${id}`)

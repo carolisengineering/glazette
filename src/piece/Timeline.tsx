@@ -50,7 +50,7 @@ function TrashButton({
 const linkButton =
   'flex min-h-11 flex-none items-center text-[13px] font-semibold text-accent'
 
-/** Edits a step's date. Saves only a cleared field or a complete date, not each keystroke. */
+/** Edits a step's date. Saves only a complete date, not each keystroke; clearing is the Clear date button. */
 function DateEditor({
   entry,
   onSetDate,
@@ -64,13 +64,10 @@ function DateEditor({
   const change = (value: string) => {
     setDraft(value)
     if (value === toDateInput(entry.date)) return
-    if (value === '') {
-      void onSetDate(entry, undefined)
-      return
-    }
-    const year = Number(value.split('-')[0])
+    // Native date inputs emit '' while a field is half-edited, so only the
+    // Clear date button clears. A complete, valid date saves.
     const iso = fromDateInput(value)
-    if (iso && year >= 1000) void onSetDate(entry, iso)
+    if (iso) void onSetDate(entry, iso)
   }
   return (
     <div className="flex items-center gap-3 pb-2 pl-11">
