@@ -1,10 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Needs `pnpm build` first; skipped when dist/ is absent so `pnpm test` works on a fresh clone.
+// Needs `pnpm build` first. Locally it skips when dist/ is absent; in CI (CI is set)
+// a missing build is a failure, so the check can never be silently skipped there.
 const dist = resolve(__dirname, '../../dist')
 
-describe.skipIf(!existsSync(resolve(dist, 'sw.js')))('build output', () => {
+const built = existsSync(resolve(dist, 'sw.js'))
+
+describe.skipIf(!built && !process.env.CI)('build output', () => {
+  test('dist has been built', () => {
+    expect(built, 'run `pnpm build` before this test').toBe(true)
+  })
+
   test('ships a service worker, manifest and cache headers', () => {
     expect(readFileSync(resolve(dist, '_headers'), 'utf8')).toContain('/sw.js')
     const manifest = JSON.parse(

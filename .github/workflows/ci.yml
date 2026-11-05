@@ -25,8 +25,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test
+      # Build first: the build-output test inspects dist/ and fails in CI without it.
       - run: pnpm build
+      - run: pnpm test
       - name: Install Playwright browsers
         if: hashFiles('playwright.config.ts') != ''
         run: pnpm exec playwright install --with-deps chromium webkit
