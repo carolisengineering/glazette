@@ -176,13 +176,13 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
           </span>
         </div>
       ) : (
-        <div className="flex flex-none flex-col gap-4 px-5 pt-12 pb-6">
+        <div className="flex-none px-5 pt-12 pb-4">
           <div className="flex items-center justify-between">
             <Link
               {...exit}
               replace
               aria-label="Close"
-              className="flex size-11 items-center justify-center rounded-full bg-camera/60"
+              className="flex size-11 items-center justify-center rounded-full bg-white/15"
             >
               <svg
                 aria-hidden="true"
@@ -201,7 +201,6 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
               Update a piece
             </span>
           </div>
-          <NoPhoto label="No photo for this update" />
         </div>
       )}
 
@@ -212,6 +211,8 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
           aria-hidden="true"
           className="h-[5px] w-10 self-center rounded-[3px] bg-[#C5CDD5]"
         />
+
+        {photo ? null : <NoPhoto label="No photo for this update" />}
 
         <div className="flex items-center gap-3 rounded-[18px] bg-surface py-2 pr-3.5 pl-2">
           <PhotoImg
@@ -237,7 +238,9 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
         </div>
 
         <div className="flex flex-col gap-2.5">
-          <span className={label}>Stage for this photo</span>
+          <span className={label}>
+            {photo ? 'Stage for this photo' : 'Stage'}
+          </span>
           <StagePicker
             value={stage}
             onChange={setPicked}

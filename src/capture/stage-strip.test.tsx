@@ -369,6 +369,8 @@ test('without a photo the strip shows "No photo for this update" and a Date fiel
   )
   expect(screen.getByRole('link', { name: 'Close' })).toBeVisible()
   expect(screen.getByText('Update a piece')).toBeVisible()
+  expect(screen.getByText('Stage')).toBeVisible()
+  expect(screen.queryByText('Stage for this photo')).toBeNull()
 })
 
 test('saving with no photo and no date writes an undated step and fills skipped stages', async () => {
