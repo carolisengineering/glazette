@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "glazette",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "a1c998ee-7e05-4900-982b-743c0d79f5cf",
       "migrations_dir": "migrations"
     }
   ],
