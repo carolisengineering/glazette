@@ -16,7 +16,9 @@ import './styles/app.css'
 ensureDefaults()
   .then(() => requestPersistence())
   .catch((err) => console.error('Could not set up defaults', err))
-  .finally(() => startAccountRefresh())
+
+// Doesn't wait on the setup above; persist() can sit on a permission prompt.
+startAccountRefresh()
 
 // End-to-end tests (built with --mode e2e) call the photo pipeline directly.
 if (import.meta.env.MODE !== 'production') {

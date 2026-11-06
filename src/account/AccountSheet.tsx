@@ -60,7 +60,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   }
 
   const verify = async () => {
-    if (busy || !sentTo) return
+    if (busy || !sentTo || !/^\d{6}$/.test(code)) return
     if (spent) {
       setLine('expired')
       return
@@ -68,7 +68,9 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
     setBusy(true)
     setLine(undefined)
     try {
-      const result = await verifyCode(sentTo, code.trim())
+      // A late sign-out from an earlier session must not land on the new one.
+      await useAccount.getState().settlePendingSignOut()
+      const result = await verifyCode(sentTo, code)
       if (result === 'ok') useAccount.getState().signedIn(sentTo)
       else {
         if (result === 'expired') setSpent(true)
@@ -150,8 +152,10 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 maxLength={6}
+                pattern="[0-9]{6}"
+                required
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 className={field}
               />
             </label>

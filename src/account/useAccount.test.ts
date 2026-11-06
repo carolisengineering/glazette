@@ -184,6 +184,37 @@ describe('useAccount', () => {
     expect(localStorage.getItem(KEY)).toBeNull()
   })
 
+  test('settlePendingSignOut waits for the retry and refresh shares it', async () => {
+    const { useAccount, api } = await load()
+    api.signOutRemote.mockRejectedValueOnce(new TypeError('offline'))
+    await useAccount.getState().signOut()
+    let finish!: () => void
+    api.signOutRemote.mockReturnValue(new Promise<void>((r) => (finish = r)))
+    const refreshing = useAccount.getState().refresh()
+    let settled = false
+    const settling = useAccount
+      .getState()
+      .settlePendingSignOut()
+      .then(() => (settled = true))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    finish()
+    await settling
+    await refreshing
+    expect(api.signOutRemote).toHaveBeenCalledTimes(2)
+    expect(localStorage.getItem('glazette.signout-pending')).toBeNull()
+  })
+
+  test('settlePendingSignOut does nothing without a pending sign-out, and ignores failure', async () => {
+    const { useAccount, api } = await load()
+    await useAccount.getState().settlePendingSignOut()
+    expect(api.signOutRemote).not.toHaveBeenCalled()
+    api.signOutRemote.mockRejectedValue(new TypeError('offline'))
+    await useAccount.getState().signOut()
+    await useAccount.getState().settlePendingSignOut()
+    expect(localStorage.getItem('glazette.signout-pending')).toBe('1')
+  })
+
   test('startAccountRefresh refreshes now and on becoming visible, once', async () => {
     const { startAccountRefresh, api } = await load()
     api.fetchSession.mockResolvedValue(null)

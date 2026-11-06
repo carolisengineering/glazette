@@ -46,6 +46,8 @@ interface AccountState {
   email?: string
   /** Checks the server session. Offline keeps whatever the device already shows. */
   refresh(): Promise<void>
+  /** Finishes a sign-out that didn't reach the server, so it can't land on a newer session. */
+  settlePendingSignOut(): Promise<void>
   signedIn(email: string): void
   /** Always signs out locally, even if the server can't be reached. */
   signOut(): Promise<void>
@@ -59,17 +61,29 @@ const cached = readCached()
 // Bumped by sign-in and sign-out so a refresh that started earlier can't apply a stale answer.
 let generation = 0
 
+// The one server sign-out retry in flight, shared by refresh and settlePendingSignOut.
+let retrying: Promise<void> | undefined
+
+function retryPendingSignOut(): Promise<void> {
+  retrying ??= (async () => {
+    try {
+      await signOutRemote()
+      writePending(false)
+    } catch {
+      // Still can't reach the server; stay signed out locally and retry next time.
+    } finally {
+      retrying = undefined
+    }
+  })()
+  return retrying
+}
+
 export const useAccount = create<AccountState>((set) => ({
   ...(cached ? { status: 'signed-in' as const, email: cached } : SIGNED_OUT),
   refresh: async () => {
     const startedAt = generation
     if (readPending()) {
-      try {
-        await signOutRemote()
-        writePending(false)
-      } catch {
-        // Still can't reach the server; stay signed out locally and retry next time.
-      }
+      await retryPendingSignOut()
       if (startedAt !== generation) return
       if (!readPending()) {
         writeCached()
@@ -86,6 +100,9 @@ export const useAccount = create<AccountState>((set) => ({
       writeCached()
       set(SIGNED_OUT)
     }
+  },
+  settlePendingSignOut: async () => {
+    if (readPending()) await retryPendingSignOut()
   },
   signedIn: (email) => {
     generation++

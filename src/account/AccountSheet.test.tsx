@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AccountSheet } from './AccountSheet'
-import { requestCode, verifyCode } from './api'
+import { requestCode, signOutRemote, verifyCode } from './api'
 import { useAccount } from './useAccount'
 
 vi.mock('./api', async (orig) => ({
@@ -207,4 +207,31 @@ test('after the expired line, more attempts keep it and skip the server', async 
   await user.type(await screen.findByLabelText('Code'), '654321')
   await user.click(screen.getByRole('button', { name: 'Sign in' }))
   expect(verifyCode).toHaveBeenCalledTimes(2)
+})
+
+test('a short code is not sent, and non-digits are dropped as she types', async () => {
+  const user = await sendCodeTo()
+  const field = await screen.findByLabelText('Code')
+  await user.type(field, '12a3')
+  expect(field).toHaveValue('123')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  expect(verifyCode).not.toHaveBeenCalled()
+})
+
+test('a pending sign-out is settled before the code is checked', async () => {
+  localStorage.setItem('glazette.signout-pending', '1')
+  vi.mocked(signOutRemote).mockClear()
+  let finish!: () => void
+  vi.mocked(signOutRemote).mockReturnValueOnce(
+    new Promise<void>((r) => (finish = r)),
+  )
+  const user = await sendCodeTo()
+  await user.type(await screen.findByLabelText('Code'), '123456')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  expect(signOutRemote).toHaveBeenCalledTimes(1)
+  expect(verifyCode).not.toHaveBeenCalled()
+  await act(async () => finish())
+  await vi.waitFor(() =>
+    expect(verifyCode).toHaveBeenCalledWith('carol@example.com', '123456'),
+  )
 })

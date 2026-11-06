@@ -228,3 +228,71 @@ test('sessions last 365 days', async () => {
   expect(days).toBeGreaterThan(364)
   expect(days).toBeLessThan(366)
 })
+
+const rowCount = async (table: 'interest' | 'code_request') =>
+  (
+    await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{
+      n: number
+    }>()
+  )?.n
+
+test.each([
+  'not an email',
+  'a@@b.com',
+  'a b@c.com',
+  '@c.com',
+  'a@',
+  `${'a'.repeat(250)}@b.com`,
+])('a junk email (%s) is a 400 and writes nothing', async (email) => {
+  const res = await sendCodeTo(email)
+  expect(res.status).toBe(400)
+  expect((await bodyOf(res))?.code).toBe('INVALID_EMAIL')
+  expect(captured).toHaveLength(0)
+  expect(await rowCount('interest')).toBe(0)
+  expect(await rowCount('code_request')).toBe(0)
+})
+
+test('a request for any type but sign-in is a 400 and uses no slot', async () => {
+  for (const type of [
+    'email-verification',
+    'forget-password',
+    'change-email',
+  ]) {
+    const res = await call('/email-otp/send-verification-otp', {
+      body: { email: CAROL, type },
+    })
+    expect(res.status).toBe(400)
+  }
+  expect(captured).toHaveLength(0)
+  expect(await rowCount('interest')).toBe(0)
+  expect(await rowCount('code_request')).toBe(0)
+})
+
+test('failed sends are refunded, so an outage does not lock the email out', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const working = app
+  app = createApp({
+    sendCode: async () => {
+      throw new Error('Resend is down')
+    },
+  })
+  for (let i = 1; i <= 5; i++) {
+    const res = await sendCodeTo(CAROL, `203.0.113.${40 + i}`)
+    expect(res.status).toBe(502)
+    expect((await bodyOf(res))?.code).toBe('SEND_FAILED')
+  }
+  expect(await rowCount('code_request')).toBe(0)
+  app = working
+  expect((await sendCodeTo(CAROL, '203.0.113.60')).status).toBe(200)
+  expect(captured).toHaveLength(1)
+})
+
+test('codes are not stored in plain text', async () => {
+  await sendCodeTo(CAROL)
+  const rows = await env.DB.prepare('SELECT value FROM verification').all<{
+    value: string
+  }>()
+  expect(rows.results.length).toBeGreaterThan(0)
+  for (const r of rows.results) expect(r.value).not.toContain(captured[0].code)
+  expect((await signIn(CAROL, captured[0].code)).status).toBe(200)
+})

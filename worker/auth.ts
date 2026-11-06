@@ -40,6 +40,7 @@ async function isAllowed(db: D1Database, email: string) {
 }
 
 // Only allowed emails get a code, and at most 5 an hour each.
+// Returns the id of the code_request row that holds the slot, so a failed send can refund it.
 async function admitCodeRequest(db: D1Database, email: string) {
   const now = new Date()
   if (!(await isAllowed(db, email))) {
@@ -65,6 +66,18 @@ async function admitCodeRequest(db: D1Database, email: string) {
       message: 'Too many codes for this email. Try again later.',
     })
   }
+  return meta.last_row_id
+}
+
+const invalidEmail = () =>
+  new APIError('BAD_REQUEST', {
+    code: 'INVALID_EMAIL',
+    message: 'Invalid email',
+  })
+
+// One "@" with something on each side, no whitespace, and no longer than an address can be.
+function isPlausibleEmail(email: string) {
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(email)
 }
 
 export function createAuth(env: Env, sendCode: SendCode) {
@@ -72,6 +85,8 @@ export function createAuth(env: Env, sendCode: SendCode) {
   // the request would still answer 200. Note the failure against the request
   // here and turn it into an error once the endpoint has run.
   const failedSends = new WeakSet<Request>()
+  // The slot each code request took, so a failed send can give it back.
+  const slots = new WeakMap<Request, number>()
 
   return betterAuth({
     database: env.DB,
@@ -91,6 +106,7 @@ export function createAuth(env: Env, sendCode: SendCode) {
     plugins: [
       emailOTP({
         otpLength: 6,
+        storeOTP: 'hashed',
         expiresIn: 300,
         allowedAttempts: 3,
         sendVerificationOTP: async ({ email, otp }, ctx) => {
@@ -110,7 +126,18 @@ export function createAuth(env: Env, sendCode: SendCode) {
         // A non-string email is left for Better Auth's body validation to reject.
         if (typeof ctx.body?.email !== 'string') return
         const email = normalizeEmail(ctx.body.email)
-        if (ctx.path === SEND_CODE_PATH) await admitCodeRequest(env.DB, email)
+        if (!isPlausibleEmail(email)) throw invalidEmail()
+        if (ctx.path === SEND_CODE_PATH) {
+          // The other flows are switched off, so a code for them could never be used.
+          if (ctx.body.type !== 'sign-in') {
+            throw new APIError('BAD_REQUEST', {
+              code: 'INVALID_TYPE',
+              message: 'Invalid code type',
+            })
+          }
+          const slot = await admitCodeRequest(env.DB, email)
+          if (ctx.request) slots.set(ctx.request, slot)
+        }
         return { context: { body: { ...ctx.body, email } } }
       }),
       after: createAuthMiddleware(async (ctx) => {
@@ -119,6 +146,12 @@ export function createAuth(env: Env, sendCode: SendCode) {
           ctx.request &&
           failedSends.has(ctx.request)
         ) {
+          const slot = slots.get(ctx.request)
+          if (slot !== undefined) {
+            await env.DB.prepare('DELETE FROM code_request WHERE rowid = ?')
+              .bind(slot)
+              .run()
+          }
           throw new APIError('BAD_GATEWAY', {
             code: 'SEND_FAILED',
             message: 'The code could not be sent. Try again.',
