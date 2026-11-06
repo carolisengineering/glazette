@@ -21,9 +21,16 @@ export async function makeTestEnv(): Promise<{
     .filter((f) => f.endsWith('.sql'))
     .sort()
   for (const f of files) {
-    // D1 exec() runs one statement per line, so flatten each file first.
-    const sql = readFileSync(resolve(dir, f), 'utf8')
-    await proxy.env.DB.exec(sql.replace(/\s*\n\s*/g, ' '))
+    // Drop "--" comments, then run the file statement by statement.
+    // (Production uses `wrangler d1 migrations apply`, which does this itself.)
+    const statements = readFileSync(resolve(dir, f), 'utf8')
+      .replace(/--.*$/gm, '')
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (statements.length > 0) {
+      await proxy.env.DB.batch(statements.map((s) => proxy.env.DB.prepare(s)))
+    }
   }
   const env: Env = {
     ...proxy.env,
