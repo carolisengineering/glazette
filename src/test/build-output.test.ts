@@ -32,4 +32,9 @@ describe.skipIf(!built && !process.env.CI)('build output', () => {
   test('precaches the fonts', () => {
     expect(readFileSync(resolve(dist, 'sw.js'), 'utf8')).toMatch(/\.woff2/)
   })
+
+  test('the service worker never serves the app shell for /api', () => {
+    const sw = readFileSync(resolve(dist, 'sw.js'), 'utf8')
+    expect(sw).toMatch(/denylist:\[\/\^\\\/api\\\/\/\]/)
+  })
 })
