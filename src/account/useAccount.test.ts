@@ -92,6 +92,53 @@ describe('useAccount', () => {
     expect(localStorage.getItem(KEY)).toBeNull()
   })
 
+  test('a failed sign-out keeps a refresh with a live session signed out and retries', async () => {
+    localStorage.setItem(KEY, 'me@example.com')
+    const { useAccount, api } = await load()
+    api.signOutRemote.mockRejectedValue(new TypeError('offline'))
+    await useAccount.getState().signOut()
+    api.fetchSession.mockResolvedValue({ email: 'me@example.com' })
+    await useAccount.getState().refresh()
+    expect(useAccount.getState().status).toBe('signed-out')
+    expect(localStorage.getItem(KEY)).toBeNull()
+    expect(api.signOutRemote).toHaveBeenCalledTimes(2)
+  })
+
+  test('a successful retry clears the pending sign-out', async () => {
+    const { useAccount, api } = await load()
+    api.signOutRemote.mockRejectedValueOnce(new TypeError('offline'))
+    await useAccount.getState().signOut()
+    api.signOutRemote.mockResolvedValue(undefined)
+    api.fetchSession.mockResolvedValue({ email: 'me@example.com' })
+    await useAccount.getState().refresh()
+    expect(useAccount.getState().status).toBe('signed-out')
+    await useAccount.getState().refresh()
+    expect(useAccount.getState().status).toBe('signed-in')
+    expect(api.signOutRemote).toHaveBeenCalledTimes(2)
+  })
+
+  test('signedIn clears the pending sign-out', async () => {
+    const { useAccount, api } = await load()
+    api.signOutRemote.mockRejectedValue(new TypeError('offline'))
+    await useAccount.getState().signOut()
+    useAccount.getState().signedIn('me@example.com')
+    api.fetchSession.mockResolvedValue({ email: 'me@example.com' })
+    await useAccount.getState().refresh()
+    expect(useAccount.getState().status).toBe('signed-in')
+    expect(api.signOutRemote).toHaveBeenCalledTimes(1)
+  })
+
+  test('a pending sign-out survives a reload', async () => {
+    const first = await load()
+    first.api.signOutRemote.mockRejectedValue(new TypeError('offline'))
+    await first.useAccount.getState().signOut()
+    const { useAccount, api } = await load()
+    api.signOutRemote.mockRejectedValue(new TypeError('offline'))
+    api.fetchSession.mockResolvedValue({ email: 'me@example.com' })
+    await useAccount.getState().refresh()
+    expect(useAccount.getState().status).toBe('signed-out')
+  })
+
   test('a throwing localStorage does not break refresh', async () => {
     const { useAccount, api } = await load()
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {

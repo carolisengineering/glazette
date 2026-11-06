@@ -181,3 +181,30 @@ test('the code field is numeric with one-time-code autofill', async () => {
   expect(code).toHaveAttribute('autocomplete', 'one-time-code')
   expect(code).toHaveAttribute('maxlength', '6')
 })
+
+test('an empty email never reaches the server', async () => {
+  const user = userEvent.setup()
+  render(<AccountSheet onClose={() => {}} />)
+  expect(screen.getByLabelText('Email')).toBeRequired()
+  await user.type(screen.getByLabelText('Email'), '   ')
+  await user.click(screen.getByRole('button', { name: 'Send code' }))
+  expect(requestCode).not.toHaveBeenCalled()
+})
+
+test('after the expired line, more attempts keep it and skip the server', async () => {
+  vi.mocked(verifyCode).mockResolvedValue('expired')
+  const user = await sendCodeTo()
+  await user.type(await screen.findByLabelText('Code'), '123456')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  await screen.findByText('That code has expired. Send a new one.')
+  vi.mocked(verifyCode).mockResolvedValue('wrong')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  expect(
+    await screen.findByText('That code has expired. Send a new one.'),
+  ).toBeVisible()
+  expect(verifyCode).toHaveBeenCalledTimes(1)
+  await user.click(screen.getByRole('button', { name: 'Send a new code' }))
+  await user.type(await screen.findByLabelText('Code'), '654321')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  expect(verifyCode).toHaveBeenCalledTimes(2)
+})

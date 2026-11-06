@@ -111,6 +111,12 @@ describe('signOutRemote', () => {
     expect(fn.mock.calls[0][0]).toBe('/api/auth/sign-out')
     expect(fn.mock.calls[0][1].method).toBe('POST')
   })
+  test('rejects on a non-ok answer', async () => {
+    stub(500, { message: 'boom' })
+    await expect(signOutRemote()).rejects.toThrow()
+    stub(403)
+    await expect(signOutRemote()).rejects.toThrow()
+  })
   test('rejects when offline so the caller can decide', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('x')))
     await expect(signOutRemote()).rejects.toThrow()

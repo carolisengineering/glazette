@@ -20,6 +20,27 @@ function writeCached(email?: string): void {
   }
 }
 
+// Set when a sign-out didn't reach the server. The session cookie is HttpOnly, so only the
+// server can clear it; until it does, refresh must not treat a live session as signed in.
+const PENDING_KEY = 'glazette.signout-pending'
+
+function readPending(): boolean {
+  try {
+    return localStorage.getItem(PENDING_KEY) !== null
+  } catch {
+    return false
+  }
+}
+
+function writePending(pending: boolean): void {
+  try {
+    if (pending) localStorage.setItem(PENDING_KEY, '1')
+    else localStorage.removeItem(PENDING_KEY)
+  } catch {
+    // Storage may be blocked; the retry then only lasts for this session.
+  }
+}
+
 interface AccountState {
   status: 'unknown' | 'signed-out' | 'signed-in'
   email?: string
@@ -41,9 +62,23 @@ let generation = 0
 export const useAccount = create<AccountState>((set) => ({
   ...(cached ? { status: 'signed-in' as const, email: cached } : SIGNED_OUT),
   refresh: async () => {
-    const started = generation
+    const startedAt = generation
+    if (readPending()) {
+      try {
+        await signOutRemote()
+        writePending(false)
+      } catch {
+        // Still can't reach the server; stay signed out locally and retry next time.
+      }
+      if (startedAt !== generation) return
+      if (!readPending()) {
+        writeCached()
+        set(SIGNED_OUT)
+      }
+      return
+    }
     const session = await fetchSession()
-    if (session === 'offline' || started !== generation) return
+    if (session === 'offline' || startedAt !== generation) return
     if (session) {
       writeCached(session.email)
       set({ status: 'signed-in', email: session.email })
@@ -54,6 +89,7 @@ export const useAccount = create<AccountState>((set) => ({
   },
   signedIn: (email) => {
     generation++
+    writePending(false)
     writeCached(email)
     set({ status: 'signed-in', email })
   },
@@ -61,8 +97,10 @@ export const useAccount = create<AccountState>((set) => ({
     generation++
     try {
       await signOutRemote()
+      writePending(false)
     } catch {
-      // Offline: the device is still signed out locally.
+      // Offline or refused: the device is signed out locally; finish it on a later refresh.
+      writePending(true)
     }
     generation++
     writeCached()

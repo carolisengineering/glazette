@@ -38,10 +38,13 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const [sentTo, setSentTo] = useState<string>()
   const [line, setLine] = useState<Line>()
   const [busy, setBusy] = useState(false)
+  // The current code is used up or expired; the server has dropped it, so don't ask again.
+  const [spent, setSpent] = useState(false)
 
   const send = async (address: string) => {
     if (busy) return
     const clean = address.trim().toLowerCase()
+    if (!clean) return
     setBusy(true)
     setLine(undefined)
     try {
@@ -49,6 +52,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
       if (result === 'sent') {
         setSentTo(clean)
         setCode('')
+        setSpent(false)
       } else setLine(result)
     } finally {
       setBusy(false)
@@ -57,12 +61,19 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
 
   const verify = async () => {
     if (busy || !sentTo) return
+    if (spent) {
+      setLine('expired')
+      return
+    }
     setBusy(true)
     setLine(undefined)
     try {
       const result = await verifyCode(sentTo, code.trim())
       if (result === 'ok') useAccount.getState().signedIn(sentTo)
-      else setLine(result)
+      else {
+        if (result === 'expired') setSpent(true)
+        setLine(result)
+      }
     } finally {
       setBusy(false)
     }
@@ -162,6 +173,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
               onClick={() => {
                 setSentTo(undefined)
                 setLine(undefined)
+                setSpent(false)
               }}
               className={link}
             >
@@ -183,6 +195,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
               Email
               <input
                 type="email"
+                required
                 autoComplete="email"
                 enterKeyHint="send"
                 value={email}

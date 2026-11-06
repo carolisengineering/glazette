@@ -97,7 +97,8 @@ export async function fetchSession(): Promise<
   }
 }
 
-/** Ends the server session. Rejects when the network call fails. */
+/** Ends the server session. Rejects when the call fails or the server doesn't say ok. */
 export async function signOutRemote(): Promise<void> {
-  await post('/api/auth/sign-out')
+  const res = await post('/api/auth/sign-out')
+  if (!res.ok) throw new Error(`sign-out failed: ${res.status}`)
 }
