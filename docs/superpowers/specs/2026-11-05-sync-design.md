@@ -48,10 +48,15 @@ These would make it a failure even if it technically works:
 
 ### Signing in
 
-- Sign-in lives in the sheet under the cloud button, alongside Save a backup and Restore. *(My call.)*
+- **Account button** (Carol chose mockup A):
+  - A round Account button sits in the shelf's top-right corner, just right of the cloud button, in the same size and style.
+  - Signed out, it shows a person outline. Signed in, it shows the first letter of the email.
+  - A small accent-colored dot appears while photos are waiting to upload.
+- Tapping it opens an Account sheet, the home for everything in this design: sign in and out, sync status and Recently deleted.
+- The cloud button keeps only Save a backup and Restore.
 - She enters her email, gets a code by email, and types it in. Wrong or expired codes say so, and she can ask for a new one.
 - An email that isn't allowed shows a short, friendly message that accounts aren't open yet. No code is sent.
-- Once she's signed in, the sheet shows her email, when the device last synced, and how many photos are still waiting to upload, if any.
+- Once she's signed in, the Account sheet shows her email, when the device last synced, and how many photos are still waiting to upload, if any.
 
 ### First sign-in on a device
 
@@ -65,7 +70,7 @@ These would make it a failure even if it technically works:
 ### Day to day
 
 - The app syncs when it opens, when it comes back to the foreground, after she makes a change, and when the connection returns. *(My call on the triggers.)*
-- Nothing on the shelf or piece screens changes. Sync status lives in the cloud-button sheet. *(My call: no badge or spinner on the main screens.)*
+- Apart from the Account button, nothing on the shelf or piece screens changes. Sync status lives in the Account sheet; the only sign on the shelf is the Account button's waiting dot. *(My call: no spinner on the main screens.)*
 - If the same thing was changed on both devices before they synced, the later change wins.
 - Restore from a backup still works while signed in and keeps its own merge rules. Whatever it changes on the device then syncs like any other change. Anything it deletes shows up in Recently deleted. *(My call.)*
 
@@ -76,7 +81,7 @@ These would make it a failure even if it technically works:
 
 ### Recently deleted
 
-- A "Recently deleted" list in the cloud-button sheet shows pieces and photos deleted in the last 30 days.
+- A "Recently deleted" list in the Account sheet shows pieces and photos deleted in the last 30 days.
 - Tapping one puts it back where it was, on every device. Restoring a piece brings back its photos and steps.
 - **What counts as a deleted photo** *(my call)*:
   - A photo lands in Recently deleted whenever it stops showing anywhere in the journal: removed from a step, replaced by Retake, dropped along with its step, or deleted along with its piece.
