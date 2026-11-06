@@ -34,6 +34,7 @@ export default defineConfig(({ command, isPreview }) => ({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
       },
       devOptions: { enabled: false },
     }),
@@ -42,4 +43,5 @@ export default defineConfig(({ command, isPreview }) => ({
     // server listens on localhost only; use `pnpm dev --host` for phone testing.
     ...(command === 'serve' && !isPreview ? [basicSsl()] : []),
   ],
+  server: { proxy: { '/api': 'http://localhost:8787' } },
 }))

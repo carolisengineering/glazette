@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import {
   addStageEntry,
@@ -172,6 +173,10 @@ test('a lost piece card has no advance link and shows "Lost"', async () => {
 
 describe('studio name', () => {
   const label = () => screen.findByRole('button', { name: /^Edit studio name/ })
+  // The label reappears with the old name the moment the field closes; the new name
+  // arrives once the save lands and the live query re-reads, so wait for the text.
+  const labelShows = (name: string) =>
+    waitFor(async () => expect(await label()).toHaveTextContent(name))
 
   test('shows "Studio" until a name is set', async () => {
     renderRoute('/')
@@ -186,7 +191,7 @@ describe('studio name', () => {
     expect(field).toHaveFocus()
     expect(field).toHaveValue('')
     await user.type(field, 'Penguin Foot{Enter}')
-    expect(await label()).toHaveTextContent('Penguin Foot')
+    await labelShows('Penguin Foot')
     expect((await db.settings.get('app'))?.studioName).toBe('Penguin Foot')
   })
 
@@ -200,7 +205,7 @@ describe('studio name', () => {
     await user.clear(field)
     await user.type(field, 'Clay Barn')
     await user.click(screen.getByRole('heading', { name: 'My Shelf' }))
-    expect(await label()).toHaveTextContent('Clay Barn')
+    await labelShows('Clay Barn')
     expect((await db.settings.get('app'))?.studioName).toBe('Clay Barn')
   })
 
@@ -211,7 +216,7 @@ describe('studio name', () => {
     await user.click(await label())
     await user.clear(screen.getByRole('textbox', { name: 'Studio name' }))
     await user.keyboard('{Enter}')
-    expect(await label()).toHaveTextContent('Studio')
+    await labelShows('Studio')
     const row = await db.settings.get('app')
     expect(row && 'studioName' in row).toBe(false)
   })
@@ -281,4 +286,39 @@ test('empty shelf says to add a piece; hidden pieces get a different message', a
       'Nothing in progress. Fired and lost pieces are under their chips.',
     ),
   ).toBeVisible()
+})
+
+describe('account button', () => {
+  afterEach(() => {
+    localStorage.clear()
+    useAccount.setState({ status: 'signed-out', email: undefined })
+  })
+
+  test('the Account button sits right of the Backup button', async () => {
+    renderRoute('/')
+    await screen.findByRole('heading', { name: 'My Shelf' })
+    const names = within(screen.getByRole('banner'))
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'))
+      .filter((n) => n === 'Backup' || n?.startsWith('Account, '))
+    expect(names).toEqual(['Backup', 'Account, signed out'])
+  })
+
+  test('the Account button shows the initial when signed in', async () => {
+    useAccount.setState({ status: 'signed-in', email: 'carol@example.com' })
+    renderRoute('/')
+    const button = await screen.findByRole('button', {
+      name: 'Account, signed in as carol@example.com',
+    })
+    expect(button).toHaveTextContent('C')
+  })
+
+  test('tapping the Account button opens the Account sheet', async () => {
+    const user = userEvent.setup()
+    renderRoute('/')
+    await user.click(
+      await screen.findByRole('button', { name: 'Account, signed out' }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Account' })).toBeVisible()
+  })
 })
