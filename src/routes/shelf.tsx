@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { AccountButton } from '../account/AccountButton'
+import { AccountSheet } from '../account/AccountSheet'
 import { BackupSheet } from '../backup/BackupSheet'
 import { BottomBar } from '../components/BottomBar'
 import { KilnBanner } from '../components/KilnBanner'
@@ -17,6 +19,7 @@ export function ShelfScreen() {
   const views = loaded ?? []
   const [chip, setChip] = useState<ShelfChip>('all')
   const [backupOpen, setBackupOpen] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const now = new Date()
   const counts = chipCounts(views, now)
   // The Lost chip disappears when no lost pieces remain; fall back to All.
@@ -33,28 +36,31 @@ export function ShelfScreen() {
             My Shelf
           </h1>
         </div>
-        <button
-          type="button"
-          aria-label="Backup"
-          onClick={() => setBackupOpen(true)}
-          className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
-        >
-          <svg
-            aria-hidden="true"
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            aria-label="Backup"
+            onClick={() => setBackupOpen(true)}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
           >
-            <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5 4 4 0 0 1 17.5 18" />
-            <path d="M12 21v-8" />
-            <path d="m9 15.5 3-3 3 3" />
-          </svg>
-        </button>
+            <svg
+              aria-hidden="true"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5 4 4 0 0 1 17.5 18" />
+              <path d="M12 21v-8" />
+              <path d="m9 15.5 3-3 3 3" />
+            </svg>
+          </button>
+          <AccountButton onClick={() => setAccountOpen(true)} />
+        </div>
       </header>
       <KilnBanner count={ready} />
       <StageChips counts={counts} active={active} onPick={setChip} />
@@ -74,6 +80,7 @@ export function ShelfScreen() {
         </div>
       )}
       <BottomBar />
+      {accountOpen && <AccountSheet onClose={() => setAccountOpen(false)} />}
       {backupOpen && <BackupSheet onClose={() => setBackupOpen(false)} />}
     </main>
   )
