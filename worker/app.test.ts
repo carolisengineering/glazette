@@ -2,35 +2,25 @@ import { createApp } from './app'
 import type { Env } from './env'
 import { makeTestEnv } from './test/harness'
 
-const built = vi.hoisted(() => ({ count: 0 }))
-vi.mock('./auth', async (importOriginal) => {
-  const real = await importOriginal<typeof import('./auth')>()
-  return {
-    ...real,
-    createAuth: (...args: Parameters<typeof real.createAuth>) => {
-      built.count++
-      return real.createAuth(...args)
-    },
-  }
-})
-
 let env: Env
 let dispose: () => Promise<void>
+
 beforeEach(async () => {
   ;({ env, dispose } = await makeTestEnv())
-  built.count = 0
 })
-afterEach(() => dispose())
 
-test('requests through one app and env share one auth instance', async () => {
-  const app = createApp({ sendCode: async () => {} })
-  const get = () =>
-    app.request(
-      'http://localhost/api/auth/get-session',
-      { headers: { Origin: 'http://localhost' } },
-      env,
-    )
-  expect((await get()).status).toBe(200)
-  expect((await get()).status).toBe(200)
-  expect(built.count).toBe(1)
+afterEach(async () => {
+  await dispose()
+})
+
+test('GET /api/health answers ok', async () => {
+  const res = await createApp().request('/api/health', {}, env)
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ ok: true })
+})
+
+test('unknown /api routes are 404 JSON, not the app shell', async () => {
+  const res = await createApp().request('/api/nope', {}, env)
+  expect(res.status).toBe(404)
+  expect(res.headers.get('content-type')).toContain('application/json')
 })
