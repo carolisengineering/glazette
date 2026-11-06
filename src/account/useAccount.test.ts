@@ -108,6 +108,35 @@ describe('useAccount', () => {
     expect(useAccount.getState().status).toBe('signed-out')
   })
 
+  test('a refresh in flight across signedIn() does not undo the sign-in', async () => {
+    const { useAccount, api } = await load()
+    let resolve!: (v: null) => void
+    api.fetchSession.mockReturnValue(new Promise((r) => (resolve = r)))
+    const pending = useAccount.getState().refresh()
+    useAccount.getState().signedIn('me@example.com')
+    resolve(null)
+    await pending
+    expect(useAccount.getState()).toMatchObject({
+      status: 'signed-in',
+      email: 'me@example.com',
+    })
+    expect(localStorage.getItem(KEY)).toBe('me@example.com')
+  })
+
+  test('a refresh in flight across signOut() does not sign the user back in', async () => {
+    localStorage.setItem(KEY, 'me@example.com')
+    const { useAccount, api } = await load()
+    let resolve!: (v: { email: string }) => void
+    api.fetchSession.mockReturnValue(new Promise((r) => (resolve = r)))
+    api.signOutRemote.mockResolvedValue(undefined)
+    const pending = useAccount.getState().refresh()
+    await useAccount.getState().signOut()
+    resolve({ email: 'me@example.com' })
+    await pending
+    expect(useAccount.getState().status).toBe('signed-out')
+    expect(localStorage.getItem(KEY)).toBeNull()
+  })
+
   test('startAccountRefresh refreshes now and on becoming visible, once', async () => {
     const { startAccountRefresh, api } = await load()
     api.fetchSession.mockResolvedValue(null)

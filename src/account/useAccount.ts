@@ -35,11 +35,15 @@ const SIGNED_OUT = { status: 'signed-out', email: undefined } as const
 // Hydrates from the cached email so the Account button is stable on first paint and offline.
 const cached = readCached()
 
+// Bumped by sign-in and sign-out so a refresh that started earlier can't apply a stale answer.
+let generation = 0
+
 export const useAccount = create<AccountState>((set) => ({
   ...(cached ? { status: 'signed-in' as const, email: cached } : SIGNED_OUT),
   refresh: async () => {
+    const started = generation
     const session = await fetchSession()
-    if (session === 'offline') return
+    if (session === 'offline' || started !== generation) return
     if (session) {
       writeCached(session.email)
       set({ status: 'signed-in', email: session.email })
@@ -49,15 +53,18 @@ export const useAccount = create<AccountState>((set) => ({
     }
   },
   signedIn: (email) => {
+    generation++
     writeCached(email)
     set({ status: 'signed-in', email })
   },
   signOut: async () => {
+    generation++
     try {
       await signOutRemote()
     } catch {
       // Offline: the device is still signed out locally.
     }
+    generation++
     writeCached()
     set(SIGNED_OUT)
   },
