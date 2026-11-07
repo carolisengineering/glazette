@@ -3,10 +3,10 @@ import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { emailOTP } from 'better-auth/plugins/email-otp'
 import type { SendCode } from './email'
 import type { Env } from './env'
+import { admitCodeRequest, isAllowed, refundCodeRequest } from './limits'
 
 const SEND_CODE_PATH = '/email-otp/send-verification-otp'
 const SIGN_IN_PATH = '/sign-in/email-otp'
-const CODES_PER_EMAIL_PER_HOUR = 5
 const DAY = 60 * 60 * 24
 
 // Email-OTP routes the app doesn't use. They would send codes or set
@@ -31,42 +31,15 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase()
 }
 
-async function isAllowed(db: D1Database, email: string) {
-  const row = await db
-    .prepare('SELECT 1 FROM allowed_email WHERE email = ?')
-    .bind(email)
-    .first()
-  return row !== null
-}
-
-// Only allowed emails get a code, and at most 5 an hour each.
-// Returns the id of the code_request row that holds the slot, so a failed send can refund it.
-async function admitCodeRequest(db: D1Database, email: string) {
-  const now = new Date()
-  if (!(await isAllowed(db, email))) {
-    await db
-      .prepare('INSERT INTO interest (email, attempted_at) VALUES (?, ?)')
-      .bind(email, now.toISOString())
-      .run()
-    throw notOpen()
-  }
-  // Count and insert in one statement so concurrent requests can't overshoot.
-  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString()
-  const { meta } = await db
-    .prepare(
-      `INSERT INTO code_request (email, requested_at)
-       SELECT ?1, ?2 WHERE (
-         SELECT COUNT(*) FROM code_request WHERE email = ?1 AND requested_at > ?3
-       ) < ?4`,
-    )
-    .bind(email, now.toISOString(), hourAgo, CODES_PER_EMAIL_PER_HOUR)
-    .run()
-  if (meta.changes === 0) {
+async function admitOrThrow(db: D1Database, email: string) {
+  const result = await admitCodeRequest(db, email)
+  if (result === 'not-open') throw notOpen()
+  if (result === 'too-many') {
     throw new APIError('TOO_MANY_REQUESTS', {
       message: 'Too many codes for this email. Try again later.',
     })
   }
-  return meta.last_row_id
+  return result
 }
 
 const invalidEmail = () =>
@@ -135,7 +108,7 @@ export function createAuth(env: Env, sendCode: SendCode) {
               message: 'Invalid code type',
             })
           }
-          const slot = await admitCodeRequest(env.DB, email)
+          const slot = await admitOrThrow(env.DB, email)
           if (ctx.request) slots.set(ctx.request, slot)
         }
         return { context: { body: { ...ctx.body, email } } }
@@ -148,9 +121,7 @@ export function createAuth(env: Env, sendCode: SendCode) {
         ) {
           const slot = slots.get(ctx.request)
           if (slot !== undefined) {
-            await env.DB.prepare('DELETE FROM code_request WHERE rowid = ?')
-              .bind(slot)
-              .run()
+            await refundCodeRequest(env.DB, slot)
           }
           throw new APIError('BAD_GATEWAY', {
             code: 'SEND_FAILED',
