@@ -259,7 +259,7 @@ git commit -m "feat(worker): serve sign-in ourselves and remove Better Auth"
 
 - [ ] **Step 1: Write the script**
 
-Start from `/private/tmp/claude-501/-Users-carol-code-glazette--claude-worktrees-pr3-piece-glazes/bc0de158-ce85-4839-a38b-2892aa8a41fc/scratchpad/harness/run.mjs`. Its parts:
+Start from `scripts/measure-worker-cpu.mjs`. Its parts:
 - A `node:sqlite` stand-in for D1 that supports `prepare/bind/all/run/first/raw` and `batch`. Make `run` return rows for `RETURNING` statements.
 - `process.cpuUsage()` around the module import and around each request.
 - Allowed email `a@b.co`.

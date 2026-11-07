@@ -77,7 +77,7 @@ Behavior carried over unchanged:
 
 ## Measuring CPU
 
-- **Before the PR:** bundle the Worker (`wrangler deploy --dry-run --outdir …`), load it in a fresh Node process with a SQLite-backed stand-in for D1, and time loading plus the first request of each kind. The harness used on 2026-11-07 is the model (a temporary file, `/private/tmp/claude-501/-Users-carol-code-glazette--claude-worktrees-pr3-piece-glazes/bc0de158-ce85-4839-a38b-2892aa8a41fc/scratchpad/harness/run.mjs`). The builder commits a version of it as a script so it can be rerun, and extends it to time a successful sign-in, a session check with a live cookie (including one that refreshes), and sign-out. Target: loading plus any first request totals about 3 ms or less on Carol's Mac. Report the bundle size and the numbers in the PR.
+- **Before the PR:** bundle the Worker (`wrangler deploy --dry-run --outdir …`), load it in a fresh Node process with a SQLite-backed stand-in for D1, and time loading plus the first request of each kind. The harness used on 2026-11-07 is the model (now committed as `scripts/measure-worker-cpu.mjs`). The builder commits a version of it as a script so it can be rerun, and extends it to time a successful sign-in, a session check with a live cookie (including one that refreshes), and sign-out. Target: loading plus any first request totals about 3 ms or less on Carol's Mac. Report the bundle size and the numbers in the PR.
 - **After merge:** Carol signs in on both devices and opens the app a few times. Then she reads CPU time on the Workers metrics page. S2 starts only if the median is under 10 ms. If not, stop and bring Carol the options.
 
 ## Left to the builder

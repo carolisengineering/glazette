@@ -77,6 +77,7 @@ const statement = (sql) => {
 
 const DB = {
   prepare: statement,
+  // Runs the statements one by one, not atomically like D1's batch. Fine for timing.
   batch: async (list) => {
     const out = []
     for (const s of list) out.push(await s.all())
