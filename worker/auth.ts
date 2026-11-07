@@ -1,145 +1,264 @@
-import { betterAuth } from 'better-auth'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
-import { emailOTP } from 'better-auth/plugins/email-otp'
+import type { Context } from 'hono'
+import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { checkCode, issueCode } from './codes'
 import type { SendCode } from './email'
 import type { Env } from './env'
-import { admitCodeRequest, isAllowed, refundCodeRequest } from './limits'
+import {
+  admitCodeRequest,
+  clientKey,
+  isAllowed,
+  overLimit,
+  refundCodeRequest,
+} from './limits'
+import {
+  clearedSessionCookie,
+  createSession,
+  endSession,
+  readSession,
+  sessionCookie,
+  tokenFromCookie,
+} from './sessions'
 
 const SEND_CODE_PATH = '/email-otp/send-verification-otp'
 const SIGN_IN_PATH = '/sign-in/email-otp'
-const DAY = 60 * 60 * 24
 
-// Email-OTP routes the app doesn't use. They would send codes or set
-// passwords outside the allowed-list gate, so they answer 404.
-const UNUSED_PATHS = [
-  '/email-otp/check-verification-otp',
-  '/email-otp/verify-email',
-  '/email-otp/request-password-reset',
-  '/forget-password/email-otp',
-  '/email-otp/reset-password',
-  '/email-otp/request-email-change',
-  '/email-otp/change-email',
-]
+// Per client IP: 3 code requests and 3 sign-in tries a minute.
+const IP_WINDOW_MS = 60_000
+const IP_MAX = 3
 
-const notOpen = () =>
-  new APIError('FORBIDDEN', {
-    code: 'NOT_OPEN',
-    message: 'Glazette sign-in is not open to this email.',
-  })
+type Ctx = Context<{ Bindings: Env }>
 
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase()
+function fail(
+  c: Ctx,
+  status: ContentfulStatusCode,
+  code: string,
+  message: string,
+) {
+  return c.json({ code, message }, status)
 }
-
-async function admitOrThrow(db: D1Database, email: string) {
-  const result = await admitCodeRequest(db, email)
-  if (result === 'not-open') throw notOpen()
-  if (result === 'too-many') {
-    throw new APIError('TOO_MANY_REQUESTS', {
-      message: 'Too many codes for this email. Try again later.',
-    })
-  }
-  return result
-}
-
-const invalidEmail = () =>
-  new APIError('BAD_REQUEST', {
-    code: 'INVALID_EMAIL',
-    message: 'Invalid email',
-  })
 
 // One "@" with something on each side, no whitespace, and no longer than an address can be.
 function isPlausibleEmail(email: string) {
   return email.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(email)
 }
 
-export function createAuth(env: Env, sendCode: SendCode) {
-  // Better Auth logs and swallows an error thrown while sending the code, so
-  // the request would still answer 200. Note the failure against the request
-  // here and turn it into an error once the endpoint has run.
-  const failedSends = new WeakSet<Request>()
-  // The slot each code request took, so a failed send can give it back.
-  const slots = new WeakMap<Request, number>()
+// APP_ORIGIN's origin, plus any listed in EXTRA_ORIGINS (local dev only).
+function trustedOrigins(env: Env): Set<string> {
+  const origins = new Set([new URL(env.APP_ORIGIN).origin])
+  for (const entry of (env.EXTRA_ORIGINS ?? '').split(',')) {
+    if (!entry.trim()) continue
+    try {
+      origins.add(new URL(entry.trim()).origin)
+    } catch {
+      // A malformed entry trusts nothing.
+    }
+  }
+  return origins
+}
 
-  return betterAuth({
-    database: env.DB,
-    secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
-    basePath: '/api/auth',
-    trustedOrigins: [env.BETTER_AUTH_URL],
-    disabledPaths: UNUSED_PATHS,
-    session: { expiresIn: 365 * DAY, updateAge: DAY },
-    rateLimit: {
-      enabled: true,
-      storage: 'database',
-      customRules: { [SEND_CODE_PATH]: { window: 60, max: 3 } },
-    },
-    // Cloudflare sets this header at the edge, so clients can't spoof it.
-    advanced: { ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] } },
-    plugins: [
-      emailOTP({
-        otpLength: 6,
-        storeOTP: 'hashed',
-        expiresIn: 300,
-        allowedAttempts: 3,
-        sendVerificationOTP: async ({ email, otp }, ctx) => {
-          try {
-            await sendCode(email, otp)
-          } catch (error) {
-            if (!ctx?.request) throw error
-            ctx.context.logger.error('Could not send the sign-in code:', error)
-            failedSends.add(ctx.request)
-          }
-        },
-      }),
-    ],
-    hooks: {
-      before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== SEND_CODE_PATH && ctx.path !== SIGN_IN_PATH) return
-        // A non-string email is left for Better Auth's body validation to reject.
-        if (typeof ctx.body?.email !== 'string') return
-        const email = normalizeEmail(ctx.body.email)
-        if (!isPlausibleEmail(email)) throw invalidEmail()
-        if (ctx.path === SEND_CODE_PATH) {
-          // The other flows are switched off, so a code for them could never be used.
-          if (ctx.body.type !== 'sign-in') {
-            throw new APIError('BAD_REQUEST', {
-              code: 'INVALID_TYPE',
-              message: 'Invalid code type',
-            })
-          }
-          const slot = await admitOrThrow(env.DB, email)
-          if (ctx.request) slots.set(ctx.request, slot)
-        }
-        return { context: { body: { ...ctx.body, email } } }
-      }),
-      after: createAuthMiddleware(async (ctx) => {
-        if (
-          ctx.path === SEND_CODE_PATH &&
-          ctx.request &&
-          failedSends.has(ctx.request)
-        ) {
-          const slot = slots.get(ctx.request)
-          if (slot !== undefined) {
-            await refundCodeRequest(env.DB, slot)
-          }
-          throw new APIError('BAD_GATEWAY', {
-            code: 'SEND_FAILED',
-            message: 'The code could not be sent. Try again.',
-          })
-        }
-      }),
-    },
-    databaseHooks: {
-      user: {
-        create: {
-          // A second guard: no account for an email that isn't on the list.
-          before: async (user) => {
-            if (!(await isAllowed(env.DB, normalizeEmail(user.email))))
-              throw notOpen()
-          },
-        },
-      },
-    },
+function fromTrustedOrigin(c: Ctx) {
+  const origin = c.req.header('origin')
+  return origin !== undefined && trustedOrigins(c.env).has(origin)
+}
+
+// The JSON object a POST carries, or null when it isn't one.
+async function jsonObject(c: Ctx): Promise<Record<string, unknown> | null> {
+  try {
+    const body: unknown = await c.req.json()
+    return typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+type EmailResult = { email: string } | { error: Response }
+
+// Reads, trims and lowercases the email, and rejects one that can't be an address.
+function readEmail(c: Ctx, body: Record<string, unknown> | null): EmailResult {
+  if (!body || typeof body.email !== 'string') {
+    return { error: fail(c, 400, 'INVALID_BODY', 'The request is malformed.') }
+  }
+  const email = body.email.trim().toLowerCase()
+  if (!isPlausibleEmail(email)) {
+    return { error: fail(c, 400, 'INVALID_EMAIL', 'Invalid email') }
+  }
+  return { email }
+}
+
+async function findOrCreateUser(
+  db: D1Database,
+  email: string,
+  now: number,
+): Promise<string | null> {
+  const existing = await db
+    .prepare('SELECT id FROM users WHERE email = ?')
+    .bind(email)
+    .first<{ id: string }>()
+  if (existing) return existing.id
+  // A second guard: no account for an email that isn't on the list.
+  if (!(await isAllowed(db, email))) return null
+  // If a parallel sign-in created the row first, this returns its id.
+  const created = await db
+    .prepare(
+      `INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)
+       ON CONFLICT (email) DO UPDATE SET email = excluded.email
+       RETURNING id`,
+    )
+    .bind(crypto.randomUUID(), email, now)
+    .first<{ id: string }>()
+  return created?.id ?? null
+}
+
+const CODE_FAILURES = {
+  INVALID_OTP: [400, 'That code is not right.'],
+  OTP_EXPIRED: [400, 'That code has expired.'],
+  TOO_MANY_ATTEMPTS: [403, 'Too many tries for this code. Ask for a new one.'],
+} as const
+
+export function authRoutes(sendCode: (env: Env) => SendCode) {
+  const routes = new Hono<{ Bindings: Env }>()
+
+  // Every POST must come from the app itself, before anything is read or written.
+  routes.use('*', async (c, next) => {
+    if (c.req.method === 'POST' && !fromTrustedOrigin(c)) {
+      return fail(
+        c,
+        403,
+        'BAD_ORIGIN',
+        'This request came from an untrusted site.',
+      )
+    }
+    await next()
   })
+
+  routes.post(SEND_CODE_PATH, async (c) => {
+    const now = Date.now()
+    const db = c.env.DB
+    if (
+      await overLimit(
+        db,
+        clientKey(c.req.raw, SEND_CODE_PATH),
+        IP_WINDOW_MS,
+        IP_MAX,
+        now,
+      )
+    ) {
+      return fail(
+        c,
+        429,
+        'TOO_MANY_REQUESTS',
+        'Too many requests. Try again in a minute.',
+      )
+    }
+    const body = await jsonObject(c)
+    const read = readEmail(c, body)
+    if ('error' in read) return read.error
+    const { email } = read
+    // Only sign-in codes exist, so a code of any other type could never be used.
+    if (body?.type !== 'sign-in') {
+      return fail(c, 400, 'INVALID_TYPE', 'Invalid code type')
+    }
+    const slot = await admitCodeRequest(db, email)
+    if (slot === 'not-open') {
+      return fail(
+        c,
+        403,
+        'NOT_OPEN',
+        'Glazette sign-in is not open to this email.',
+      )
+    }
+    if (slot === 'too-many') {
+      return fail(
+        c,
+        429,
+        'TOO_MANY_REQUESTS',
+        'Too many codes for this email. Try again later.',
+      )
+    }
+    const code = await issueCode(db, c.env.BETTER_AUTH_SECRET, email, now)
+    try {
+      await sendCode(c.env)(email, code)
+    } catch (error) {
+      console.error('Could not send the sign-in code:', error)
+      // Give the slot back so an outage doesn't lock the email out.
+      await refundCodeRequest(db, slot)
+      return fail(
+        c,
+        502,
+        'SEND_FAILED',
+        'The code could not be sent. Try again.',
+      )
+    }
+    return c.json({ success: true })
+  })
+
+  routes.post(SIGN_IN_PATH, async (c) => {
+    const now = Date.now()
+    const db = c.env.DB
+    if (
+      await overLimit(
+        db,
+        clientKey(c.req.raw, SIGN_IN_PATH),
+        IP_WINDOW_MS,
+        IP_MAX,
+        now,
+      )
+    ) {
+      return fail(
+        c,
+        429,
+        'TOO_MANY_REQUESTS',
+        'Too many tries. Try again in a minute.',
+      )
+    }
+    const body = await jsonObject(c)
+    const read = readEmail(c, body)
+    if ('error' in read) return read.error
+    const { email } = read
+    const otp = body?.otp
+    if (typeof otp !== 'string' || !/^\d{6}$/.test(otp)) {
+      return fail(c, 400, 'INVALID_OTP', CODE_FAILURES.INVALID_OTP[1])
+    }
+    const check = await checkCode(db, c.env.BETTER_AUTH_SECRET, email, otp, now)
+    if (check !== 'ok') {
+      const [status, message] = CODE_FAILURES[check]
+      return fail(c, status, check, message)
+    }
+    const userId = await findOrCreateUser(db, email, now)
+    if (!userId) {
+      return fail(
+        c,
+        403,
+        'NOT_OPEN',
+        'Glazette sign-in is not open to this email.',
+      )
+    }
+    const token = await createSession(db, userId, now)
+    c.header('Set-Cookie', sessionCookie(token))
+    return c.json({ user: { email } })
+  })
+
+  routes.get('/get-session', async (c) => {
+    const token = tokenFromCookie(c.req.header('cookie'))
+    if (!token) return c.json(null)
+    const session = await readSession(c.env.DB, token, Date.now())
+    if (!session) {
+      c.header('Set-Cookie', clearedSessionCookie())
+      return c.json(null)
+    }
+    if (session.refreshed) c.header('Set-Cookie', sessionCookie(token))
+    return c.json({ user: { email: session.email } })
+  })
+
+  routes.post('/sign-out', async (c) => {
+    const token = tokenFromCookie(c.req.header('cookie'))
+    if (token) await endSession(c.env.DB, token)
+    c.header('Set-Cookie', clearedSessionCookie())
+    return c.json({ success: true })
+  })
+
+  return routes
 }
