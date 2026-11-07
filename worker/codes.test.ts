@@ -1,4 +1,5 @@
 import { CODE_TTL_MS, checkCode, issueCode } from './codes'
+import { hmacHex } from './crypto'
 import type { Env } from './env'
 import { makeTestEnv } from './test/harness'
 
@@ -89,5 +90,32 @@ describe('sign-in codes', () => {
       .first<{ code_hash: string }>()
     expect(row?.code_hash).toBeTruthy()
     expect(row?.code_hash).not.toContain(code)
+    expect(row?.code_hash).toBe(await hmacHex(secret(), `${EMAIL}:${code}`))
+  })
+
+  it('clearing an expired code never deletes a fresh one issued meanwhile', async () => {
+    await issue()
+    const later = NOW + CODE_TTL_MS + 1
+    let fresh = ''
+    // Issue a new code just before the expired one is deleted, as a parallel send-code could.
+    const racing = {
+      prepare(sql: string) {
+        const statement = env.DB.prepare(sql)
+        if (!sql.startsWith('DELETE FROM sign_in_codes')) return statement
+        return {
+          bind: (...args: unknown[]) => ({
+            run: async () => {
+              fresh = await issueCode(env.DB, secret(), EMAIL, later)
+              return statement.bind(...args).run()
+            },
+          }),
+        }
+      },
+    } as unknown as D1Database
+    expect(await checkCode(racing, secret(), EMAIL, '000000', later)).toBe(
+      'OTP_EXPIRED',
+    )
+    expect(fresh).toMatch(/^\d{6}$/)
+    expect(await check(fresh, later + 1)).toBe('ok')
   })
 })

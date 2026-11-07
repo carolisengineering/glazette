@@ -242,7 +242,7 @@ test('sessions last 365 days', async () => {
 })
 
 const rowCount = async (
-  table: 'interest' | 'code_request' | 'users' | 'sessions',
+  table: 'interest' | 'code_request' | 'users' | 'sessions' | 'rate_limits',
 ) =>
   (
     await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{
@@ -352,6 +352,7 @@ test('a POST with no Origin, or a foreign Origin, is 403 BAD_ORIGIN and sends no
   expect(await rowCount('code_request')).toBe(0)
   expect(await rowCount('users')).toBe(0)
   expect(await rowCount('sessions')).toBe(0)
+  expect(await rowCount('rate_limits')).toBe(0)
   expect(await attemptsOn(CAROL)).toBe(0)
 })
 
@@ -473,4 +474,108 @@ test('a successful sign-in never returns the token in the body', async () => {
   const text = await res.text()
   expect(text).not.toContain(token)
   expect(JSON.parse(text)).toEqual({ user: { email: CAROL } })
+})
+
+test('addresses in one IPv6 /64 share the per-address limit', async () => {
+  const statuses: number[] = []
+  for (const ip of [
+    '2001:db8:1:2::1',
+    '2001:db8:1:2::2',
+    '2001:DB8:1:2:0:0:0:3',
+    '2001:0db8:0001:0002:ffff:ffff:ffff:ffff',
+  ]) {
+    statuses.push((await sendCodeTo(CAROL, ip)).status)
+  }
+  expect(statuses).toEqual([200, 200, 200, 429])
+  expect((await sendCodeTo(CAROL, '2001:db8:1:3::1')).status).toBe(200)
+})
+
+test('a failure storing the code is a JSON error and gives the slot back', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE sign_in_codes').run()
+  const res = await sendCodeTo(CAROL)
+  expect(res.status).toBe(502)
+  expect(res.headers.get('content-type')).toContain('application/json')
+  expect(await res.json()).toEqual({
+    code: 'SEND_FAILED',
+    message: expect.any(String),
+  })
+  expect(captured).toHaveLength(0)
+  expect(await rowCount('code_request')).toBe(0)
+  expect(logged).toHaveBeenCalled()
+})
+
+test('an unexpected failure is a logged JSON 500, not plain text', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE rate_limits').run()
+  for (const res of [await sendCodeTo(CAROL), await signIn(CAROL, '123456')]) {
+    expect(res.status).toBe(500)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(await res.json()).toEqual({
+      code: 'SERVER_ERROR',
+      message: expect.any(String),
+    })
+  }
+  expect(logged).toHaveBeenCalledTimes(2)
+})
+
+test('signing in again ends the session the browser already had', async () => {
+  await sendCodeTo(CAROL)
+  const first = cookiesFrom(await signIn(CAROL, captured[0].code))
+  await sendCodeTo(CAROL)
+  const otp = captured[1].code
+
+  // A failed try leaves the old session alone.
+  const wrong = await call('/sign-in/email-otp', {
+    body: { email: CAROL, otp: wrongCode(otp) },
+    cookie: first,
+  })
+  expect(wrong.status).toBe(400)
+  expect(
+    (await bodyOf(await call('/get-session', { cookie: first })))?.user?.email,
+  ).toBe(CAROL)
+
+  const again = await call('/sign-in/email-otp', {
+    body: { email: CAROL, otp },
+    cookie: first,
+    ip: '203.0.113.2',
+  })
+  expect(again.status).toBe(200)
+  const second = cookiesFrom(again)
+  expect(second).toContain('session_token=')
+  expect(second).not.toBe(first)
+  expect(await rowCount('sessions')).toBe(1)
+  expect(
+    await (await call('/get-session', { cookie: first })).json(),
+  ).toBeNull()
+  const now = await call('/get-session', { cookie: second })
+  expect((await bodyOf(now))?.user?.email).toBe(CAROL)
+})
+
+test('a successful sign-in clears rate-limit windows that ended long ago', async () => {
+  const now = Date.now()
+  await env.DB.prepare(
+    'INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1), (?, ?, 1)',
+  )
+    .bind('old|/x', now - 2 * 60 * 60 * 1000, 'recent|/x', now - 30_000)
+    .run()
+  const keys = async () =>
+    (
+      await env.DB.prepare('SELECT key FROM rate_limits').all<{ key: string }>()
+    ).results.map((r) => r.key)
+
+  await sendCodeTo(CAROL)
+  expect((await signIn(CAROL, wrongCode(captured[0].code))).status).toBe(400)
+  expect(await keys()).toContain('old|/x')
+
+  expect((await signIn(CAROL, captured[0].code)).status).toBe(200)
+  const left = await keys()
+  expect(left).not.toContain('old|/x')
+  expect(left).toContain('recent|/x')
+})
+
+test('a sign-out with no cookie is 200 success', async () => {
+  const res = await call('/sign-out', { body: {} })
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ success: true })
 })

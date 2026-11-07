@@ -66,9 +66,10 @@ export async function checkCode(
     .first<{ expires_at: number; attempts: number }>()
   if (!row) return 'INVALID_OTP'
   if (row.expires_at <= now) {
+    // Only the expired code: a fresh one issued since must survive.
     await db
-      .prepare('DELETE FROM sign_in_codes WHERE email = ?')
-      .bind(email)
+      .prepare('DELETE FROM sign_in_codes WHERE email = ? AND expires_at <= ?')
+      .bind(email, now)
       .run()
     return 'OTP_EXPIRED'
   }

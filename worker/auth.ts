@@ -9,6 +9,7 @@ import {
   clientKey,
   isAllowed,
   overLimit,
+  pruneRateLimits,
   refundCodeRequest,
 } from './limits'
 import {
@@ -178,8 +179,8 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
         'Too many codes for this email. Try again later.',
       )
     }
-    const code = await issueCode(db, c.env.BETTER_AUTH_SECRET, email, now)
     try {
+      const code = await issueCode(db, c.env.BETTER_AUTH_SECRET, email, now)
       await sendCode(c.env)(email, code)
     } catch (error) {
       console.error('Could not send the sign-in code:', error)
@@ -236,7 +237,12 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
         'Glazette sign-in is not open to this email.',
       )
     }
+    // The new cookie replaces any old one, so end its session rather than
+    // leave the row for a year.
+    const oldToken = tokenFromCookie(c.req.header('cookie'))
+    if (oldToken) await endSession(db, oldToken)
     const token = await createSession(db, userId, now)
+    await pruneRateLimits(db, now)
     c.header('Set-Cookie', sessionCookie(token))
     return c.json({ user: { email } })
   })

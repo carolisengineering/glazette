@@ -12,5 +12,13 @@ export function createApp(deps: AppDeps = {}) {
   const { sendCode } = deps
   app.route('/auth', authRoutes(sendCode ? () => sendCode : resendSender))
   app.notFound((c) => c.json({ error: 'not_found' }, 404))
+  // Anything unexpected is logged and answered as JSON, never as plain text.
+  app.onError((error, c) => {
+    console.error('Unexpected error:', error)
+    return c.json(
+      { code: 'SERVER_ERROR', message: 'Something went wrong. Try again.' },
+      500,
+    )
+  })
   return app
 }
