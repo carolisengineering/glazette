@@ -1,5 +1,5 @@
 // Measures the Worker's CPU time locally, one step per line.
-// Usage: node scripts/measure-worker-cpu.mjs <bundle.js> <migrationsDir>
+// Usage: node --no-warnings scripts/measure-worker-cpu.mjs <bundle.js> <migrationsDir>
 // Build the bundle first: pnpm exec wrangler deploy --dry-run --outdir .wrangler/cpu-bundle
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -82,11 +82,11 @@ const DB = {
     for (const s of list) out.push(await s.all())
     return out
   },
-  exec: async (sql) => sqlite.exec(sql),
 }
 
 const env = {
   DB,
+  // The Worker's existing secret name.
   BETTER_AUTH_SECRET: 'x'.repeat(40),
   APP_ORIGIN: ORIGIN,
   RESEND_API_KEY: 'test-key',
@@ -154,25 +154,48 @@ const steps = [
 ]
 
 let failed = false
+const fail = (message) => {
+  console.error(`FAILED: ${message}`)
+  failed = true
+}
+const ctx = { waitUntil() {}, passThroughOnException() {} }
+const isSignedIn = (json) => json?.user?.email === EMAIL
+
 for (const [label, expected, make] of steps) {
   const req = make()
   t = cpuMs()
-  const res = await mod.default.fetch(req, env, {
-    waitUntil() {},
-    passThroughOnException() {},
-  })
-  await res.text()
+  const res = await mod.default.fetch(req, env, ctx)
+  const text = await res.text()
   const ms = cpuMs() - t
+  console.log(label, res.status, ms.toFixed(1), 'ms')
+
+  // Checks run outside the timed region.
   const set = res.headers.get('set-cookie')
   if (set?.startsWith('__Host-session_token=')) cookie = set.split(';')[0]
-  if (res.status !== expected) failed = true
-  if (label === 'sign-in' && !cookie) {
-    console.error('Sign-in did not set a session cookie.')
-    failed = true
+  if (res.status !== expected)
+    fail(`${label}: expected ${expected}, got ${res.status}`)
+  if (label === 'sign-in' && !cookie)
+    fail('sign-in did not set a session cookie')
+  if (label === 'get-session (cookie)') {
+    if (!isSignedIn(JSON.parse(text)))
+      fail(`${label}: not signed in as ${EMAIL}: ${text}`)
+    if (set) fail(`${label}: unexpected Set-Cookie`)
   }
-  console.log(label, res.status, ms.toFixed(1), 'ms')
+  if (label === 'get-session (a day later, refresh)') {
+    if (!isSignedIn(JSON.parse(text)))
+      fail(`${label}: not signed in as ${EMAIL}: ${text}`)
+    if (!set?.includes('__Host-session_token='))
+      fail(`${label}: missing refreshed Set-Cookie`)
+  }
 }
-if (failed) {
-  console.error('A request did not answer its expected status.')
-  process.exit(1)
+
+// Untimed: the signed-out cookie must no longer work.
+const after = await mod.default.fetch(request('/get-session'), env, ctx)
+const afterText = await after.text()
+if (after.status !== 200 || JSON.parse(afterText) !== null) {
+  fail(
+    `get-session after sign-out should answer null, got ${after.status} ${afterText}`,
+  )
 }
+
+if (failed) process.exit(1)
