@@ -171,7 +171,13 @@ for (const [label, expected, make] of steps) {
 
   // Checks run outside the timed region.
   const set = res.headers.get('set-cookie')
-  if (set?.startsWith('__Host-session_token=')) cookie = set.split(';')[0]
+  // Keep only live cookies; sign-out answers an empty one that clears it.
+  const pair = set?.split(';')[0]
+  if (
+    pair?.startsWith('__Host-session_token=') &&
+    pair.length > '__Host-session_token='.length
+  )
+    cookie = pair
   if (res.status !== expected)
     fail(`${label}: expected ${expected}, got ${res.status}`)
   if (label === 'sign-in' && !cookie)
