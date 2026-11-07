@@ -19,7 +19,6 @@
     "@fontsource/instrument-serif": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
     "@tanstack/react-router": "^1.170.46",
-    "better-auth": "^1.7.18",
     "dexie": "^4.4.7",
     "dexie-react-hooks": "^4.4.0",
     "exifr": "^7.1.3",

@@ -111,7 +111,7 @@ These would make it a failure even if it technically works:
 This is the choice from the 2026-11-01 stack research. Carol's local research notes, in the `notes/reports/` folder (which git doesn't track), have the full reasoning. The 2026-11-05 check is in "Glazette sync backend check.md".
 
 - A Hono API in the same Cloudflare Worker that serves the app, under `/api/*`, so sign-in cookies are first-party.
-- Better Auth with its email OTP plugin, with users and sessions in D1.
+- Our own email-code sign-in (see `2026-11-07-own-sign-in-design.md`), with users and sessions in D1.
   - An allowed-list check runs before any code is sent, and records turned-away emails.
   - Rate limits are stored in the database, not in memory.
   - Sessions last 90 to 365 days.

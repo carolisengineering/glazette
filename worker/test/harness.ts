@@ -35,7 +35,7 @@ export async function makeTestEnv(): Promise<{
   const env: Env = {
     ...proxy.env,
     BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret-0123',
-    BETTER_AUTH_URL: 'http://localhost',
+    APP_ORIGIN: 'http://localhost',
   }
   return { env, dispose: () => proxy.dispose() }
 }

@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local dev. Never commit .dev.vars.
+APP_ORIGIN=https://localhost:5173
+# Comma-separated extra origins to trust, for local dev only. Leave empty unless you
+# test on a phone on the LAN, then list its address, for example https://192.168.1.20:5173.
+EXTRA_ORIGINS=
+# Any random string of 32+ characters, for example from `openssl rand -hex 32`.
+BETTER_AUTH_SECRET=replace-with-a-random-32-plus-character-string
+# A dummy value is fine locally; sending a code then fails with SEND_FAILED.
+RESEND_API_KEY=re_placeholder

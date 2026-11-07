@@ -2,7 +2,6 @@
   "name": "glazette",
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
-  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -18,7 +17,7 @@
     }
   ],
   "vars": {
-    "BETTER_AUTH_URL": "https://glazette.offhours.workers.dev"
+    "APP_ORIGIN": "https://glazette.offhours.workers.dev"
   },
   "observability": {
     "enabled": true

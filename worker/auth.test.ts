@@ -1,4 +1,5 @@
 import { createApp } from './app'
+import { issueCode } from './codes'
 import type { SendCode } from './email'
 import type { Env } from './env'
 import { makeTestEnv } from './test/harness'
@@ -29,26 +30,38 @@ afterEach(async () => {
   await dispose()
 })
 
-type CallOptions = { body?: unknown; ip?: string; cookie?: string }
+type CallOptions = {
+  body?: unknown
+  // Sent as is, in place of a JSON body.
+  rawBody?: string
+  ip?: string
+  cookie?: string
+  // null sends no Origin header.
+  origin?: string | null
+  withEnv?: Env
+}
 
 function call(
   path: string,
-  { body, ip = '203.0.113.1', cookie }: CallOptions = {},
+  {
+    body,
+    rawBody,
+    ip = '203.0.113.1',
+    cookie,
+    origin = ORIGIN,
+    withEnv = env,
+  }: CallOptions = {},
 ) {
-  const headers: Record<string, string> = {
-    Origin: ORIGIN,
-    'cf-connecting-ip': ip,
-  }
-  if (body !== undefined) headers['content-type'] = 'application/json'
+  const headers: Record<string, string> = { 'cf-connecting-ip': ip }
+  if (origin !== null) headers.Origin = origin
+  const sent =
+    rawBody ?? (body === undefined ? undefined : JSON.stringify(body))
+  if (sent !== undefined) headers['content-type'] = 'application/json'
   if (cookie) headers.cookie = cookie
   return app.request(
     `${ORIGIN}/api/auth${path}`,
-    {
-      method: body === undefined ? 'GET' : 'POST',
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    },
-    env,
+    { method: sent === undefined ? 'GET' : 'POST', headers, body: sent },
+    withEnv,
   )
 }
 
@@ -61,7 +74,7 @@ const sendCodeTo = (email: string, ip?: string) =>
 const signIn = (email: string, otp: string, ip?: string) =>
   call('/sign-in/email-otp', { body: { email, otp }, ip })
 
-// The parts of Better Auth's JSON answers these tests read.
+// The parts of the JSON answers these tests read.
 type AuthBody = { code?: string; user?: { email: string } } | null
 const bodyOf = async (res: Response) => (await res.json()) as AuthBody
 
@@ -115,7 +128,7 @@ test('mixed case and spaces match the allowed list and the same account', async 
   await sendCodeTo(CAROL)
   expect((await signIn(CAROL, captured[1].code)).status).toBe(200)
 
-  const users = await env.DB.prepare('SELECT email FROM user').all()
+  const users = await env.DB.prepare('SELECT email FROM users').all()
   expect(users.results).toEqual([{ email: CAROL }])
 })
 
@@ -197,13 +210,26 @@ test('a failed email send is an error, not a success', async () => {
   )
 })
 
+test('a failed send leaves the code already sent working', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await sendCodeTo(CAROL)
+  const first = captured[0].code
+  app = createApp({
+    sendCode: async () => {
+      throw new Error('Resend is down')
+    },
+  })
+  expect((await sendCodeTo(CAROL)).status).toBe(502)
+  expect((await signIn(CAROL, first)).status).toBe(200)
+})
+
 test('an email taken off the list before signing in cannot create an account', async () => {
   await sendCodeTo(CAROL)
   await env.DB.prepare('DELETE FROM allowed_email').run()
   const res = await signIn(CAROL, captured[0].code)
   expect(res.status).toBe(403)
   expect((await bodyOf(res))?.code).toBe('NOT_OPEN')
-  const users = await env.DB.prepare('SELECT COUNT(*) AS n FROM user').first<{
+  const users = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{
     n: number
   }>()
   expect(users?.n).toBe(0)
@@ -220,16 +246,17 @@ test('code routes other than sign-in are switched off', async () => {
 test('sessions last 365 days', async () => {
   await sendCodeTo(CAROL)
   await signIn(CAROL, captured[0].code)
-  const row = await env.DB.prepare('SELECT expiresAt FROM session').first<{
-    expiresAt: string
+  const row = await env.DB.prepare('SELECT expires_at FROM sessions').first<{
+    expires_at: number
   }>()
-  const days =
-    (new Date(row?.expiresAt ?? 0).getTime() - Date.now()) / 86_400_000
+  const days = ((row?.expires_at ?? 0) - Date.now()) / 86_400_000
   expect(days).toBeGreaterThan(364)
   expect(days).toBeLessThan(366)
 })
 
-const rowCount = async (table: 'interest' | 'code_request') =>
+const rowCount = async (
+  table: 'interest' | 'code_request' | 'users' | 'sessions' | 'rate_limits',
+) =>
   (
     await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{
       n: number
@@ -289,10 +316,284 @@ test('failed sends are refunded, so an outage does not lock the email out', asyn
 
 test('codes are not stored in plain text', async () => {
   await sendCodeTo(CAROL)
-  const rows = await env.DB.prepare('SELECT value FROM verification').all<{
-    value: string
+  const rows = await env.DB.prepare('SELECT code_hash FROM sign_in_codes').all<{
+    code_hash: string
   }>()
   expect(rows.results.length).toBeGreaterThan(0)
-  for (const r of rows.results) expect(r.value).not.toContain(captured[0].code)
+  for (const r of rows.results) {
+    expect(r.code_hash).not.toContain(captured[0].code)
+  }
   expect((await signIn(CAROL, captured[0].code)).status).toBe(200)
+})
+
+// A code issued straight into the table, so no send-code row is written.
+const issueDirect = (email: string) =>
+  issueCode(env.DB, env.BETTER_AUTH_SECRET, email, Date.now())
+
+const attemptsOn = async (email: string) =>
+  (
+    await env.DB.prepare('SELECT attempts FROM sign_in_codes WHERE email = ?')
+      .bind(email)
+      .first<{ attempts: number }>()
+  )?.attempts
+
+test('a sign-in with no code issued is 400 INVALID_OTP', async () => {
+  const res = await signIn(CAROL, '123456')
+  expect(res.status).toBe(400)
+  expect((await bodyOf(res))?.code).toBe('INVALID_OTP')
+  expect(cookiesFrom(res)).not.toContain('session_token=')
+})
+
+test('a POST with no Origin, or a foreign Origin, is 403 BAD_ORIGIN and sends nothing', async () => {
+  const code = await issueDirect(CAROL)
+  let ip = 70
+  for (const origin of ['https://evil.example', null]) {
+    const requests: [string, unknown][] = [
+      ['/email-otp/send-verification-otp', { email: CAROL, type: 'sign-in' }],
+      ['/sign-in/email-otp', { email: CAROL, otp: code }],
+      ['/sign-out', {}],
+    ]
+    for (const [path, body] of requests) {
+      const res = await call(path, { body, origin, ip: `203.0.113.${ip++}` })
+      expect(res.status).toBe(403)
+      expect((await bodyOf(res))?.code).toBe('BAD_ORIGIN')
+      expect(cookiesFrom(res)).not.toContain('session_token=')
+    }
+  }
+  expect(captured).toHaveLength(0)
+  expect(await rowCount('interest')).toBe(0)
+  expect(await rowCount('code_request')).toBe(0)
+  expect(await rowCount('users')).toBe(0)
+  expect(await rowCount('sessions')).toBe(0)
+  expect(await rowCount('rate_limits')).toBe(0)
+  expect(await attemptsOn(CAROL)).toBe(0)
+})
+
+test('a sign-out from a foreign Origin leaves the session alive', async () => {
+  await sendCodeTo(CAROL)
+  const cookie = cookiesFrom(await signIn(CAROL, captured[0].code))
+  const out = await call('/sign-out', {
+    body: {},
+    cookie,
+    origin: 'https://evil.example',
+  })
+  expect(out.status).toBe(403)
+  const session = await call('/get-session', { cookie })
+  expect((await bodyOf(session))?.user?.email).toBe(CAROL)
+})
+
+test('EXTRA_ORIGINS lets a listed dev origin through', async () => {
+  const devEnv: Env = {
+    ...env,
+    EXTRA_ORIGINS: 'https://localhost:5173, https://192.168.1.5:5173',
+  }
+  for (const origin of ['https://localhost:5173', 'https://192.168.1.5:5173']) {
+    const res = await call('/email-otp/send-verification-otp', {
+      body: { email: CAROL, type: 'sign-in' },
+      origin,
+      withEnv: devEnv,
+    })
+    expect(res.status).toBe(200)
+  }
+  expect(captured).toHaveLength(2)
+  const foreign = await call('/email-otp/send-verification-otp', {
+    body: { email: CAROL, type: 'sign-in' },
+    origin: 'https://evil.example',
+    withEnv: devEnv,
+  })
+  expect(foreign.status).toBe(403)
+  expect((await bodyOf(foreign))?.code).toBe('BAD_ORIGIN')
+})
+
+test('malformed bodies are 400 and write nothing', async () => {
+  const notJson = await call('/email-otp/send-verification-otp', {
+    rawBody: 'email=carol@example.com',
+  })
+  expect(notJson.status).toBe(400)
+  expect((await bodyOf(notJson))?.code).toBe('INVALID_BODY')
+  const numeric = await call('/email-otp/send-verification-otp', {
+    body: { email: 42, type: 'sign-in' },
+  })
+  expect(numeric.status).toBe(400)
+  expect((await bodyOf(numeric))?.code).toBe('INVALID_BODY')
+
+  await issueDirect(CAROL)
+  for (const body of [
+    { email: CAROL },
+    { email: CAROL, otp: '1234567' },
+    { email: CAROL, otp: '12a456' },
+  ]) {
+    const res = await call('/sign-in/email-otp', { body })
+    expect(res.status).toBe(400)
+    expect((await bodyOf(res))?.code).toBe('INVALID_OTP')
+  }
+
+  expect(captured).toHaveLength(0)
+  expect(await rowCount('interest')).toBe(0)
+  expect(await rowCount('code_request')).toBe(0)
+  expect(await rowCount('users')).toBe(0)
+  expect(await attemptsOn(CAROL)).toBe(0)
+})
+
+test('more than 3 sign-in tries from one address in a minute are 429', async () => {
+  const statuses: number[] = []
+  for (let i = 0; i < 4; i++) {
+    statuses.push((await signIn(CAROL, '123456')).status)
+  }
+  expect(statuses).toEqual([400, 400, 400, 429])
+  expect((await signIn(CAROL, '123456', '203.0.113.99')).status).toBe(400)
+})
+
+test('a session check a day later refreshes the cookie', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  await sendCodeTo(CAROL)
+  const cookie = cookiesFrom(await signIn(CAROL, captured[0].code))
+
+  const soon = await call('/get-session', { cookie })
+  expect(soon.headers.getSetCookie()).toEqual([])
+
+  vi.setSystemTime(Date.now() + 86_400_000 + 1000)
+  const later = await call('/get-session', { cookie })
+  expect((await bodyOf(later))?.user?.email).toBe(CAROL)
+  const set = later.headers.getSetCookie()
+  expect(set).toHaveLength(1)
+  expect(set[0]).toContain('__Host-session_token=')
+  expect(set[0]).not.toContain('Max-Age=0')
+})
+
+test('a dead or garbage cookie: get-session is null and sign-out is 200', async () => {
+  await sendCodeTo(CAROL)
+  const cookie = cookiesFrom(await signIn(CAROL, captured[0].code))
+  expect((await call('/sign-out', { body: {}, cookie })).status).toBe(200)
+
+  for (const dead of [cookie, '__Host-session_token=garbage']) {
+    const session = await call('/get-session', { cookie: dead })
+    expect(session.status).toBe(200)
+    expect(await session.json()).toBeNull()
+    expect(session.headers.getSetCookie().join()).toContain('Max-Age=0')
+
+    const out = await call('/sign-out', { body: {}, cookie: dead })
+    expect(out.status).toBe(200)
+    expect(out.headers.getSetCookie().join()).toContain('Max-Age=0')
+  }
+})
+
+test('a successful sign-in never returns the token in the body', async () => {
+  await sendCodeTo(CAROL)
+  const res = await signIn(CAROL, captured[0].code)
+  expect(res.status).toBe(200)
+  const token = cookiesFrom(res).split('=')[1]
+  expect(token.length).toBeGreaterThan(20)
+  const text = await res.text()
+  expect(text).not.toContain(token)
+  expect(JSON.parse(text)).toEqual({ user: { email: CAROL } })
+})
+
+test('addresses in one IPv6 /64 share the per-address limit', async () => {
+  const statuses: number[] = []
+  for (const ip of [
+    '2001:db8:1:2::1',
+    '2001:db8:1:2::2',
+    '2001:DB8:1:2:0:0:0:3',
+    '2001:0db8:0001:0002:ffff:ffff:ffff:ffff',
+  ]) {
+    statuses.push((await sendCodeTo(CAROL, ip)).status)
+  }
+  expect(statuses).toEqual([200, 200, 200, 429])
+  expect((await sendCodeTo(CAROL, '2001:db8:1:3::1')).status).toBe(200)
+})
+
+test('a failure storing the code after sending it is a JSON error and gives the slot back', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE sign_in_codes').run()
+  const res = await sendCodeTo(CAROL)
+  expect(res.status).toBe(502)
+  expect(res.headers.get('content-type')).toContain('application/json')
+  expect(await res.json()).toEqual({
+    code: 'SEND_FAILED',
+    message: expect.any(String),
+  })
+  // The email went out first, but its code was never stored.
+  expect(captured).toHaveLength(1)
+  expect(await rowCount('code_request')).toBe(0)
+  expect(logged).toHaveBeenCalled()
+})
+
+test('an unexpected failure is a logged JSON 500, not plain text', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE rate_limits').run()
+  for (const res of [await sendCodeTo(CAROL), await signIn(CAROL, '123456')]) {
+    expect(res.status).toBe(500)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(await res.json()).toEqual({
+      code: 'SERVER_ERROR',
+      message: expect.any(String),
+    })
+  }
+  expect(logged).toHaveBeenCalledTimes(2)
+})
+
+test('signing in again gives a new session and leaves the old one alone', async () => {
+  await sendCodeTo(CAROL)
+  const first = cookiesFrom(await signIn(CAROL, captured[0].code))
+  await sendCodeTo(CAROL)
+  const otp = captured[1].code
+
+  // A failed try leaves the old session alone.
+  const wrong = await call('/sign-in/email-otp', {
+    body: { email: CAROL, otp: wrongCode(otp) },
+    cookie: first,
+  })
+  expect(wrong.status).toBe(400)
+  expect(
+    (await bodyOf(await call('/get-session', { cookie: first })))?.user?.email,
+  ).toBe(CAROL)
+
+  const again = await call('/sign-in/email-otp', {
+    body: { email: CAROL, otp },
+    cookie: first,
+    ip: '203.0.113.2',
+  })
+  expect(again.status).toBe(200)
+  const second = cookiesFrom(again)
+  expect(second).toContain('session_token=')
+  expect(second).not.toBe(first)
+  expect(await rowCount('sessions')).toBe(2)
+  // Ending it could race a session check still in flight with the old cookie.
+  expect(
+    (await bodyOf(await call('/get-session', { cookie: first })))?.user?.email,
+  ).toBe(CAROL)
+  const now = await call('/get-session', { cookie: second })
+  expect((await bodyOf(now))?.user?.email).toBe(CAROL)
+})
+
+test('sign-in requests clear rate-limit windows that ended long ago', async () => {
+  const now = Date.now()
+  await env.DB.prepare(
+    'INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1), (?, ?, 1)',
+  )
+    .bind('old|/x', now - 2 * 60 * 60 * 1000, 'recent|/x', now - 30_000)
+    .run()
+  const keys = async () =>
+    (
+      await env.DB.prepare('SELECT key FROM rate_limits').all<{ key: string }>()
+    ).results.map((r) => r.key)
+
+  expect((await signIn(CAROL, '123456')).status).toBe(400)
+  const left = await keys()
+  expect(left).not.toContain('old|/x')
+  expect(left).toContain('recent|/x')
+})
+
+test('a failure clearing old rows does not fail the request', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE sessions').run()
+  expect((await sendCodeTo(CAROL)).status).toBe(200)
+  expect(captured).toHaveLength(1)
+})
+
+test('a sign-out with no cookie is 200 success', async () => {
+  const res = await call('/sign-out', { body: {} })
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ success: true })
 })

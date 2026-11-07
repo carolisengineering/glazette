@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createAuth } from './auth'
+import { authRoutes } from './auth'
 import { resendSender, type SendCode } from './email'
 import type { Env } from './env'
 
@@ -9,16 +9,16 @@ export type AppDeps = { sendCode?: SendCode }
 export function createApp(deps: AppDeps = {}) {
   const app = new Hono<{ Bindings: Env }>().basePath('/api')
   app.get('/health', (c) => c.json({ ok: true }))
-  // Building Better Auth is costly, so build it once per env and reuse it.
-  const instances = new WeakMap<Env, ReturnType<typeof createAuth>>()
-  app.on(['GET', 'POST'], '/auth/*', (c) => {
-    let auth = instances.get(c.env)
-    if (!auth) {
-      auth = createAuth(c.env, deps.sendCode ?? resendSender(c.env))
-      instances.set(c.env, auth)
-    }
-    return auth.handler(c.req.raw)
-  })
+  const { sendCode } = deps
+  app.route('/auth', authRoutes(sendCode ? () => sendCode : resendSender))
   app.notFound((c) => c.json({ error: 'not_found' }, 404))
+  // Anything unexpected is logged and answered as JSON, never as plain text.
+  app.onError((error, c) => {
+    console.error('Unexpected error:', error)
+    return c.json(
+      { code: 'SERVER_ERROR', message: 'Something went wrong. Try again.' },
+      500,
+    )
+  })
   return app
 }
