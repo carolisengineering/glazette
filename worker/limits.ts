@@ -65,11 +65,20 @@ export async function overLimit(
 // Windows are a minute long, so one that started over an hour ago is long over.
 const RATE_LIMIT_KEEP_MS = 60 * 60 * 1000
 
-export async function pruneRateLimits(db: D1Database, now: number) {
-  await db
-    .prepare('DELETE FROM rate_limits WHERE window_start < ?')
-    .bind(now - RATE_LIMIT_KEEP_MS)
-    .run()
+// Deletes rate-limit windows that ended long ago and sessions that have expired.
+// Runs on every sign-in POST that gets past the per-address limit, so neither
+// table can grow without bound. A failure here is logged, never passed on.
+export async function pruneStale(db: D1Database, now: number) {
+  try {
+    await db.batch([
+      db
+        .prepare('DELETE FROM rate_limits WHERE window_start < ?')
+        .bind(now - RATE_LIMIT_KEEP_MS),
+      db.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now),
+    ])
+  } catch (error) {
+    console.error('Could not clear old rows:', error)
+  }
 }
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/

@@ -210,6 +210,19 @@ test('a failed email send is an error, not a success', async () => {
   )
 })
 
+test('a failed send leaves the code already sent working', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await sendCodeTo(CAROL)
+  const first = captured[0].code
+  app = createApp({
+    sendCode: async () => {
+      throw new Error('Resend is down')
+    },
+  })
+  expect((await sendCodeTo(CAROL)).status).toBe(502)
+  expect((await signIn(CAROL, first)).status).toBe(200)
+})
+
 test('an email taken off the list before signing in cannot create an account', async () => {
   await sendCodeTo(CAROL)
   await env.DB.prepare('DELETE FROM allowed_email').run()
@@ -490,7 +503,7 @@ test('addresses in one IPv6 /64 share the per-address limit', async () => {
   expect((await sendCodeTo(CAROL, '2001:db8:1:3::1')).status).toBe(200)
 })
 
-test('a failure storing the code is a JSON error and gives the slot back', async () => {
+test('a failure storing the code after sending it is a JSON error and gives the slot back', async () => {
   const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
   await env.DB.prepare('DROP TABLE sign_in_codes').run()
   const res = await sendCodeTo(CAROL)
@@ -500,7 +513,8 @@ test('a failure storing the code is a JSON error and gives the slot back', async
     code: 'SEND_FAILED',
     message: expect.any(String),
   })
-  expect(captured).toHaveLength(0)
+  // The email went out first, but its code was never stored.
+  expect(captured).toHaveLength(1)
   expect(await rowCount('code_request')).toBe(0)
   expect(logged).toHaveBeenCalled()
 })
@@ -519,7 +533,7 @@ test('an unexpected failure is a logged JSON 500, not plain text', async () => {
   expect(logged).toHaveBeenCalledTimes(2)
 })
 
-test('signing in again ends the session the browser already had', async () => {
+test('signing in again gives a new session and leaves the old one alone', async () => {
   await sendCodeTo(CAROL)
   const first = cookiesFrom(await signIn(CAROL, captured[0].code))
   await sendCodeTo(CAROL)
@@ -544,15 +558,16 @@ test('signing in again ends the session the browser already had', async () => {
   const second = cookiesFrom(again)
   expect(second).toContain('session_token=')
   expect(second).not.toBe(first)
-  expect(await rowCount('sessions')).toBe(1)
+  expect(await rowCount('sessions')).toBe(2)
+  // Ending it could race a session check still in flight with the old cookie.
   expect(
-    await (await call('/get-session', { cookie: first })).json(),
-  ).toBeNull()
+    (await bodyOf(await call('/get-session', { cookie: first })))?.user?.email,
+  ).toBe(CAROL)
   const now = await call('/get-session', { cookie: second })
   expect((await bodyOf(now))?.user?.email).toBe(CAROL)
 })
 
-test('a successful sign-in clears rate-limit windows that ended long ago', async () => {
+test('sign-in requests clear rate-limit windows that ended long ago', async () => {
   const now = Date.now()
   await env.DB.prepare(
     'INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1), (?, ?, 1)',
@@ -564,14 +579,17 @@ test('a successful sign-in clears rate-limit windows that ended long ago', async
       await env.DB.prepare('SELECT key FROM rate_limits').all<{ key: string }>()
     ).results.map((r) => r.key)
 
-  await sendCodeTo(CAROL)
-  expect((await signIn(CAROL, wrongCode(captured[0].code))).status).toBe(400)
-  expect(await keys()).toContain('old|/x')
-
-  expect((await signIn(CAROL, captured[0].code)).status).toBe(200)
+  expect((await signIn(CAROL, '123456')).status).toBe(400)
   const left = await keys()
   expect(left).not.toContain('old|/x')
   expect(left).toContain('recent|/x')
+})
+
+test('a failure clearing old rows does not fail the request', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await env.DB.prepare('DROP TABLE sessions').run()
+  expect((await sendCodeTo(CAROL)).status).toBe(200)
+  expect(captured).toHaveLength(1)
 })
 
 test('a sign-out with no cookie is 200 success', async () => {

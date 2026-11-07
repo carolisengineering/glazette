@@ -1,7 +1,8 @@
-import type { Context } from 'hono'
+import type { Context, Next } from 'hono'
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { checkCode, issueCode } from './codes'
+import { randomCode } from './crypto'
 import type { SendCode } from './email'
 import type { Env } from './env'
 import {
@@ -9,7 +10,7 @@ import {
   clientKey,
   isAllowed,
   overLimit,
-  pruneRateLimits,
+  pruneStale,
   refundCodeRequest,
 } from './limits'
 import {
@@ -39,13 +40,42 @@ function fail(
   return c.json({ code, message }, status)
 }
 
+function notOpen(c: Ctx) {
+  return fail(c, 403, 'NOT_OPEN', 'Glazette sign-in is not open to this email.')
+}
+
+// Per client IP, a few requests a minute to this path. Requests that get
+// through also clear out stale rows.
+function limitByIp(path: string, message: string) {
+  return async (c: Ctx, next: Next) => {
+    const now = Date.now()
+    const key = clientKey(c.req.raw, path)
+    if (await overLimit(c.env.DB, key, IP_WINDOW_MS, IP_MAX, now)) {
+      return fail(c, 429, 'TOO_MANY_REQUESTS', message)
+    }
+    await pruneStale(c.env.DB, now)
+    await next()
+  }
+}
+
 // One "@" with something on each side, no whitespace, and no longer than an address can be.
 function isPlausibleEmail(email: string) {
   return email.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(email)
 }
 
-// APP_ORIGIN's origin, plus any listed in EXTRA_ORIGINS (local dev only).
+// The trusted origins for the last settings seen, so each POST doesn't parse them again.
+let originsCache: { from: string; origins: Set<string> } | undefined
+
 function trustedOrigins(env: Env): Set<string> {
+  const from = `${env.APP_ORIGIN}\n${env.EXTRA_ORIGINS ?? ''}`
+  if (originsCache?.from !== from) {
+    originsCache = { from, origins: parseOrigins(env) }
+  }
+  return originsCache.origins
+}
+
+// APP_ORIGIN's origin, plus any listed in EXTRA_ORIGINS (local dev only).
+function parseOrigins(env: Env): Set<string> {
   const origins = new Set([new URL(env.APP_ORIGIN).origin])
   for (const entry of (env.EXTRA_ORIGINS ?? '').split(',')) {
     if (!entry.trim()) continue
@@ -135,25 +165,13 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
     await next()
   })
 
+  routes.post(
+    SEND_CODE_PATH,
+    limitByIp(SEND_CODE_PATH, 'Too many requests. Try again in a minute.'),
+  )
   routes.post(SEND_CODE_PATH, async (c) => {
     const now = Date.now()
     const db = c.env.DB
-    if (
-      await overLimit(
-        db,
-        clientKey(c.req.raw, SEND_CODE_PATH),
-        IP_WINDOW_MS,
-        IP_MAX,
-        now,
-      )
-    ) {
-      return fail(
-        c,
-        429,
-        'TOO_MANY_REQUESTS',
-        'Too many requests. Try again in a minute.',
-      )
-    }
     const body = await jsonObject(c)
     const read = readEmail(c, body)
     if ('error' in read) return read.error
@@ -163,14 +181,7 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
       return fail(c, 400, 'INVALID_TYPE', 'Invalid code type')
     }
     const slot = await admitCodeRequest(db, email)
-    if (slot === 'not-open') {
-      return fail(
-        c,
-        403,
-        'NOT_OPEN',
-        'Glazette sign-in is not open to this email.',
-      )
-    }
+    if (slot === 'not-open') return notOpen(c)
     if (slot === 'too-many') {
       return fail(
         c,
@@ -180,8 +191,10 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
       )
     }
     try {
-      const code = await issueCode(db, c.env.BETTER_AUTH_SECRET, email, now)
+      // Send before storing, so a failed send leaves any earlier code working.
+      const code = randomCode()
       await sendCode(c.env)(email, code)
+      await issueCode(db, c.env.BETTER_AUTH_SECRET, email, now, code)
     } catch (error) {
       console.error('Could not send the sign-in code:', error)
       // Give the slot back so an outage doesn't lock the email out.
@@ -196,25 +209,13 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
     return c.json({ success: true })
   })
 
+  routes.post(
+    SIGN_IN_PATH,
+    limitByIp(SIGN_IN_PATH, 'Too many tries. Try again in a minute.'),
+  )
   routes.post(SIGN_IN_PATH, async (c) => {
     const now = Date.now()
     const db = c.env.DB
-    if (
-      await overLimit(
-        db,
-        clientKey(c.req.raw, SIGN_IN_PATH),
-        IP_WINDOW_MS,
-        IP_MAX,
-        now,
-      )
-    ) {
-      return fail(
-        c,
-        429,
-        'TOO_MANY_REQUESTS',
-        'Too many tries. Try again in a minute.',
-      )
-    }
     const body = await jsonObject(c)
     const read = readEmail(c, body)
     if ('error' in read) return read.error
@@ -229,20 +230,10 @@ export function authRoutes(sendCode: (env: Env) => SendCode) {
       return fail(c, status, check, message)
     }
     const userId = await findOrCreateUser(db, email, now)
-    if (!userId) {
-      return fail(
-        c,
-        403,
-        'NOT_OPEN',
-        'Glazette sign-in is not open to this email.',
-      )
-    }
-    // The new cookie replaces any old one, so end its session rather than
-    // leave the row for a year.
-    const oldToken = tokenFromCookie(c.req.header('cookie'))
-    if (oldToken) await endSession(db, oldToken)
+    if (!userId) return notOpen(c)
+    // Any older session is left alone: ending it could race a session check
+    // still in flight with the old cookie, whose reply would clear the new one.
     const token = await createSession(db, userId, now)
-    await pruneRateLimits(db, now)
     c.header('Set-Cookie', sessionCookie(token))
     return c.json({ user: { email } })
   })

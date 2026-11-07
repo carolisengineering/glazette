@@ -1,5 +1,5 @@
 import type { Env } from './env'
-import { clientKey, overLimit, pruneRateLimits } from './limits'
+import { clientKey, overLimit, pruneStale } from './limits'
 import { makeTestEnv } from './test/harness'
 
 const NOW = 1_800_000_000_000
@@ -12,6 +12,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await dispose()
 })
 
@@ -36,16 +37,49 @@ describe('overLimit', () => {
   })
 })
 
-describe('pruneRateLimits', () => {
+describe('pruneStale', () => {
   it('deletes windows that started over an hour ago and keeps the rest', async () => {
     await hit('old', NOW - 60 * 60 * 1000 - 1)
     await hit('edge', NOW - 60 * 60 * 1000)
     await hit('recent', NOW - 30_000)
-    await pruneRateLimits(env.DB, NOW)
+    await pruneStale(env.DB, NOW)
     const rows = await env.DB.prepare(
       'SELECT key FROM rate_limits ORDER BY key',
     ).all<{ key: string }>()
     expect(rows.results.map((r) => r.key)).toEqual(['edge', 'recent'])
+  })
+
+  it('deletes expired sessions and keeps live ones, including one expiring now', async () => {
+    await env.DB.prepare(
+      'INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)',
+    )
+      .bind('u1', 'a@example.com', NOW)
+      .run()
+    const add = (hash: string, expiresAt: number) =>
+      env.DB.prepare(
+        `INSERT INTO sessions (token_hash, user_id, created_at, refreshed_at, expires_at)
+         VALUES (?, 'u1', 0, 0, ?)`,
+      )
+        .bind(hash, expiresAt)
+        .run()
+    await add('expired', NOW - 1)
+    await add('edge', NOW)
+    await add('live', NOW + 1)
+    await pruneStale(env.DB, NOW)
+    const rows = await env.DB.prepare(
+      'SELECT token_hash FROM sessions ORDER BY token_hash',
+    ).all<{ token_hash: string }>()
+    expect(rows.results.map((r) => r.token_hash)).toEqual(['edge', 'live'])
+  })
+
+  it('logs a failure instead of throwing', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await env.DB.prepare('DROP TABLE sessions').run()
+    await expect(pruneStale(env.DB, NOW)).resolves.toBeUndefined()
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('Could not clear old rows'),
+      expect.anything(),
+    )
   })
 })
 

@@ -25,14 +25,25 @@ function toHex(buffer: ArrayBuffer): string {
   ).join('')
 }
 
+// The imported key for the last secret seen, so each hash doesn't import it again.
+let hmacKey: { secret: string; key: Promise<CryptoKey> } | undefined
+
+function keyFor(secret: string): Promise<CryptoKey> {
+  if (hmacKey?.secret !== secret) {
+    const key = crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    hmacKey = { secret, key }
+  }
+  return hmacKey.key
+}
+
 export async function hmacHex(secret: string, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
+  const key = await keyFor(secret)
   return toHex(await crypto.subtle.sign('HMAC', key, encoder.encode(data)))
 }
 

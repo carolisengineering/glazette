@@ -11,13 +11,14 @@ export type CodeCheck =
 
 // Issues a new code for the email, replacing any earlier one and resetting
 // its tries. Returns the plain code. Only a keyed hash is stored.
+// Pass a code to store one that was already made (and sent).
 export async function issueCode(
   db: D1Database,
   secret: string,
   email: string,
   now: number,
+  code: string = randomCode(),
 ): Promise<string> {
-  const code = randomCode()
   const codeHash = await hmacHex(secret, `${email}:${code}`)
   await db
     .prepare(
