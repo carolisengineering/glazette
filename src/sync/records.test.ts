@@ -1,4 +1,8 @@
-import { EPOCH, type SyncRecord } from '../../shared/syncProtocol'
+import {
+  EPOCH,
+  MAX_DATA_CHARS,
+  type SyncRecord,
+} from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Piece } from '../db/types'
@@ -96,13 +100,19 @@ test('toRecord leaves out device-only fields', () => {
 
 test('readDirty skips a record too big to send and keeps it waiting', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-  await db.pieces.add(piece('big', { notes: 'x'.repeat(20_000) }))
+  await db.pieces.add(piece('big', { notes: 'x'.repeat(MAX_DATA_CHARS + 1) }))
   await db.pieces.add(piece('small'))
   const records = await readDirty(db)
   expect(records.map((r) => r.id)).toEqual(['small'])
   expect(warn).toHaveBeenCalled()
   expect((await db.pieces.get('big'))?.dirty).toBe(1)
   warn.mockRestore()
+})
+
+test('readDirty sends a piece with 60,000 characters of notes', async () => {
+  await db.pieces.add(piece('long', { notes: 'x'.repeat(60_000) }))
+  const records = await readDirty(db)
+  expect(records.map((r) => r.id)).toEqual(['long'])
 })
 
 test('readDirty returns only dirty rows, from every synced table', async () => {

@@ -1,5 +1,7 @@
 import Dexie from 'dexie'
 import {
+  isSyncRecord,
+  MAX_DATA_CHARS,
   PULL_LIMIT,
   PUSH_MAX_BYTES,
   type SyncRecord,
@@ -547,6 +549,47 @@ test('pushes are sized in bytes, so long Japanese notes stay under the limit', a
   expect(onServerIds.sort()).toEqual(
     Array.from({ length: 60 }, (_, i) => `e${i}`).sort(),
   )
+  expect(await dirtyCount(a)).toBe(0)
+})
+
+test('records of the largest size, in 3-byte text, each fit in a push', async () => {
+  const step = {
+    id: 'e0',
+    pieceId: 'p1',
+    stage: 'thrown' as const,
+    updatedAt: T1,
+    note: '',
+  }
+  // As much 3-byte text as one record's data may hold.
+  const note = '釉'.repeat(MAX_DATA_CHARS - JSON.stringify(step).length)
+  await a.pieces.add(piece('p1'))
+  await a.entries.bulkAdd(
+    ['e0', 'e1', 'e2'].map((id) => ({ ...step, id, note })),
+  )
+  const { transport, pushed } = watched()
+
+  expect(await syncOnce(a, transport, ME)).toBe('done')
+
+  const steps = pushed.flat().filter((r) => r.kind === 'entry')
+  expect(steps).toHaveLength(3)
+  for (const record of steps) {
+    expect(JSON.stringify(record.data).length).toBe(MAX_DATA_CHARS)
+    expect(isSyncRecord(record)).toBe(true)
+    const bytes = new TextEncoder().encode(JSON.stringify([record])).length
+    expect(bytes).toBeGreaterThan(3 * MAX_DATA_CHARS - 1_000)
+    expect(bytes).toBeLessThanOrEqual(PUSH_MAX_BYTES)
+  }
+  for (const records of pushed) {
+    const bytes = new TextEncoder().encode(JSON.stringify(records)).length
+    expect(bytes).toBeLessThanOrEqual(PUSH_MAX_BYTES)
+  }
+  expect(
+    server
+      .records()
+      .filter((r) => r.kind === 'entry')
+      .map((r) => r.id)
+      .sort(),
+  ).toEqual(['e0', 'e1', 'e2'])
   expect(await dirtyCount(a)).toBe(0)
 })
 
