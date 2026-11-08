@@ -1,5 +1,9 @@
 import Dexie from 'dexie'
-import { PULL_LIMIT, type SyncRecord } from '../../shared/syncProtocol'
+import {
+  PULL_LIMIT,
+  PUSH_MAX_CHARS,
+  type SyncRecord,
+} from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
 import type { Piece } from '../db/types'
 import { SyncStopped, syncOnce, type Transport } from './engine'
@@ -431,6 +435,35 @@ describe('stopping early keeps what is safe', () => {
     expect(await syncOnce(a, stuck, ME)).toBe('error')
     expect(await a.syncState.get('state')).toBeUndefined()
   })
+})
+
+test('pushes stay under the size limit and every record arrives', async () => {
+  const note = 'x'.repeat(15_000)
+  await a.pieces.add(piece('p1'))
+  await a.entries.bulkAdd(
+    Array.from({ length: 60 }, (_, i) => ({
+      id: `e${i}`,
+      pieceId: 'p1',
+      stage: 'thrown' as const,
+      note,
+    })),
+  )
+  const { transport, pushed } = watched()
+
+  expect(await syncOnce(a, transport, ME)).toBe('done')
+
+  expect(pushed.length).toBeGreaterThan(1)
+  for (const records of pushed) {
+    expect(JSON.stringify(records).length).toBeLessThanOrEqual(PUSH_MAX_CHARS)
+  }
+  const onServerIds = server
+    .records()
+    .filter((r) => r.kind === 'entry')
+    .map((r) => r.id)
+  expect(onServerIds.sort()).toEqual(
+    Array.from({ length: 60 }, (_, i) => `e${i}`).sort(),
+  )
+  expect(await dirtyCount(a)).toBe(0)
 })
 
 test('nothing to do is still a sync', async () => {

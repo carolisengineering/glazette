@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
   isSyncRecord,
+  MAX_BODY_BYTES,
   PULL_LIMIT,
   PUSH_LIMIT,
   type PushResponse,
@@ -11,8 +12,6 @@ import {
 } from '../shared/syncProtocol'
 import type { Env } from './env'
 import { readSession, sessionCookie, tokenFromCookie } from './sessions'
-
-const MAX_BODY_BYTES = 1024 * 1024
 
 type Vars = { userId: string }
 type Ctx = Context<{ Bindings: Env; Variables: Vars }>

@@ -3,6 +3,7 @@
 
 import {
   isSyncRecord,
+  MAX_BODY_BYTES,
   PULL_LIMIT,
   PUSH_LIMIT,
   type PullResponse,
@@ -23,7 +24,9 @@ export function createTestServer(): Transport & { records(): SyncRecord[] } {
   return {
     async push(records: SyncRecord[]): Promise<PushResponse> {
       const keys = new Set(records.map((r) => `${r.kind}/${r.id}`))
+      const body = new TextEncoder().encode(JSON.stringify({ records }))
       if (
+        body.length > MAX_BODY_BYTES ||
         records.length > PUSH_LIMIT ||
         !records.every(isSyncRecord) ||
         keys.size !== records.length

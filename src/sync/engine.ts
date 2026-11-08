@@ -1,6 +1,7 @@
 import {
   isSyncRecord,
   PUSH_LIMIT,
+  PUSH_MAX_CHARS,
   type PullResponse,
   type PushResponse,
   type SyncRecord,
@@ -101,9 +102,7 @@ async function run(
   // 4. Push what changed here. A row edited while its push is in flight keeps
   // its mark for the next sync. The server's copy is applied before the mark
   // is cleared, so on a tie the server's copy wins over the dirty row.
-  const dirty = await readDirty(db)
-  for (let i = 0; i < dirty.length; i += PUSH_LIMIT) {
-    const chunk = dirty.slice(i, i + PUSH_LIMIT)
+  for (const chunk of inPushes(await readDirty(db))) {
     const { rejected } = await transport.push(chunk)
     await quietly(db, async () => {
       await applyRecords(db, rejected)
@@ -118,4 +117,30 @@ async function run(
     cursor,
     lastSyncedAt: new Date().toISOString(),
   })
+}
+
+/**
+ * Splits records into pushes of at most PUSH_LIMIT records and at most
+ * PUSH_MAX_CHARS characters as JSON. A record that can be sent always fits
+ * on its own.
+ */
+function inPushes(records: SyncRecord[]): SyncRecord[][] {
+  const pushes: SyncRecord[][] = []
+  let current: SyncRecord[] = []
+  let chars = 2 // the array's brackets
+  for (const record of records) {
+    const size = JSON.stringify(record).length
+    // A comma before every record but the first.
+    const full =
+      current.length >= PUSH_LIMIT || chars + 1 + size > PUSH_MAX_CHARS
+    if (current.length > 0 && full) {
+      pushes.push(current)
+      current = []
+      chars = 2
+    }
+    chars += (current.length > 0 ? 1 : 0) + size
+    current.push(record)
+  }
+  if (current.length > 0) pushes.push(current)
+  return pushes
 }
