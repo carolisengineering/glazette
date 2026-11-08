@@ -10,7 +10,7 @@ import type {
   StageEntry,
   SyncState,
 } from './types'
-import { fillSkippedStages } from './upgrade'
+import { dateOldRows, fillSkippedStages } from './upgrade'
 
 export class GlazetteDB extends Dexie {
   pieces!: EntityTable<Piece, 'id'>
@@ -36,17 +36,20 @@ export class GlazetteDB extends Dexie {
     this.version(1).stores(stores)
     // Same stores: version 2 exists only to run the one-time fill.
     this.version(2).stores(stores).upgrade(fillSkippedStages)
-    // Indexing dirty finds the rows waiting to sync. No upgrade: a row without
-    // updatedAt counts as unchanged since 1970.
-    this.version(3).stores({
-      pieces: 'id, updatedAt, deletedAt, dirty',
-      entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
-      glazeApps: 'id, entryId, pieceId, glazeId, dirty',
-      glazes: 'id, name, deletedAt, dirty',
-      clays: 'id, name, deletedAt, dirty',
-      settings: 'id, dirty',
-      syncState: 'id',
-    })
+    // Indexing dirty finds the rows waiting to sync. The upgrade dates rows
+    // changed before sync; a row still without updatedAt counts as unchanged
+    // since 1970.
+    this.version(3)
+      .stores({
+        pieces: 'id, updatedAt, deletedAt, dirty',
+        entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
+        glazeApps: 'id, entryId, pieceId, glazeId, dirty',
+        glazes: 'id, name, deletedAt, dirty',
+        clays: 'id, name, deletedAt, dirty',
+        settings: 'id, dirty',
+        syncState: 'id',
+      })
+      .upgrade(dateOldRows)
     trackChanges(this)
   }
 }

@@ -1,3 +1,4 @@
+import Dexie from 'dexie'
 import { PULL_LIMIT, type SyncRecord } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
 import type { Piece } from '../db/types'
@@ -501,4 +502,87 @@ test('a full sync pulls from the start and an incremental one from the cursor', 
 
   expect(since).toEqual([0, cursor])
   expect(cursor).toBeGreaterThan(0)
+})
+
+describe('rows changed before this update keep their changes at first sync', () => {
+  const V2_STORES = {
+    pieces: 'id, updatedAt, deletedAt',
+    entries: 'id, pieceId, [pieceId+date], stage, deletedAt',
+    glazeApps: 'id, entryId, pieceId, glazeId',
+    glazes: 'id, name, deletedAt',
+    clays: 'id, name, deletedAt',
+    photos: 'id, hash',
+    settings: 'id',
+  }
+  // The settings ensureDefaults writes.
+  const DEFAULTS = {
+    id: 'app' as const,
+    defaultCone: '6',
+    bisqueNote: 'Cone 6',
+    firedNote: 'Cone 6 oxidation',
+  }
+
+  /**
+   * Rebuilds a device as it was before this update (database version 2, no
+   * change times), then opens it as the app does, which runs the upgrade.
+   */
+  async function fromBeforeTheUpdate(
+    device: GlazetteDB,
+    seed: (old: Dexie) => Promise<void>,
+  ) {
+    await device.delete()
+    const old = new Dexie(device.name)
+    old.version(2).stores(V2_STORES)
+    await old.open()
+    await seed(old)
+    old.close()
+    await device.open()
+  }
+
+  test('edited settings from before the update survive a first sync against untouched defaults', async () => {
+    await fromBeforeTheUpdate(a, async (old) => {
+      await old.table('clays').add({ id: 'clay-a', name: 'White stoneware' })
+      await old.table('settings').add({ ...DEFAULTS, defaultClayId: 'clay-a' })
+    })
+    await fromBeforeTheUpdate(b, async (old) => {
+      await old.table('clays').add({ id: 'clay-b', name: 'White stoneware' })
+      await old.table('settings').add({
+        ...DEFAULTS,
+        defaultClayId: 'clay-b',
+        studioName: 'Penguin Foot',
+        bisqueNote: 'Cone 04',
+      })
+    })
+
+    expect(await syncOnce(a, server, ME)).toBe('done')
+    expect(await syncOnce(b, server, ME)).toBe('done')
+    expect(await syncOnce(a, server, ME)).toBe('done')
+
+    const edited = { studioName: 'Penguin Foot', bisqueNote: 'Cone 04' }
+    expect(await a.settings.get('app')).toMatchObject(edited)
+    expect(await b.settings.get('app')).toMatchObject(edited)
+    expect(onServer('settings', 'app')?.data).toMatchObject(edited)
+  })
+
+  test('a step edited before the update on one device survives a first sync', async () => {
+    // Both devices restored the same backup; B then dated and noted the step.
+    const step = { id: 'e1', pieceId: 'p1', stage: 'thrown' }
+    const edited = { date: T2, note: 'Wide foot ring' }
+    await fromBeforeTheUpdate(a, async (old) => {
+      await old.table('pieces').add(piece('p1', { updatedAt: T1 }))
+      await old.table('entries').add(step)
+    })
+    await fromBeforeTheUpdate(b, async (old) => {
+      await old.table('pieces').add(piece('p1', { updatedAt: T2 }))
+      await old.table('entries').add({ ...step, ...edited })
+    })
+
+    expect(await syncOnce(a, server, ME)).toBe('done')
+    expect(await syncOnce(b, server, ME)).toBe('done')
+    expect(await syncOnce(a, server, ME)).toBe('done')
+
+    expect(await a.entries.get('e1')).toMatchObject(edited)
+    expect(await b.entries.get('e1')).toMatchObject(edited)
+    expect(onServer('entry', 'e1')?.data).toMatchObject(edited)
+  })
 })
