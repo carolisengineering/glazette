@@ -24,9 +24,10 @@ export interface SyncRecord {
 export const PUSH_LIMIT = 100
 // The largest request body the server takes.
 export const MAX_BODY_BYTES = 1024 * 1024
-// A push's records, as JSON, stay under this many characters, well inside
-// MAX_BODY_BYTES. One record (at most MAX_DATA_CHARS of data) always fits.
-export const PUSH_MAX_CHARS = 512_000
+// A push's records, as UTF-8 JSON, stay under this many bytes, well inside
+// MAX_BODY_BYTES. One record (at most MAX_DATA_CHARS of data, so at most
+// 3 bytes per character) always fits.
+export const PUSH_MAX_BYTES = 512_000
 export const PULL_LIMIT = 200
 export const MAX_DATA_CHARS = 16_384
 export const RECORD_ID = /^[A-Za-z0-9-]{1,64}$/

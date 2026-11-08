@@ -1,7 +1,7 @@
 import {
   isSyncRecord,
   PUSH_LIMIT,
-  PUSH_MAX_CHARS,
+  PUSH_MAX_BYTES,
   type PullResponse,
   type PushResponse,
   type SyncRecord,
@@ -119,26 +119,28 @@ async function run(
   })
 }
 
+const utf8 = new TextEncoder()
+
 /**
  * Splits records into pushes of at most PUSH_LIMIT records and at most
- * PUSH_MAX_CHARS characters as JSON. A record that can be sent always fits
- * on its own.
+ * PUSH_MAX_BYTES bytes as UTF-8 JSON, the way the server counts its limit.
+ * A record that can be sent always fits on its own.
  */
 function inPushes(records: SyncRecord[]): SyncRecord[][] {
   const pushes: SyncRecord[][] = []
   let current: SyncRecord[] = []
-  let chars = 2 // the array's brackets
+  let bytes = 2 // the array's brackets
   for (const record of records) {
-    const size = JSON.stringify(record).length
+    const size = utf8.encode(JSON.stringify(record)).length
     // A comma before every record but the first.
     const full =
-      current.length >= PUSH_LIMIT || chars + 1 + size > PUSH_MAX_CHARS
+      current.length >= PUSH_LIMIT || bytes + 1 + size > PUSH_MAX_BYTES
     if (current.length > 0 && full) {
       pushes.push(current)
       current = []
-      chars = 2
+      bytes = 2
     }
-    chars += (current.length > 0 ? 1 : 0) + size
+    bytes += (current.length > 0 ? 1 : 0) + size
     current.push(record)
   }
   if (current.length > 0) pushes.push(current)

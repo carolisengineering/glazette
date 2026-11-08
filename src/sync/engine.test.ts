@@ -1,7 +1,7 @@
 import Dexie from 'dexie'
 import {
   PULL_LIMIT,
-  PUSH_MAX_CHARS,
+  PUSH_MAX_BYTES,
   type SyncRecord,
 } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
@@ -487,7 +487,38 @@ test('pushes stay under the size limit and every record arrives', async () => {
 
   expect(pushed.length).toBeGreaterThan(1)
   for (const records of pushed) {
-    expect(JSON.stringify(records).length).toBeLessThanOrEqual(PUSH_MAX_CHARS)
+    expect(JSON.stringify(records).length).toBeLessThanOrEqual(PUSH_MAX_BYTES)
+  }
+  const onServerIds = server
+    .records()
+    .filter((r) => r.kind === 'entry')
+    .map((r) => r.id)
+  expect(onServerIds.sort()).toEqual(
+    Array.from({ length: 60 }, (_, i) => `e${i}`).sort(),
+  )
+  expect(await dirtyCount(a)).toBe(0)
+})
+
+test('pushes are sized in bytes, so long Japanese notes stay under the limit', async () => {
+  // 3 bytes per character in UTF-8.
+  const note = '釉薬が垂れる'.repeat(2_500)
+  await a.pieces.add(piece('p1'))
+  await a.entries.bulkAdd(
+    Array.from({ length: 60 }, (_, i) => ({
+      id: `e${i}`,
+      pieceId: 'p1',
+      stage: 'thrown' as const,
+      note,
+    })),
+  )
+  const { transport, pushed } = watched()
+
+  expect(await syncOnce(a, transport, ME)).toBe('done')
+
+  expect(pushed.length).toBeGreaterThan(1)
+  for (const records of pushed) {
+    const bytes = new TextEncoder().encode(JSON.stringify(records)).length
+    expect(bytes).toBeLessThanOrEqual(PUSH_MAX_BYTES)
   }
   const onServerIds = server
     .records()
