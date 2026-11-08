@@ -255,6 +255,42 @@ describe('the sync line', () => {
     expect(await screen.findByText('Last synced just now')).toBeVisible()
   })
 
+  test('the line moves on while the sheet stays open', async () => {
+    // Only the clock and intervals are faked, so Dexie and findByText run as usual.
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 8, 12, 0, 0))
+      useAccount.setState({ status: 'signed-in', email: EMAIL })
+      await db.syncState.put({
+        id: 'state',
+        account: EMAIL,
+        cursor: 3,
+        lastSyncedAt: new Date(Date.now() - 30_000).toISOString(),
+      })
+      render(<AccountSheet onClose={() => {}} />)
+      expect(await screen.findByText('Last synced just now')).toBeVisible()
+
+      act(() => vi.advanceTimersByTime(60_000))
+
+      expect(screen.getByText('Last synced today at 11:59 AM')).toBeVisible()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('closing the sheet stops its refresh', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      useAccount.setState({ status: 'signed-in', email: EMAIL })
+      const { unmount } = render(<AccountSheet onClose={() => {}} />)
+      expect(vi.getTimerCount()).toBe(1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('a sync state for another email reads as not synced yet', async () => {
     useAccount.setState({ status: 'signed-in', email: EMAIL })
     await db.syncState.put({
