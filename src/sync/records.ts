@@ -105,6 +105,33 @@ export function markAllDirty(db: GlazetteDB): Promise<void> {
   })
 }
 
+/** Records grouped by kind, each group in the order given. */
+function byKind<T extends { kind: RecordKind }>(
+  records: T[],
+): Map<RecordKind, T[]> {
+  const groups = new Map<RecordKind, T[]>()
+  for (const record of records) {
+    const group = groups.get(record.kind)
+    if (group) group.push(record)
+    else groups.set(record.kind, [record])
+  }
+  return groups
+}
+
+/** The stored rows for these records' ids, by id: one read per table. */
+async function rowsById(
+  db: GlazetteDB,
+  kind: RecordKind,
+  records: SyncRecord[],
+): Promise<Map<string, Row | undefined>> {
+  const ids = [...new Set(records.map((r) => r.id))]
+  const rows = (await db.table(TABLE_OF[kind]).bulkGet(ids)) as (
+    | Row
+    | undefined
+  )[]
+  return new Map(ids.map((id, i) => [id, rows[i]]))
+}
+
 /**
  * Clears the mark on rows that were pushed, unless the row changed since it
  * was read: a newer edit stays marked for the next sync.
@@ -114,12 +141,19 @@ export function clearDirty(
   pushed: SyncRecord[],
 ): Promise<void> {
   return quietly(db, async () => {
-    for (const record of pushed) {
-      const table = db.table(TABLE_OF[record.kind])
-      const row = (await table.get(record.id)) as Row | undefined
-      if (row && changedAt(row) === record.changedAt) {
-        await table.update(record.id, { dirty: undefined })
+    for (const [kind, group] of byKind(pushed)) {
+      const rows = await rowsById(db, kind, group)
+      const clean = new Set<string>()
+      for (const record of group) {
+        const row = rows.get(record.id)
+        if (row && changedAt(row) === record.changedAt) clean.add(record.id)
       }
+      if (clean.size === 0) continue
+      await db
+        .table(TABLE_OF[kind])
+        .bulkUpdate(
+          [...clean].map((key) => ({ key, changes: { dirty: undefined } })),
+        )
     }
   })
 }
@@ -138,6 +172,8 @@ export interface ApplyResult {
 /**
  * Writes the records that are newer than (or tie with a dirty copy of) the
  * local row, skipping any this version can't use. Written rows end clean.
+ * Each table is read once and written once; records for the same row apply
+ * in order, each against the row as the one before left it.
  */
 export function applyRecords(
   db: GlazetteDB,
@@ -149,34 +185,50 @@ export function applyRecords(
       skipped: 0,
       skippedKeys: new Set(),
     }
+    const skip = (record: unknown) => {
+      result.skipped++
+      const named = record as { kind?: unknown; id?: unknown } | null
+      if (typeof named?.kind === 'string' && typeof named.id === 'string') {
+        result.skippedKeys.add(recordKey({ kind: named.kind, id: named.id }))
+      }
+    }
+    const usable: SyncRecord[] = []
     for (const record of records) {
-      if (
-        !isSyncRecord(record) ||
-        !ROW_CHECK[record.kind](record.data) ||
-        !(await applyOne(db, record))
-      ) {
-        result.skipped++
-        const named = record as { kind?: unknown; id?: unknown } | null
-        if (typeof named?.kind === 'string' && typeof named.id === 'string') {
-          result.skippedKeys.add(recordKey({ kind: named.kind, id: named.id }))
+      if (isSyncRecord(record) && ROW_CHECK[record.kind](record.data)) {
+        usable.push(record)
+      } else skip(record)
+    }
+    for (const [kind, group] of byKind(usable)) {
+      const rows = await rowsById(db, kind, group)
+      const writes = new Map<string, Row>()
+      for (const record of group) {
+        const row = winningRow(record, rows.get(record.id))
+        if (!row) {
+          skip(record)
+          continue
         }
-      } else {
+        rows.set(record.id, row)
+        writes.set(record.id, row)
         result.applied++
+      }
+      if (writes.size > 0) {
+        await db.table(TABLE_OF[kind]).bulkPut([...writes.values()])
       }
     }
     return result
   })
 }
 
-/** True when the record was written, false when the local row stays. */
-async function applyOne(db: GlazetteDB, record: SyncRecord): Promise<boolean> {
-  const table = db.table(TABLE_OF[record.kind])
-  const mine = (await table.get(record.id)) as Row | undefined
+/** The row to write for the record, or undefined when the local row stays. */
+function winningRow(
+  record: SyncRecord,
+  mine: Row | undefined,
+): Row | undefined {
   if (mine) {
     const local = changedAt(mine)
     const wins =
       record.changedAt > local || (record.changedAt === local && mine.dirty)
-    if (!wins) return false
+    if (!wins) return undefined
   }
   let row: Row = { ...record.data } as Row
   delete row.dirty
@@ -190,8 +242,7 @@ async function applyOne(db: GlazetteDB, record: SyncRecord): Promise<boolean> {
       if (mine[key] !== undefined) row[key] = mine[key]
     }
   }
-  await table.put(row)
-  return true
+  return row
 }
 
 /**

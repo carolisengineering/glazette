@@ -224,6 +224,20 @@ test('applyRecords names the records it skipped, including ones the local row be
   })
 })
 
+test('applyRecords applies records for the same row in order', async () => {
+  await db.pieces.add(piece('p1', { name: 'mine' }))
+  const result = await applyRecords(db, [
+    pieceRecord('p1', T1, { name: 'first' }),
+    // A tie with the now clean row: the row stays.
+    pieceRecord('p1', T1, { name: 'tie' }),
+    pieceRecord('p1', T2, { name: 'later' }),
+  ])
+  expect(result).toMatchObject({ applied: 2, skipped: 1 })
+  const row = await db.pieces.get('p1')
+  expect(row?.name).toBe('later')
+  expect(row?.dirty).toBeUndefined()
+})
+
 test("applyRecords keeps this device's lastBackupAt", async () => {
   await db.settings.add({
     id: 'app',
