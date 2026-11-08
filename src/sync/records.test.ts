@@ -321,10 +321,13 @@ describe('mergeByName', () => {
 
     expect(await db.pieces.get('p1')).toMatchObject({
       clayId: 'ac',
-      updatedAt: T1,
+      updatedAt: '2026-01-01T00:00:00.001Z',
       dirty: 1,
     })
-    expect((await db.pieces.get('p2'))?.clayId).toBe('lc2')
+    expect(await db.pieces.get('p2')).toMatchObject({
+      clayId: 'lc2',
+      updatedAt: T1,
+    })
     expect(await db.glazeApps.get('a1')).toMatchObject({
       glazeId: 'ag',
       dirty: 1,
@@ -344,6 +347,33 @@ describe('mergeByName', () => {
     }
     expect((await db.clays.get('ac'))?.deletedAt).toBeUndefined()
     expect((await db.glazes.get('lg2'))?.deletedAt).toBeUndefined()
+  })
+
+  test('a moved piece changes 1 ms after its last change, deleted or not', async () => {
+    await quietly(db, async () => {
+      await db.clays.bulkAdd([
+        { id: 'lc', name: 'Porcelain', updatedAt: T1 },
+        { id: 'ac', name: 'Porcelain', updatedAt: T1 },
+      ])
+      await db.pieces.bulkAdd([
+        piece('no-time', { clayId: 'lc', updatedAt: undefined }),
+        piece('garbled', { clayId: 'lc', updatedAt: 'garbage' }),
+        piece('deleted', { clayId: 'lc', updatedAt: T1, deletedAt: T2 }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(), clay: new Set(['ac']) })
+
+    expect(await db.pieces.get('no-time')).toMatchObject({
+      clayId: 'ac',
+      updatedAt: '1970-01-01T00:00:00.001Z',
+    })
+    expect((await db.pieces.get('garbled'))?.updatedAt).toBe(
+      '1970-01-01T00:00:00.001Z',
+    )
+    const deleted = await db.pieces.get('deleted')
+    expect(deleted).toMatchObject({ clayId: 'ac', deletedAt: T2 })
+    expect(changedAt(deleted ?? {})).toBe('2026-02-01T00:00:00.001Z')
   })
 
   test('leaves a deleted account row alone', async () => {

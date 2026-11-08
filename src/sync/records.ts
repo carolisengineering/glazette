@@ -182,7 +182,10 @@ async function applyOne(db: GlazetteDB, record: SyncRecord): Promise<boolean> {
  * name matches a live one that is, becomes that one. Its details carry over to
  * the account's row (see carriedDetails), everything pointing at it moves to
  * the account's id, and the local duplicate is deleted. A normal
- * tracked write, so the changes sync. Pieces keep their updatedAt.
+ * tracked write, so the changes sync. A piece that moves to the account's
+ * clay changes 1 ms after it last did: past a server copy with the same
+ * change time (left by an earlier full sync that stopped partway), still
+ * behind any later one, and in the same place on the shelf.
  */
 export function mergeByName(
   db: GlazetteDB,
@@ -206,6 +209,7 @@ export function mergeByName(
           .filter((p) => p.clayId !== undefined && clays.has(p.clayId))
           .modify((p) => {
             p.clayId = clays.get(p.clayId as string)
+            p.updatedAt = justAfter(changedAt(p))
           })
         const settings = await db.settings.get('app')
         const joined = settings?.defaultClayId
@@ -216,6 +220,9 @@ export function mergeByName(
     },
   )
 }
+
+/** The ISO time 1 ms after `time`, a valid change time. */
+const justAfter = (time: string) => new Date(Date.parse(time) + 1).toISOString()
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto

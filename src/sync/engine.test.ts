@@ -304,6 +304,39 @@ test('the first sign-in merges same-named glazes and clays', async () => {
   expect(await dirtyCount(b)).toBe(0)
 })
 
+test("the name merge's move to the account's clay wins over a server copy with the same change time", async () => {
+  // An earlier full sync stopped after pushing the piece, still pointing at
+  // this device's own clay; another device already put the account's clay up.
+  await server.push([
+    {
+      kind: 'clay',
+      id: 'clay-acct',
+      changedAt: T1,
+      data: { id: 'clay-acct', name: 'White stoneware', updatedAt: T1 },
+    },
+    {
+      kind: 'piece',
+      id: 'p1',
+      changedAt: T1,
+      data: { id: 'p1', createdAt: T1, updatedAt: T1, clayId: 'clay-local' },
+    },
+  ])
+  await a.clays.add({
+    id: 'clay-local',
+    name: 'White stoneware',
+    updatedAt: T1,
+  })
+  await a.clays.add({ id: 'clay-acct', name: 'White stoneware', updatedAt: T1 })
+  await a.pieces.add(piece('p1', { clayId: 'clay-local' }))
+
+  expect(await syncOnce(a, server, ME)).toBe('done')
+
+  expect((await a.pieces.get('p1'))?.clayId).toBe('clay-acct')
+  expect(onServer('piece', 'p1')?.data.clayId).toBe('clay-acct')
+  expect((await a.clays.get('clay-local'))?.deletedAt).toBeTruthy()
+  expect(await dirtyCount(a)).toBe(0)
+})
+
 test('signing in to a different account runs a full sync', async () => {
   await a.pieces.add(piece('p1'))
   await a.pieces.add(piece('p2'))
