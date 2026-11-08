@@ -18,7 +18,7 @@ import {
   withValidColor,
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import { quietly, type SYNCED_TABLES } from './track'
+import { DEVICE_ONLY_FIELDS, quietly, type SYNCED_TABLES } from './track'
 
 type TableName = (typeof SYNCED_TABLES)[number]
 
@@ -42,9 +42,6 @@ const ROW_CHECK: Record<RecordKind, (row: unknown) => boolean> = {
   settings: (row) =>
     isSettingsRow(row) && (row as { id: unknown }).id === 'app',
 }
-
-/** Fields that stay on this device. */
-const DEVICE_ONLY = ['dirty', 'lastBackupAt', 'persistRequested']
 
 type Row = Record<string, unknown> & {
   id: string
@@ -74,7 +71,7 @@ export function changedAt(row: {
 /** A row as a sync record, without the fields that stay on this device. */
 export function toRecord(kind: RecordKind, row: Row): SyncRecord {
   const data = { ...row }
-  for (const key of DEVICE_ONLY) delete data[key]
+  for (const key of DEVICE_ONLY_FIELDS) delete data[key]
   return { kind, id: row.id, changedAt: changedAt(row), data }
 }
 
@@ -186,7 +183,9 @@ async function applyOne(db: GlazetteDB, record: SyncRecord): Promise<boolean> {
   if (record.kind === 'glaze')
     row = withValidColor(row as Row & { color?: unknown })
   if (record.kind === 'settings' && mine) {
-    for (const key of ['lastBackupAt', 'persistRequested']) {
+    // This device's own settings stay; the row is written clean.
+    for (const key of DEVICE_ONLY_FIELDS) {
+      if (key === 'dirty') continue
       delete row[key]
       if (mine[key] !== undefined) row[key] = mine[key]
     }

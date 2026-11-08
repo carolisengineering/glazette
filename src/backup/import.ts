@@ -7,6 +7,7 @@ import {
   isEntryRow,
   isGlazeRow,
   isLayerRow,
+  isObject,
   isPieceRow,
   isRow,
   isSettingsRow,
@@ -14,6 +15,7 @@ import {
   withValidColor,
 } from '../db/rowChecks'
 import type { Photo, Settings } from '../db/types'
+import { changedAt } from '../sync/records'
 import type { ReadBytes } from './export'
 import {
   BACKUP_JSON_PATH,
@@ -103,9 +105,6 @@ function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
   }
   return { json, files }
 }
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const areRows = (v: unknown, check: (row: unknown) => boolean) =>
   Array.isArray(v) && v.every(check)
@@ -290,10 +289,6 @@ async function mergeKeepingLocal<
   return added
 }
 
-/** The later of updatedAt and deletedAt: the generic soft delete sets only deletedAt. */
-const lastChanged = (p: { updatedAt: string; deletedAt?: string }) =>
-  p.deletedAt && p.deletedAt > p.updatedAt ? p.deletedAt : p.updatedAt
-
 /** A known piece is replaced only when the incoming copy changed later (a delete included). */
 async function mergePieces(
   incoming: BackupJson['pieces'],
@@ -308,7 +303,8 @@ async function mergePieces(
       count.pieces++
       return true
     }
-    if (lastChanged(row) > lastChanged(mine)) {
+    // The later of updatedAt and deletedAt: the generic soft delete sets only deletedAt.
+    if (changedAt(row) > changedAt(mine)) {
       count.updated++
       count.pieces++
       return true

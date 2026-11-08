@@ -3,10 +3,8 @@ import type {
   PushResponse,
   SyncRecord,
 } from '../../shared/syncProtocol'
+import { isObject } from '../db/rowChecks'
 import { SyncStopped, type Transport } from './engine'
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /** How long one request may take before the sync gives up on it as offline. */
 export const SYNC_TIMEOUT_MS = 30_000

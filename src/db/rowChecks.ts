@@ -6,7 +6,8 @@ import { STAGES } from './stage'
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
+/** A plain object: not null and not an array. */
+export const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const isStringOrAbsent = (v: unknown) =>

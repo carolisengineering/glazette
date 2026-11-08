@@ -12,11 +12,16 @@ export const SYNCED_TABLES = [
 ] as const
 
 /**
- * Fields whose change alone isn't a change to sync: the sync mark itself, and
- * settings that stay on this device. A write that changes nothing (a `put` of
- * the same row) isn't one either.
+ * Fields that stay on this device and never travel in a sync record: the sync
+ * mark itself, and settings kept per device. A change to only these isn't a
+ * change to sync. A write that changes nothing (a `put` of the same row)
+ * isn't one either.
  */
-const LOCAL_ONLY_FIELDS = new Set(['dirty', 'lastBackupAt', 'persistRequested'])
+export const DEVICE_ONLY_FIELDS: readonly string[] = [
+  'dirty',
+  'lastBackupAt',
+  'persistRequested',
+]
 
 const quietTransactions = new WeakSet<Transaction>()
 const noticedTransactions = new WeakSet<Transaction>()
@@ -81,7 +86,11 @@ export function trackChanges(db: GlazetteDB): void {
       'updating',
       (modifications: { updatedAt?: unknown }, _key, _obj, trans) => {
         if (isQuiet(trans)) return
-        if (Object.keys(modifications).every((k) => LOCAL_ONLY_FIELDS.has(k))) {
+        if (
+          Object.keys(modifications).every((k) =>
+            DEVICE_ONLY_FIELDS.includes(k),
+          )
+        ) {
           return
         }
         notice(db, trans)
