@@ -1,5 +1,9 @@
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useId, useRef, useState } from 'react'
 import { useModal } from '../components/useModal'
+import { db } from '../db/db'
+import { lastSyncedLabel } from '../sync/label'
+import { useSync } from '../sync/useSync'
 import { requestCode, verifyCode } from './api'
 import { useAccount } from './useAccount'
 
@@ -31,6 +35,14 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const status = useAccount((s) => s.status)
   const accountEmail = useAccount((s) => s.email)
   const signOut = useAccount((s) => s.signOut)
+  const syncing = useSync((s) => s.syncing)
+  const failed = useSync((s) => s.failed)
+  const syncState = useLiveQuery(() => db.syncState.get('state'), [])
+  // Only a sync with this account counts as this account's last sync.
+  const lastSyncedAt =
+    syncState && syncState.account === accountEmail
+      ? syncState.lastSyncedAt
+      : undefined
 
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -126,7 +138,17 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
         </h2>
         {status === 'signed-in' ? (
           <section className="flex flex-col gap-4">
-            <p className="text-[16px]">Signed in as {accountEmail}</p>
+            <div className="flex flex-col gap-1">
+              <p className="text-[16px]">Signed in as {accountEmail}</p>
+              <p className="text-[14px] text-muted">
+                {lastSyncedLabel(lastSyncedAt, syncing, new Date())}
+              </p>
+              {failed && (
+                <p className="text-[14px] text-muted">
+                  Couldn&apos;t sync. It will try again later.
+                </p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => void leave()}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { SyncRecord } from '../../shared/syncProtocol'
 import { SyncStopped } from './engine'
-import { fetchTransport } from './transport'
+import { fetchTransport, SYNC_TIMEOUT_MS } from './transport'
 
 function stub(status: number, body?: unknown) {
   const fn = vi
@@ -103,6 +103,22 @@ test('push posts the records as JSON and returns a valid answer', async () => {
   expect(init.credentials).toBe('same-origin')
   expect(new Headers(init.headers).get('content-type')).toBe('application/json')
   expect(JSON.parse(init.body)).toEqual({ records: [record] })
+})
+
+test('a request that never settles is offline after the timeout', async () => {
+  vi.useFakeTimers()
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    const stopped = stoppedWith(fetchTransport.pull(0))
+    let settled = false
+    void stopped.then(() => (settled = true))
+    await vi.advanceTimersByTimeAsync(SYNC_TIMEOUT_MS - 1)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await stopped).toBe('offline')
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 test("a record it can't use is passed on, for the engine to skip", async () => {

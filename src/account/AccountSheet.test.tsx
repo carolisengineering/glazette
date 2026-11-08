@@ -1,5 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { db } from '../db/db'
+import { useSync } from '../sync/useSync'
 import { AccountSheet } from './AccountSheet'
 import { requestCode, signOutRemote, verifyCode } from './api'
 import { useAccount } from './useAccount'
@@ -11,7 +13,9 @@ vi.mock('./api', async (orig) => ({
   signOutRemote: vi.fn().mockResolvedValue(undefined),
 }))
 
-beforeEach(() => {
+beforeEach(async () => {
+  await db.syncState.clear()
+  useSync.setState({ syncing: false, failed: false })
   vi.mocked(requestCode).mockReset().mockResolvedValue('sent')
   vi.mocked(verifyCode).mockReset().mockResolvedValue('ok')
   localStorage.clear()
@@ -234,4 +238,47 @@ test('a pending sign-out is settled before the code is checked', async () => {
   await vi.waitFor(() =>
     expect(verifyCode).toHaveBeenCalledWith('carol@example.com', '123456'),
   )
+})
+
+describe('the sync line', () => {
+  const EMAIL = 'carol@example.com'
+
+  test('signed in shows when this device last synced', async () => {
+    useAccount.setState({ status: 'signed-in', email: EMAIL })
+    await db.syncState.put({
+      id: 'state',
+      account: EMAIL,
+      cursor: 3,
+      lastSyncedAt: new Date(Date.now() - 30_000).toISOString(),
+    })
+    render(<AccountSheet onClose={() => {}} />)
+    expect(await screen.findByText('Last synced just now')).toBeVisible()
+  })
+
+  test('a sync state for another email reads as not synced yet', async () => {
+    useAccount.setState({ status: 'signed-in', email: EMAIL })
+    await db.syncState.put({
+      id: 'state',
+      account: 'someone@example.com',
+      cursor: 3,
+      lastSyncedAt: new Date().toISOString(),
+    })
+    render(<AccountSheet onClose={() => {}} />)
+    expect(await screen.findByText('Not synced yet')).toBeVisible()
+  })
+
+  test('a failed sync says so', async () => {
+    useAccount.setState({ status: 'signed-in', email: EMAIL })
+    useSync.setState({ failed: true })
+    render(<AccountSheet onClose={() => {}} />)
+    expect(
+      await screen.findByText("Couldn't sync. It will try again later."),
+    ).toBeVisible()
+  })
+
+  test('signed out shows no sync line', async () => {
+    render(<AccountSheet onClose={() => {}} />)
+    expect(screen.queryByText(/synced/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
+  })
 })

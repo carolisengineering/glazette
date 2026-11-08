@@ -8,20 +8,47 @@ import { SyncStopped, type Transport } from './engine'
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
+/** How long one request may take before the sync gives up on it as offline. */
+export const SYNC_TIMEOUT_MS = 30_000
+
 /** The server's answer as JSON. Throws SyncStopped for anything but a 2xx JSON answer. */
 async function request(url: string, init: RequestInit): Promise<unknown> {
-  let res: Response
+  // One sync runs at a time, so a request that hangs would stall every later
+  // sync. The timeout also rejects by itself, in case fetch ignores the abort.
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(new SyncStopped('offline'))
+    }, SYNC_TIMEOUT_MS)
+  })
+  const answer = (async () => {
+    let res: Response
+    try {
+      res = await fetch(url, {
+        ...init,
+        credentials: 'same-origin',
+        signal: controller.signal,
+      })
+    } catch {
+      throw new SyncStopped('offline')
+    }
+    if (res.status === 401) throw new SyncStopped('signed-out')
+    if (!res.ok) throw new SyncStopped('error')
+    try {
+      return (await res.json()) as unknown
+    } catch {
+      throw new SyncStopped(controller.signal.aborted ? 'offline' : 'error')
+    }
+  })()
+  // If the timeout wins, the answer's later failure is not an unhandled rejection.
+  answer.catch(() => {})
+  timedOut.catch(() => {})
   try {
-    res = await fetch(url, { ...init, credentials: 'same-origin' })
-  } catch {
-    throw new SyncStopped('offline')
-  }
-  if (res.status === 401) throw new SyncStopped('signed-out')
-  if (!res.ok) throw new SyncStopped('error')
-  try {
-    return await res.json()
-  } catch {
-    throw new SyncStopped('error')
+    return await Promise.race([answer, timedOut])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
