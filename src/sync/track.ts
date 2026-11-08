@@ -58,9 +58,10 @@ function notice(db: GlazetteDB, trans: Transaction): void {
 
 /**
  * Marks every local write to a synced table as waiting to sync (`dirty: 1`)
- * and stamps its change time (`updatedAt`), except on pieces, whose
- * `updatedAt` the app sets itself and the shelf is ordered by. Called once
- * from the database constructor.
+ * and stamps its change time (`updatedAt`) with now, unless the write gives
+ * one itself (a restore keeps the backup's change times). Pieces are never
+ * stamped: the app sets their `updatedAt` itself and the shelf is ordered by
+ * it. Called once from the database constructor.
  */
 export function trackChanges(db: GlazetteDB): void {
   for (const name of SYNCED_TABLES) {
@@ -70,20 +71,26 @@ export function trackChanges(db: GlazetteDB): void {
       (_key, obj: { dirty?: 1; updatedAt?: string }, trans) => {
         if (isQuiet(trans)) return
         obj.dirty = 1
-        if (name !== 'pieces') obj.updatedAt = new Date().toISOString()
+        if (name !== 'pieces' && obj.updatedAt === undefined) {
+          obj.updatedAt = new Date().toISOString()
+        }
         notice(db, trans)
       },
     )
-    table.hook('updating', (modifications, _key, _obj, trans) => {
-      if (isQuiet(trans)) return
-      if (Object.keys(modifications).every((k) => LOCAL_ONLY_FIELDS.has(k))) {
-        return
-      }
-      notice(db, trans)
-      return name === 'pieces'
-        ? { dirty: 1 }
-        : { dirty: 1, updatedAt: new Date().toISOString() }
-    })
+    table.hook(
+      'updating',
+      (modifications: { updatedAt?: unknown }, _key, _obj, trans) => {
+        if (isQuiet(trans)) return
+        if (Object.keys(modifications).every((k) => LOCAL_ONLY_FIELDS.has(k))) {
+          return
+        }
+        notice(db, trans)
+        const givesTime = modifications.updatedAt !== undefined
+        return name === 'pieces' || givesTime
+          ? { dirty: 1 }
+          : { dirty: 1, updatedAt: new Date().toISOString() }
+      },
+    )
   }
 }
 

@@ -79,14 +79,11 @@ describe('every write method marks the row', () => {
   })
 
   test.each<[string, (db: GlazetteDB) => Promise<unknown>, string[]]>([
-    ['add', (db) => db.entries.add(entry('n1', { updatedAt: EPOCH })), ['n1']],
+    // New rows come without updatedAt; a given one is kept (tested below).
+    ['add', (db) => db.entries.add(entry('n1')), ['n1']],
     [
       'bulkAdd',
-      (db) =>
-        db.entries.bulkAdd([
-          entry('n1', { updatedAt: EPOCH }),
-          entry('n2', { updatedAt: EPOCH }),
-        ]),
+      (db) => db.entries.bulkAdd([entry('n1'), entry('n2')]),
       ['n1', 'n2'],
     ],
     [
@@ -130,6 +127,28 @@ describe('every write method marks the row', () => {
     expect(other?.dirty).toBeUndefined()
     expect(other?.updatedAt).toBe(EPOCH)
   })
+})
+
+test('a given updatedAt is kept on create', async () => {
+  const T = '2026-10-01T09:00:00.000Z'
+  await db.entries.add(entry('k1', { updatedAt: T }))
+  await db.entries.bulkPut([entry('k2', { updatedAt: EPOCH })])
+  expect(await db.entries.get('k1')).toMatchObject({ updatedAt: T, dirty: 1 })
+  expect(await db.entries.get('k2')).toMatchObject({
+    updatedAt: EPOCH,
+    dirty: 1,
+  })
+})
+
+test('an update that sets updatedAt keeps it', async () => {
+  await quietly(db, () => db.entries.add(entry('u1', { updatedAt: EPOCH })))
+  const T = '2026-10-01T09:00:00.000Z'
+  await db.entries.update('u1', { note: 'x', updatedAt: T })
+  expect(await db.entries.get('u1')).toMatchObject({ updatedAt: T, dirty: 1 })
+  // A put whose row carries a new updatedAt keeps it too.
+  const U = '2026-10-02T09:00:00.000Z'
+  await db.entries.put(entry('u1', { note: 'y', updatedAt: U }))
+  expect(await db.entries.get('u1')).toMatchObject({ updatedAt: U, dirty: 1 })
 })
 
 test("local-only settings fields don't count as a change", async () => {

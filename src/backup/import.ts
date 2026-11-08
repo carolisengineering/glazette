@@ -1,5 +1,6 @@
 import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
+import { EPOCH } from '../../shared/syncProtocol'
 import { db, newId } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { STAGES } from '../db/stage'
@@ -292,11 +293,18 @@ async function matchByName<
 }
 
 /**
- * For tables without updatedAt. Unknown ids are added. Known ids keep the
- * local row, except that an incoming tombstone is applied to a live row:
- * deletions spread, edits never overwrite. Returns the added rows.
+ * For every table but pieces: rows aren't compared by change time. Unknown ids
+ * are added. Known ids keep the local row, except that an incoming tombstone
+ * is applied to a live row: deletions spread, edits never overwrite. Returns
+ * the added rows.
+ *
+ * An added row keeps the backup's change time (1970 when the backup has none),
+ * so a stale backup can't outrank newer copies at sync. A tombstone applied
+ * here is a change made now, and the change tracker stamps it so.
  */
-async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
+async function mergeKeepingLocal<
+  T extends { id: string; deletedAt?: string; updatedAt?: string },
+>(
   table: EntityTable<T, 'id'>,
   incoming: T[],
   count: ImportResult,
@@ -308,8 +316,9 @@ async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
   rows.forEach((row, i) => {
     const mine = local[i]
     if (!mine) {
-      added.push(row)
-      writes.push(row)
+      const restored = { ...row, updatedAt: row.updatedAt ?? EPOCH }
+      added.push(restored)
+      writes.push(restored)
     } else if (row.deletedAt && !mine.deletedAt) {
       writes.push({ ...mine, deletedAt: row.deletedAt })
       count.updated++
@@ -451,8 +460,9 @@ async function reviveReusedPhotos(
  * The backup's settings win, with three exceptions. A default clay that names
  * no live clay after the import keeps the current default. The later
  * lastBackupAt is kept. The retired persistRequested flag is never taken from
- * a backup. The sync marks (dirty, updatedAt) stay as they are here, so the
- * change tracker marks the row only when a synced field really changes.
+ * a backup. On a device that has settings, their sync marks (dirty,
+ * updatedAt) stay as they are, so the change tracker marks and stamps the row
+ * only when a synced field really changes.
  */
 async function mergeSettings(
   incoming: Settings | null | undefined,
@@ -470,6 +480,8 @@ async function mergeSettings(
   const next: Settings = { ...rest, id: 'app' }
   if (current?.updatedAt) next.updatedAt = current.updatedAt
   if (current?.dirty) next.dirty = current.dirty
+  // Settings this restore adds keep the backup's change time, as other rows do.
+  if (!current) next.updatedAt = incoming.updatedAt ?? EPOCH
 
   if (next.defaultClayId) {
     next.defaultClayId = clayIdMap.get(next.defaultClayId) ?? next.defaultClayId

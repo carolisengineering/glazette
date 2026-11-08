@@ -1,10 +1,12 @@
 import 'fake-indexeddb/auto'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { EPOCH } from '../../shared/syncProtocol'
 import { db } from '../db/db'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Photo, Piece, Settings, StageEntry } from '../db/types'
+import { quietly } from '../sync/track'
 import { lenientBytes } from '../test/bytes'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
@@ -463,6 +465,71 @@ test('a glaze made on both devices becomes one glaze that the layers use', async
     { id: 'local-gl', name: 'Celadon', color: '#111111' },
   ])
   expect((await db.glazeApps.get('ga1'))?.glazeId).toBe('local-gl')
+})
+
+test("restored rows keep the backup's change time", async () => {
+  const T = '2026-10-01T09:00:00.000Z'
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'e1', pieceId: 'p1', stage: 'glazed', updatedAt: T },
+        { id: 'e2', pieceId: 'p1', stage: 'thrown' },
+      ],
+      glazeApps: [
+        { id: 'ga1', entryId: 'e1', pieceId: 'p1', glazeId: 'gl1', order: 0 },
+      ],
+      glazes: [{ id: 'gl1', name: 'Celadon', color: '#9dbbaa', updatedAt: T }],
+      clays: [{ id: 'c1', name: 'Buff' }],
+      settings: { ...SETTINGS },
+    }),
+  )
+
+  await importZip(zip)
+
+  const rows = [
+    [await db.entries.get('e1'), T],
+    [await db.entries.get('e2'), EPOCH],
+    [await db.glazeApps.get('ga1'), EPOCH],
+    [await db.glazes.get('gl1'), T],
+    [await db.clays.get('c1'), EPOCH],
+    [await db.settings.get('app'), EPOCH],
+  ] as const
+  for (const [row, time] of rows) {
+    expect(row).toMatchObject({ updatedAt: time, dirty: 1 })
+  }
+})
+
+test("a stale backup can't bring back a deleted step", async () => {
+  const T1 = '2026-11-01T09:00:00.000Z'
+  const T2 = '2026-11-03T09:00:00.000Z'
+  const tombstone: StageEntry = {
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    updatedAt: T1,
+    deletedAt: T2,
+  }
+  await quietly(db, () => db.entries.add({ ...tombstone }))
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'e1', pieceId: 'p1', stage: 'thrown', updatedAt: T1 },
+        { id: 'e2', pieceId: 'p1', stage: 'trimmed', updatedAt: T1 },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect(await db.entries.get('e1')).toEqual(tombstone)
+  // The later of updatedAt and deletedAt, as sync compares them.
+  const changedAt = (r: StageEntry) =>
+    r.deletedAt && r.deletedAt > (r.updatedAt ?? EPOCH)
+      ? r.deletedAt
+      : (r.updatedAt ?? EPOCH)
+  const added = (await db.entries.get('e2')) as StageEntry
+  expect(changedAt(added)).toBe(T1)
+  expect(added.dirty).toBe(1)
 })
 
 test('glaze layers come in only with a step this import adds', async () => {
