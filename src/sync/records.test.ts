@@ -1,5 +1,6 @@
 import { EPOCH, type SyncRecord } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
+import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Piece } from '../db/types'
 import {
   applyRecords,
@@ -354,5 +355,83 @@ describe('mergeByName', () => {
     })
     await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
     expect((await db.glazes.get('lg'))?.deletedAt).toBeUndefined()
+  })
+
+  const details = { color: '#aa0000', cone: '10', notes: 'Runs on verticals' }
+
+  test("the merge keeps this device's later glaze details", async () => {
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('lg', ' shino', { ...details, updatedAt: T3 }),
+        glaze('ag', 'Shino', {
+          color: DEFAULT_GLAZE_COLOR,
+          cone: '6',
+          updatedAt: T2,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    const merged = await db.glazes.get('ag')
+    expect(merged).toMatchObject({ name: 'Shino', ...details, dirty: 1 })
+    expect(merged?.deletedAt).toBeUndefined()
+    expect(changedAt(merged ?? {}) > T3).toBe(true)
+    expect((await db.glazes.get('lg'))?.deletedAt).toBeTruthy()
+  })
+
+  test('on a tie the merge fills in what the account glaze lacks', async () => {
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('lg', 'shino', { ...details, updatedAt: T2 }),
+        glaze('ag', 'Shino', {
+          color: DEFAULT_GLAZE_COLOR,
+          cone: '6',
+          updatedAt: T2,
+        }),
+        glaze('lg2', 'Celadon', { ...details, updatedAt: T2 }),
+        glaze('ag2', 'Celadon', { color: '#00aa00', notes: '', updatedAt: T2 }),
+      ])
+    })
+
+    await mergeByName(db, {
+      glaze: new Set(['ag', 'ag2']),
+      clay: new Set(),
+    })
+
+    // Its own cone stays; the default color and missing notes are filled.
+    expect(await db.glazes.get('ag')).toMatchObject({
+      name: 'Shino',
+      color: '#aa0000',
+      cone: '6',
+      notes: 'Runs on verticals',
+      dirty: 1,
+    })
+    // Its own color stays; the missing cone and empty notes are filled.
+    expect(await db.glazes.get('ag2')).toMatchObject({
+      name: 'Celadon',
+      color: '#00aa00',
+      cone: '10',
+      notes: 'Runs on verticals',
+      dirty: 1,
+    })
+  })
+
+  test('the merge keeps the account glaze when it changed later', async () => {
+    const account = glaze('ag', 'Shino', {
+      color: DEFAULT_GLAZE_COLOR,
+      updatedAt: T3,
+    })
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', { ...details, updatedAt: T2 }),
+        account,
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    expect(await db.glazes.get('ag')).toEqual(account)
+    expect((await db.glazes.get('lg'))?.deletedAt).toBeTruthy()
   })
 })

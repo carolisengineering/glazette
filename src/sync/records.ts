@@ -1,3 +1,4 @@
+import type { Table } from 'dexie'
 import {
   CHANGED_AT,
   EPOCH,
@@ -16,6 +17,7 @@ import {
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
+import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { quietly, type SYNCED_TABLES } from './track'
 
 type TableName = (typeof SYNCED_TABLES)[number]
@@ -177,8 +179,9 @@ async function applyOne(db: GlazetteDB, record: SyncRecord): Promise<boolean> {
 
 /**
  * First sign-in: a live local glaze or clay that isn't the account's, whose
- * name matches a live one that is, becomes that one. Everything pointing at it
- * moves to the account's id and the local duplicate is deleted. A normal
+ * name matches a live one that is, becomes that one. Its details carry over to
+ * the account's row (see carriedDetails), everything pointing at it moves to
+ * the account's id, and the local duplicate is deleted. A normal
  * tracked write, so the changes sync. Pieces keep their updatedAt.
  */
 export function mergeByName(
@@ -214,26 +217,87 @@ export function mergeByName(
   )
 }
 
-/** Deletes the local duplicates in one table; returns duplicate id -> account id. */
+/**
+ * Deletes the local duplicates in one table, first carrying their details onto
+ * the account's rows; returns duplicate id -> account id.
+ */
 async function joinByName(
   table: GlazetteDB['glazes'] | GlazetteDB['clays'],
   accountIds: Set<string>,
 ): Promise<Map<string, string>> {
-  const live = await table.filter((r) => !r.deletedAt).toArray()
-  const accountByName = new Map<string, string>()
+  // Read and written as plain rows, so details carry over generically.
+  const rows = table as unknown as Table<NamedRow, string>
+  const live = await rows.filter((r) => !r.deletedAt).toArray()
+  const accountByName = new Map<string, NamedRow>()
   for (const row of live) {
-    if (accountIds.has(row.id) && !accountByName.has(nameKey(row.name))) {
-      accountByName.set(nameKey(row.name), row.id)
+    const key = nameKey(row.name)
+    if (accountIds.has(row.id) && !accountByName.has(key)) {
+      accountByName.set(key, row)
     }
   }
   const joined = new Map<string, string>()
+  const deletedAt = new Date().toISOString()
   for (const row of live) {
     const target = accountByName.get(nameKey(row.name))
-    if (!accountIds.has(row.id) && target) joined.set(row.id, target)
-  }
-  const deletedAt = new Date().toISOString()
-  for (const id of joined.keys()) {
-    await (table as GlazetteDB['clays']).update(id, { deletedAt })
+    if (accountIds.has(row.id) || !target) continue
+    joined.set(row.id, target.id)
+    const details = carriedDetails(row, target)
+    if (Object.keys(details).length > 0) {
+      await rows.update(target.id, details)
+      // As stored now, for a second duplicate of the same name.
+      Object.assign(target, details, { updatedAt: new Date().toISOString() })
+    }
+    await rows.update(row.id, { deletedAt })
   }
   return joined
+}
+
+type NamedRow = Row & { name: string }
+
+/** Never carried from a local duplicate onto the account's row. */
+const NOT_CARRIED = new Set(['id', 'name', 'deletedAt', 'dirty', 'updatedAt'])
+
+/** On a tie, filled in from the local duplicate when the account's is empty. */
+const FILLED_ON_TIE = ['notes', 'cone']
+
+const isBlank = (v: unknown) => v === undefined || v === null || v === ''
+
+const isDefaultColor = (v: unknown) =>
+  v === undefined ||
+  (typeof v === 'string' &&
+    v.toLowerCase() === DEFAULT_GLAZE_COLOR.toLowerCase())
+
+/**
+ * What a local duplicate adds to the account's row it merges into: all its
+ * details when it changed later; on a tie, only what the account's row lacks
+ * (empty notes or cone, the default color); nothing when the account's row
+ * changed later. The account's name always stays.
+ */
+function carriedDetails(local: Row, account: Row): Record<string, unknown> {
+  const localTime = changedAt(local)
+  const accountTime = changedAt(account)
+  const details: Record<string, unknown> = {}
+  if (localTime > accountTime) {
+    for (const [key, value] of Object.entries(local)) {
+      if (
+        !NOT_CARRIED.has(key) &&
+        value !== undefined &&
+        account[key] !== value
+      )
+        details[key] = value
+    }
+  } else if (localTime === accountTime) {
+    for (const key of FILLED_ON_TIE) {
+      if (isBlank(account[key]) && !isBlank(local[key]))
+        details[key] = local[key]
+    }
+    if (
+      'color' in local &&
+      isDefaultColor(account.color) &&
+      !isDefaultColor(local.color)
+    ) {
+      details.color = local.color
+    }
+  }
+  return details
 }
