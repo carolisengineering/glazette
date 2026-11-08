@@ -63,36 +63,6 @@ function isPlausibleEmail(email: string) {
   return email.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(email)
 }
 
-// The trusted origins for the last settings seen, so each POST doesn't parse them again.
-let originsCache: { from: string; origins: Set<string> } | undefined
-
-function trustedOrigins(env: Env): Set<string> {
-  const from = `${env.APP_ORIGIN}\n${env.EXTRA_ORIGINS ?? ''}`
-  if (originsCache?.from !== from) {
-    originsCache = { from, origins: parseOrigins(env) }
-  }
-  return originsCache.origins
-}
-
-// APP_ORIGIN's origin, plus any listed in EXTRA_ORIGINS (local dev only).
-function parseOrigins(env: Env): Set<string> {
-  const origins = new Set([new URL(env.APP_ORIGIN).origin])
-  for (const entry of (env.EXTRA_ORIGINS ?? '').split(',')) {
-    if (!entry.trim()) continue
-    try {
-      origins.add(new URL(entry.trim()).origin)
-    } catch {
-      // A malformed entry trusts nothing.
-    }
-  }
-  return origins
-}
-
-function fromTrustedOrigin(c: Ctx) {
-  const origin = c.req.header('origin')
-  return origin !== undefined && trustedOrigins(c.env).has(origin)
-}
-
 // The JSON object a POST carries, or null when it isn't one.
 async function jsonObject(c: Ctx): Promise<Record<string, unknown> | null> {
   try {
@@ -151,19 +121,6 @@ const CODE_FAILURES = {
 
 export function authRoutes(sendCode: (env: Env) => SendCode) {
   const routes = new Hono<{ Bindings: Env }>()
-
-  // Every POST must come from the app itself, before anything is read or written.
-  routes.use('*', async (c, next) => {
-    if (c.req.method === 'POST' && !fromTrustedOrigin(c)) {
-      return fail(
-        c,
-        403,
-        'BAD_ORIGIN',
-        'This request came from an untrusted site.',
-      )
-    }
-    await next()
-  })
 
   routes.post(
     SEND_CODE_PATH,
