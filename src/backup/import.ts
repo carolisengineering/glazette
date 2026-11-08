@@ -1,9 +1,21 @@
 import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
+import { EPOCH } from '../../shared/syncProtocol'
 import { db, newId } from '../db/db'
-import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import { STAGES } from '../db/stage'
+import {
+  isClayRow,
+  isEntryRow,
+  isGlazeRow,
+  isLayerRow,
+  isObject,
+  isPieceRow,
+  isRow,
+  isSettingsRow,
+  nameKey,
+  withValidColor,
+} from '../db/rowChecks'
 import type { Photo, Settings } from '../db/types'
+import { changedAt } from '../sync/records'
 import type { ReadBytes } from './export'
 import {
   BACKUP_JSON_PATH,
@@ -38,8 +50,6 @@ export interface ImportResult {
   /** Pieces added, replaced or newly deleted: what the restore message counts. */
   pieces: number
 }
-
-const HEX_COLOR = /^#[0-9a-f]{6}$/i
 
 const readFileBytes: ReadBytes = async (file) =>
   new Uint8Array(await file.arrayBuffer())
@@ -96,61 +106,21 @@ function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
   return { json, files }
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-
-const isStringOrAbsent = (v: unknown) =>
-  v === undefined || typeof v === 'string'
-
-/**
- * Rows must be objects with a string id and the other listed string keys, and
- * `deletedAt` must be a string or absent.
- */
-const areRows = (
-  v: unknown,
-  stringKeys: string[] = [],
-  extra: (row: Record<string, unknown>) => boolean = () => true,
-) =>
-  Array.isArray(v) &&
-  v.every(
-    (row) =>
-      isObject(row) &&
-      ['id', ...stringKeys].every((k) => typeof row[k] === 'string') &&
-      isStringOrAbsent(row.deletedAt) &&
-      extra(row),
-  )
-
-const isEntry = (row: Record<string, unknown>) =>
-  STAGES.includes(row.stage as never) &&
-  ['photoId', 'date', 'note'].every((k) => isStringOrAbsent(row[k]))
-
-const isLayer = (row: Record<string, unknown>) => typeof row.order === 'number'
-
-function areSettings(v: unknown): boolean {
-  if (v == null) return true
-  return (
-    isObject(v) &&
-    ['defaultCone', 'bisqueNote', 'firedNote'].every(
-      (k) => typeof v[k] === 'string',
-    ) &&
-    ['studioName', 'defaultClayId', 'lastBackupAt'].every((k) =>
-      isStringOrAbsent(v[k]),
-    )
-  )
-}
+const areRows = (v: unknown, check: (row: unknown) => boolean) =>
+  Array.isArray(v) && v.every(check)
 
 function isBackup(json: unknown): json is BackupJson {
   return (
     isObject(json) &&
     json.version === BACKUP_VERSION &&
     (json.dbVersion === undefined || typeof json.dbVersion === 'number') &&
-    areRows(json.pieces, ['updatedAt', 'createdAt']) &&
-    areRows(json.entries, ['pieceId'], isEntry) &&
-    areRows(json.glazeApps, ['entryId', 'pieceId', 'glazeId'], isLayer) &&
-    areRows(json.glazes, ['name']) &&
-    areRows(json.clays, ['name']) &&
-    areRows(json.photos, ['hash']) &&
-    areSettings(json.settings)
+    areRows(json.pieces, isPieceRow) &&
+    areRows(json.entries, isEntryRow) &&
+    areRows(json.glazeApps, isLayerRow) &&
+    areRows(json.glazes, isGlazeRow) &&
+    areRows(json.clays, isClayRow) &&
+    areRows(json.photos, (row) => isRow(row, ['hash'])) &&
+    (json.settings == null || isSettingsRow(json.settings))
   )
 }
 
@@ -159,14 +129,7 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
 
   const clays = await matchByName(db.clays, json.clays)
   await mergeKeepingLocal(db.clays, clays.rows, count)
-  const glazes = await matchByName(
-    db.glazes,
-    json.glazes.map((g) =>
-      typeof g.color === 'string' && HEX_COLOR.test(g.color)
-        ? g
-        : { ...g, color: DEFAULT_GLAZE_COLOR },
-    ),
-  )
+  const glazes = await matchByName(db.glazes, json.glazes.map(withValidColor))
   await mergeKeepingLocal(db.glazes, glazes.rows, count)
 
   await mergePieces(
@@ -249,8 +212,6 @@ const uniqueById = <T extends { id: string }>(rows: T[]): T[] => [
   ...new Map(rows.map((r) => [r.id, r])).values(),
 ]
 
-const nameKey = (name: string) => name.trim().toLowerCase()
-
 /**
  * Clays and glazes match by id, then by live name ignoring case, as the app
  * does when one is typed in. A live incoming row with a new id whose name
@@ -292,11 +253,18 @@ async function matchByName<
 }
 
 /**
- * For tables without updatedAt. Unknown ids are added. Known ids keep the
- * local row, except that an incoming tombstone is applied to a live row:
- * deletions spread, edits never overwrite. Returns the added rows.
+ * For every table but pieces: rows aren't compared by change time. Unknown ids
+ * are added. Known ids keep the local row, except that an incoming tombstone
+ * is applied to a live row: deletions spread, edits never overwrite. Returns
+ * the added rows.
+ *
+ * An added row keeps the backup's change time (1970 when the backup has none),
+ * so a stale backup can't outrank newer copies at sync. A tombstone applied
+ * here is a change made now, and the change tracker stamps it so.
  */
-async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
+async function mergeKeepingLocal<
+  T extends { id: string; deletedAt?: string; updatedAt?: string },
+>(
   table: EntityTable<T, 'id'>,
   incoming: T[],
   count: ImportResult,
@@ -308,8 +276,9 @@ async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
   rows.forEach((row, i) => {
     const mine = local[i]
     if (!mine) {
-      added.push(row)
-      writes.push(row)
+      const restored = { ...row, updatedAt: row.updatedAt ?? EPOCH }
+      added.push(restored)
+      writes.push(restored)
     } else if (row.deletedAt && !mine.deletedAt) {
       writes.push({ ...mine, deletedAt: row.deletedAt })
       count.updated++
@@ -319,10 +288,6 @@ async function mergeKeepingLocal<T extends { id: string; deletedAt?: string }>(
   if (writes.length > 0) await table.bulkPut(writes)
   return added
 }
-
-/** The later of updatedAt and deletedAt: the generic soft delete sets only deletedAt. */
-const lastChanged = (p: { updatedAt: string; deletedAt?: string }) =>
-  p.deletedAt && p.deletedAt > p.updatedAt ? p.deletedAt : p.updatedAt
 
 /** A known piece is replaced only when the incoming copy changed later (a delete included). */
 async function mergePieces(
@@ -338,7 +303,8 @@ async function mergePieces(
       count.pieces++
       return true
     }
-    if (lastChanged(row) > lastChanged(mine)) {
+    // The later of updatedAt and deletedAt: the generic soft delete sets only deletedAt.
+    if (changedAt(row) > changedAt(mine)) {
       count.updated++
       count.pieces++
       return true
@@ -451,7 +417,9 @@ async function reviveReusedPhotos(
  * The backup's settings win, with three exceptions. A default clay that names
  * no live clay after the import keeps the current default. The later
  * lastBackupAt is kept. The retired persistRequested flag is never taken from
- * a backup.
+ * a backup. On a device that has settings, their sync marks (dirty,
+ * updatedAt) stay as they are, so the change tracker marks and stamps the row
+ * only when a synced field really changes.
  */
 async function mergeSettings(
   incoming: Settings | null | undefined,
@@ -460,8 +428,17 @@ async function mergeSettings(
 ) {
   if (!incoming) return
   const current = await db.settings.get('app')
-  const { persistRequested: _ignored, ...rest } = incoming
+  const {
+    persistRequested: _ignored,
+    dirty: _dirty,
+    updatedAt: _updatedAt,
+    ...rest
+  } = incoming
   const next: Settings = { ...rest, id: 'app' }
+  if (current?.updatedAt) next.updatedAt = current.updatedAt
+  if (current?.dirty) next.dirty = current.dirty
+  // Settings this restore adds keep the backup's change time, as other rows do.
+  if (!current) next.updatedAt = incoming.updatedAt ?? EPOCH
 
   if (next.defaultClayId) {
     next.defaultClayId = clayIdMap.get(next.defaultClayId) ?? next.defaultClayId

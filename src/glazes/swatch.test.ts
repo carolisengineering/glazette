@@ -110,6 +110,23 @@ test('only the latest glazed entry counts toward a glaze', () => {
   expect(result.find((v) => v.glaze.id === 'g2')?.pieceIds).toEqual(['a'])
 })
 
+test("a deleted glaze layer doesn't show", () => {
+  const glazes = [glaze('g1', 'Celadon'), glaze('g2', 'Tenmoku')]
+  const entries = [
+    entry('ag', 'a', 'glazed', '2026-10-02'),
+    entry('bg', 'b', 'glazed', '2026-10-02'),
+  ]
+  const apps = [
+    app('ag', 'a', 'g1'),
+    { ...app('ag', 'a', 'g2'), deletedAt: '2026-10-05T00:00:00.000Z' },
+    // b's only layer is deleted, so b wears no glaze.
+    { ...app('bg', 'b', 'g1'), deletedAt: '2026-10-05T00:00:00.000Z' },
+  ]
+  const result = views([piece('a'), piece('b')], entries, apps, glazes)
+  expect(result.find((v) => v.glaze.id === 'g1')?.pieceIds).toEqual(['a'])
+  expect(result.find((v) => v.glaze.id === 'g2')?.pieceIds).toEqual([])
+})
+
 test('centerCropStyle covers a square tile from the center', () => {
   expect(centerCropStyle(800, 600)).toMatchObject({
     objectFit: 'cover',

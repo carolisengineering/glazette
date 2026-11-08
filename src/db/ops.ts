@@ -1,5 +1,6 @@
 import type { ProcessedImage } from '../photos/process'
 import { storePhoto } from '../photos/store'
+import { quietly } from '../sync/track'
 import { db, newId } from './db'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
 import { currentStage, latestEntry, STAGES, stagesBetween } from './stage'
@@ -22,8 +23,12 @@ function toIsoDate(value: string): string {
   return date.toISOString()
 }
 
+/**
+ * Seeds the default clay and settings on a fresh database. Quiet, so the
+ * defaults count as unchanged since 1970 and never outrank an account's copy.
+ */
 export async function ensureDefaults(): Promise<void> {
-  await db.transaction('rw', db.clays, db.settings, async () => {
+  await quietly(db, async () => {
     if (await db.settings.get('app')) return
     const existing = await db.clays
       .filter((c) => !c.deletedAt && c.name === DEFAULT_CLAY_NAME)
@@ -198,9 +203,9 @@ export async function addStageEntry(input: {
 /**
  * Moves a just-created piece to another stage. The step holding the photo (or
  * the latest step when none does) takes the stage; photo-less steps at or after
- * it are soft-deleted; earlier stages without a live step are filled. Glaze rows
- * belonging to a step that is deleted, or that stops being Glazed, are removed
- * (glaze rows have no soft-delete flag).
+ * it are soft-deleted; earlier stages without a live step are filled. Glaze
+ * layers belonging to a step that is deleted, or that stops being Glazed, are
+ * soft-deleted too. Nothing is removed, so every change can sync.
  */
 export async function restagePiece(
   pieceId: string,
@@ -215,29 +220,16 @@ export async function restagePiece(
     if (!moved) return
     const dropGlazesFor: string[] = []
     const softDeletes: string[] = []
-    const hardDeletes: string[] = []
     const updates: { key: string; changes: Partial<StageEntry> }[] = []
     if (moved.stage !== stage) {
       updates.push({ key: moved.id, changes: { stage } })
       if (moved.stage === 'glazed') dropGlazesFor.push(moved.id)
     }
     const covered = new Set<Stage>([stage])
-    const withGlazes = new Set(
-      (
-        await db.glazeApps
-          .where('entryId')
-          .anyOf(live.map((e) => e.id))
-          .toArray()
-      ).map((a) => a.entryId),
-    )
     for (const e of live) {
       if (e.id === moved.id) continue
       if (!e.photoId && STAGES.indexOf(e.stage) >= STAGES.indexOf(stage)) {
-        // A blank step was made moments ago on the unfinished new-piece sheet:
-        // drop it outright so it doesn't linger as a tombstone in backups.
-        const blank = !e.date && !e.note && !withGlazes.has(e.id)
-        if (blank) hardDeletes.push(e.id)
-        else softDeletes.push(e.id)
+        softDeletes.push(e.id)
         dropGlazesFor.push(e.id)
       } else {
         covered.add(e.stage)
@@ -251,13 +243,16 @@ export async function restagePiece(
         softDeletes.map((key) => ({ key, changes: { deletedAt: now } })),
       )
     }
-    if (hardDeletes.length > 0) await db.entries.bulkDelete(hardDeletes)
     const fills = stagesBetween(undefined, stage)
       .filter((s) => !covered.has(s))
       .map((s) => filledEntry(pieceId, s))
     if (fills.length > 0) await db.entries.bulkAdd(fills)
     if (dropGlazesFor.length > 0) {
-      await db.glazeApps.where('entryId').anyOf(dropGlazesFor).delete()
+      await db.glazeApps
+        .where('entryId')
+        .anyOf(dropGlazesFor)
+        .filter((a) => !a.deletedAt)
+        .modify({ deletedAt: now })
     }
     await db.pieces.update(pieceId, { updatedAt: now })
   })
@@ -273,10 +268,9 @@ export async function addGlazesToPiece(
     const entries = await db.entries.where('pieceId').equals(pieceId).toArray()
     const glazed = latestEntry(entries, 'glazed')
     if (!glazed) return
-    const existing = await db.glazeApps
-      .where('entryId')
-      .equals(glazed.id)
-      .toArray()
+    const existing = (
+      await db.glazeApps.where('entryId').equals(glazed.id).toArray()
+    ).filter((a) => !a.deletedAt)
     const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
     await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
     await db.pieces.update(pieceId, { updatedAt: nowIso() })

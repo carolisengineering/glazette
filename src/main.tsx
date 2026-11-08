@@ -10,6 +10,7 @@ import { ensureDefaults } from './db/ops'
 import { processImage } from './photos/process'
 import { requestPersistence } from './pwa/persist'
 import { ReloadPrompt } from './pwa/ReloadPrompt'
+import { startSync } from './sync/useSync'
 import './styles/app.css'
 
 // Seeds the default clay and settings once per app start.
@@ -19,6 +20,7 @@ ensureDefaults()
 
 // Doesn't wait on the setup above; persist() can sit on a permission prompt.
 startAccountRefresh()
+startSync()
 
 // End-to-end tests (built with --mode e2e) call the photo pipeline directly.
 if (import.meta.env.MODE !== 'production') {

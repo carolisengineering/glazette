@@ -1,5 +1,9 @@
-import { useId, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useModal } from '../components/useModal'
+import { db } from '../db/db'
+import { lastSyncedLabel } from '../sync/label'
+import { useSync } from '../sync/useSync'
 import { requestCode, verifyCode } from './api'
 import { useAccount } from './useAccount'
 
@@ -11,6 +15,9 @@ const field =
   'h-14 w-full rounded-[14px] border border-border bg-surface px-4 text-[16px] text-ink'
 const link =
   'min-h-11 text-[16px] font-semibold text-accent disabled:opacity-50'
+
+/** How often the "Last synced" line is worked out again while the sheet is open. */
+const SYNC_LINE_REFRESH_MS = 30_000
 
 const LINES = {
   'not-open': "Glazette accounts aren't open yet. Thanks for your interest!",
@@ -31,6 +38,24 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const status = useAccount((s) => s.status)
   const accountEmail = useAccount((s) => s.email)
   const signOut = useAccount((s) => s.signOut)
+  const syncing = useSync((s) => s.syncing)
+  const failed = useSync((s) => s.failed)
+  const syncState = useLiveQuery(() => db.syncState.get('state'), [])
+  // Only a sync with this account counts as this account's last sync.
+  const lastSyncedAt =
+    syncState && syncState.account === accountEmail
+      ? syncState.lastSyncedAt
+      : undefined
+  // Re-renders now and then, so "just now" moves on while the sheet stays open.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (status !== 'signed-in') return
+    const timer = setInterval(
+      () => setTick((tick) => tick + 1),
+      SYNC_LINE_REFRESH_MS,
+    )
+    return () => clearInterval(timer)
+  }, [status])
 
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -126,7 +151,17 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
         </h2>
         {status === 'signed-in' ? (
           <section className="flex flex-col gap-4">
-            <p className="text-[16px]">Signed in as {accountEmail}</p>
+            <div className="flex flex-col gap-1">
+              <p className="text-[16px]">Signed in as {accountEmail}</p>
+              <p className="text-[14px] text-muted">
+                {lastSyncedLabel(lastSyncedAt, syncing, new Date())}
+              </p>
+              {failed && (
+                <p className="text-[14px] text-muted">
+                  Couldn&apos;t sync. It will try again later.
+                </p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => void leave()}

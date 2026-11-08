@@ -10,6 +10,7 @@ export interface Piece {
   createdAt: string // ISO date
   updatedAt: string
   deletedAt?: string // soft delete (tombstone for v2 sync)
+  dirty?: 1 // changed here since the last sync
 }
 // Current stage is derived: the stage of the piece's latest StageEntry.
 
@@ -21,6 +22,8 @@ export interface StageEntry {
   note?: string // e.g. "Cone 04", "2 dips"
   date?: string // Photo date, a date the user entered, or none
   deletedAt?: string
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
 }
 
 export interface GlazeApplication {
@@ -32,6 +35,9 @@ export interface GlazeApplication {
   dips?: number
   method?: 'dip' | 'brush' | 'pour' | 'spray'
   note?: string // "top half only", "brushed over the rim"
+  deletedAt?: string
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
 }
 
 export interface Glaze {
@@ -41,12 +47,16 @@ export interface Glaze {
   color: string // hex for the swatch fallback
   notes?: string
   deletedAt?: string
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
 }
 
 export interface Clay {
   id: string
   name: string // "Speckled buff", "Porcelain"
   deletedAt?: string
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
 }
 
 export interface Photo {
@@ -69,4 +79,14 @@ export interface Settings {
   studioName?: string // shown above My Shelf; "Studio" when unset
   lastBackupAt?: string // ISO time of the last saved backup
   persistRequested?: boolean // unused; kept so old rows and backups still type-check
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
+}
+
+/** Where this device's record sync stands. One row, id 'state'. */
+export interface SyncState {
+  id: 'state'
+  account: string
+  cursor: number
+  lastSyncedAt: string
 }

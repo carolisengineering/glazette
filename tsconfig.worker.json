@@ -15,5 +15,5 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["worker"]
+  "include": ["worker", "shared"]
 }

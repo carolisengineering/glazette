@@ -134,6 +134,26 @@ describe('buildPieceViews', () => {
     expect(views[0].glazeNames).toEqual([])
   })
 
+  test("a deleted glaze layer doesn't show", async () => {
+    await db.glazes.bulkAdd([
+      { id: 'g1', name: 'Celadon', color: '#9DBBAA' },
+      { id: 'g2', name: 'Tenmoku', color: '#3A2A20' },
+    ])
+    const id = await createPiece({
+      name: 'Mug',
+      stage: 'glazed',
+      glazes: [{ glazeId: 'g2' }, { glazeId: 'g1' }],
+    })
+    const tenmoku = await db.glazeApps.where('glazeId').equals('g2').first()
+    await db.glazeApps.update(tenmoku?.id as string, {
+      deletedAt: '2026-11-08T10:00:00.000Z',
+    })
+    const [v] = await load()
+    expect(v.piece.id).toBe(id)
+    expect(v.glazeNames).toEqual(['Celadon'])
+    expect(v.glazeColor).toBe('#9DBBAA')
+  })
+
   test('latestPhotoId is the newest live entry that has a photo', async () => {
     const id = await createPiece({ name: 'P' })
     const first = await db.entries.where('pieceId').equals(id).first()

@@ -43,6 +43,12 @@ const e = (
   ...extra,
 })
 
+/**
+ * A step without its sync marks. The version 3 upgrade, which runs after this
+ * one, dates and marks old steps; that's tested in db.test.ts.
+ */
+const stepOnly = ({ dirty, updatedAt, ...step }: StageEntry): StageEntry => step
+
 beforeEach(async () => {
   await db.delete()
   await db.open()
@@ -60,12 +66,12 @@ test('upgrade fills Trimmed for a piece that went Thrown → Bisqued', async () 
   expect(rows).toHaveLength(3)
   const added = rows.find((r) => r.stage === 'trimmed')
   expect(added).toBeDefined()
-  expect(Object.keys(added as StageEntry).sort()).toEqual([
-    'id',
-    'pieceId',
-    'stage',
-  ])
-  for (const o of original) expect(rows).toContainEqual(o)
+  // dirty and updatedAt are sync marks (see src/sync/track.ts), not step data.
+  const { dirty, updatedAt, ...step } = added as StageEntry
+  expect(dirty).toBe(1)
+  expect(updatedAt).toBeDefined()
+  expect(Object.keys(step).sort()).toEqual(['id', 'pieceId', 'stage'])
+  for (const o of original) expect(rows.map(stepOnly)).toContainEqual(o)
 })
 
 test('upgrade leaves a stage whose step was deleted alone', async () => {
@@ -77,7 +83,7 @@ test('upgrade leaves a stage whose step was deleted alone', async () => {
   await seedV1([piece('p1')], original)
   const rows = await db.entries.toArray()
   expect(rows).toHaveLength(3)
-  for (const o of original) expect(rows).toContainEqual(o)
+  for (const o of original) expect(rows.map(stepOnly)).toContainEqual(o)
 })
 
 test('upgrade skips deleted pieces and pieces with no gaps', async () => {
@@ -93,5 +99,5 @@ test('upgrade skips deleted pieces and pieces with no gaps', async () => {
   )
   const rows = await db.entries.toArray()
   expect(rows).toHaveLength(4)
-  for (const o of original) expect(rows).toContainEqual(o)
+  for (const o of original) expect(rows.map(stepOnly)).toContainEqual(o)
 })

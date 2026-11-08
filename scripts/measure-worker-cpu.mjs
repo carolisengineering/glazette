@@ -126,6 +126,56 @@ const request = (path, body) => {
   })
 }
 
+// Realistic records: a piece with a 300-character note, a step, and a glaze layer.
+const T = '2026-11-07T10:00:00.000Z'
+const makeRecords = (n) =>
+  Array.from({ length: n }, (_, i) => {
+    const kind = ['piece', 'entry', 'glazeApp'][i % 3]
+    const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+    const data =
+      kind === 'piece'
+        ? {
+            id,
+            name: `Bowl ${i}`,
+            clayId: '11111111-1111-4111-8111-111111111111',
+            note: 'n'.repeat(300),
+            createdAt: T,
+            updatedAt: T,
+          }
+        : kind === 'entry'
+          ? {
+              id,
+              pieceId: id,
+              stage: 'glazed',
+              note: 'Dipped twice, wiped the foot.',
+              createdAt: T,
+              updatedAt: T,
+            }
+          : {
+              id,
+              entryId: id,
+              glazeId: '22222222-2222-4222-8222-222222222222',
+              coats: 2,
+              updatedAt: T,
+            }
+    return { kind, id, changedAt: T, data }
+  })
+// The shared push limit is 100 records; a full pull page is 200.
+const all = makeRecords(200)
+const records = all.slice(0, 100)
+
+const syncRequest = (path, body) =>
+  new Request(`${ORIGIN}/api/sync${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: {
+      origin: ORIGIN,
+      'cf-connecting-ip': '1.2.3.4',
+      cookie,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+  })
+
 const steps = [
   ['get-session (no cookie)', 200, () => request('/get-session')],
   [
@@ -149,6 +199,27 @@ const steps = [
     () => {
       skewMs += DAY_MS + 1000
       return request('/get-session')
+    },
+  ],
+  ['sync push 100', 200, () => syncRequest('/push', { records })],
+  [
+    'sync push 100 again (all rejected)',
+    200,
+    () => syncRequest('/push', { records }),
+  ],
+  [
+    'sync pull 200',
+    200,
+    () => {
+      // Untimed: store the other 100 records so the page is full.
+      const userId = sqlite.prepare('SELECT id FROM users').get().id
+      const insert = sqlite.prepare(
+        `INSERT INTO records (user_id, kind, id, changed_at, data, seq)
+         VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM records))`,
+      )
+      for (const r of all.slice(100))
+        insert.run(userId, r.kind, r.id, r.changedAt, JSON.stringify(r.data))
+      return syncRequest('/pull?since=0')
     },
   ],
   ['sign-out', 200, () => request('/sign-out', {})],
@@ -193,6 +264,28 @@ for (const [label, expected, make] of steps) {
       fail(`${label}: not signed in as ${EMAIL}: ${text}`)
     if (!set?.includes('__Host-session_token='))
       fail(`${label}: missing refreshed Set-Cookie`)
+  }
+  if (label === 'sync push 100') {
+    if (JSON.stringify(JSON.parse(text)) !== '{"rejected":[]}')
+      fail(`${label}: expected nothing rejected: ${text.slice(0, 200)}`)
+  }
+  if (label === 'sync push 100 again (all rejected)') {
+    const { rejected } = JSON.parse(text)
+    if (
+      rejected.length !== records.length ||
+      JSON.stringify(rejected) !== JSON.stringify(records)
+    )
+      fail(`${label}: expected the server's 100 copies back`)
+  }
+  if (label === 'sync pull 200') {
+    const pulled = JSON.parse(text)
+    if (
+      pulled.records.length !== all.length ||
+      pulled.more !== true ||
+      pulled.cursor < 1 ||
+      JSON.stringify(pulled.records) !== JSON.stringify(all)
+    )
+      fail(`${label}: expected a full page of 200 records in order`)
   }
 }
 

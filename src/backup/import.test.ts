@@ -1,10 +1,12 @@
 import 'fake-indexeddb/auto'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { EPOCH } from '../../shared/syncProtocol'
 import { db } from '../db/db'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { Photo, Piece, Settings } from '../db/types'
+import type { Glaze, Photo, Piece, Settings, StageEntry } from '../db/types'
+import { quietly } from '../sync/track'
 import { lenientBytes } from '../test/bytes'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
@@ -71,14 +73,23 @@ const photoRow = (id: string, hash: string, deletedAt?: string): Photo => ({
 const withoutBytes = (photos: Photo[]) =>
   photos.map(({ blob: _b, thumb: _t, ...meta }) => meta)
 
+/**
+ * A row without the sync marks every local write gets (see src/sync/track.ts).
+ * Not for pieces: their updatedAt is the app's own.
+ */
+function unmarked<T extends { dirty?: 1; updatedAt?: string }>(row: T) {
+  const { dirty: _dirty, updatedAt: _updatedAt, ...rest } = row
+  return rest
+}
+
 async function snapshot() {
   return {
     pieces: await db.pieces.toArray(),
-    entries: await db.entries.toArray(),
-    glazeApps: await db.glazeApps.toArray(),
-    glazes: await db.glazes.toArray(),
-    clays: await db.clays.toArray(),
-    settings: await db.settings.toArray(),
+    entries: (await db.entries.toArray()).map(unmarked),
+    glazeApps: (await db.glazeApps.toArray()).map(unmarked),
+    glazes: (await db.glazes.toArray()).map(unmarked),
+    clays: (await db.clays.toArray()).map(unmarked),
+    settings: (await db.settings.toArray()).map(unmarked),
     photos: withoutBytes(await db.photos.toArray()),
   }
 }
@@ -113,7 +124,7 @@ async function seedEverything() {
   })
   await db.glazes.add({ id: 'gl1', name: 'Celadon', color: '#9dbbaa' })
   await db.clays.add({ id: 'c1', name: 'Buff' })
-  await db.settings.add(SETTINGS)
+  await db.settings.add({ ...SETTINGS }) // a copy: writes mark the object they are given
   await db.photos.bulkAdd([
     photoRow('ph1', 'h1'),
     photoRow('ph2', 'h2', '2026-11-03'),
@@ -160,7 +171,7 @@ test('restore on a fresh install brings back the studio name and default clay', 
 
   const result = await importZip(zip)
 
-  expect(await db.settings.get('app')).toEqual(SETTINGS)
+  expect(unmarked((await db.settings.get('app')) as Settings)).toEqual(SETTINGS)
   expect(result).toMatchObject({ added: 1, updated: 1 }) // the clay; the settings
 })
 
@@ -270,7 +281,7 @@ test('an undated step and a tombstoned piece round-trip unchanged', async () => 
     deletedAt: '2026-11-04T00:00:00.000Z',
   })
   await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
-  await db.settings.add(SETTINGS)
+  await db.settings.add({ ...SETTINGS }) // a copy: writes mark the object they are given
   const before = await snapshot()
   const zip = await exportZip()
   await clearAll()
@@ -342,14 +353,16 @@ test('an incoming tombstone deletes an existing live step', async () => {
 
   const result = await importZip(zip)
 
-  expect(await db.entries.get('e1')).toEqual({
+  const step = (await db.entries.get('e1')) as StageEntry
+  expect(unmarked(step)).toEqual({
     id: 'e1',
     pieceId: 'p1',
     stage: 'thrown',
     note: 'local',
     deletedAt: 'z',
   })
-  expect(await db.glazes.get('gl1')).toEqual({
+  expect(step.dirty).toBe(1) // the tombstone is a change to sync
+  expect(unmarked((await db.glazes.get('gl1')) as Glaze)).toEqual({
     id: 'gl1',
     name: 'Local',
     color: '#111111',
@@ -448,10 +461,75 @@ test('a glaze made on both devices becomes one glaze that the layers use', async
 
   await importZip(zip)
 
-  expect(await db.glazes.toArray()).toEqual([
+  expect((await db.glazes.toArray()).map(unmarked)).toEqual([
     { id: 'local-gl', name: 'Celadon', color: '#111111' },
   ])
   expect((await db.glazeApps.get('ga1'))?.glazeId).toBe('local-gl')
+})
+
+test("restored rows keep the backup's change time", async () => {
+  const T = '2026-10-01T09:00:00.000Z'
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'e1', pieceId: 'p1', stage: 'glazed', updatedAt: T },
+        { id: 'e2', pieceId: 'p1', stage: 'thrown' },
+      ],
+      glazeApps: [
+        { id: 'ga1', entryId: 'e1', pieceId: 'p1', glazeId: 'gl1', order: 0 },
+      ],
+      glazes: [{ id: 'gl1', name: 'Celadon', color: '#9dbbaa', updatedAt: T }],
+      clays: [{ id: 'c1', name: 'Buff' }],
+      settings: { ...SETTINGS },
+    }),
+  )
+
+  await importZip(zip)
+
+  const rows = [
+    [await db.entries.get('e1'), T],
+    [await db.entries.get('e2'), EPOCH],
+    [await db.glazeApps.get('ga1'), EPOCH],
+    [await db.glazes.get('gl1'), T],
+    [await db.clays.get('c1'), EPOCH],
+    [await db.settings.get('app'), EPOCH],
+  ] as const
+  for (const [row, time] of rows) {
+    expect(row).toMatchObject({ updatedAt: time, dirty: 1 })
+  }
+})
+
+test("a stale backup can't bring back a deleted step", async () => {
+  const T1 = '2026-11-01T09:00:00.000Z'
+  const T2 = '2026-11-03T09:00:00.000Z'
+  const tombstone: StageEntry = {
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    updatedAt: T1,
+    deletedAt: T2,
+  }
+  await quietly(db, () => db.entries.add({ ...tombstone }))
+  const zip = zipOf(
+    backup({
+      entries: [
+        { id: 'e1', pieceId: 'p1', stage: 'thrown', updatedAt: T1 },
+        { id: 'e2', pieceId: 'p1', stage: 'trimmed', updatedAt: T1 },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect(await db.entries.get('e1')).toEqual(tombstone)
+  // The later of updatedAt and deletedAt, as sync compares them.
+  const changedAt = (r: StageEntry) =>
+    r.deletedAt && r.deletedAt > (r.updatedAt ?? EPOCH)
+      ? r.deletedAt
+      : (r.updatedAt ?? EPOCH)
+  const added = (await db.entries.get('e2')) as StageEntry
+  expect(changedAt(added)).toBe(T1)
+  expect(added.dirty).toBe(1)
 })
 
 test('glaze layers come in only with a step this import adds', async () => {
