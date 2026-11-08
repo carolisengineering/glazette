@@ -2,8 +2,17 @@ import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
 import { EPOCH } from '../../shared/syncProtocol'
 import { db, newId } from '../db/db'
-import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import { STAGES } from '../db/stage'
+import {
+  isClayRow,
+  isEntryRow,
+  isGlazeRow,
+  isLayerRow,
+  isPieceRow,
+  isRow,
+  isSettingsRow,
+  nameKey,
+  withValidColor,
+} from '../db/rowChecks'
 import type { Photo, Settings } from '../db/types'
 import type { ReadBytes } from './export'
 import {
@@ -39,8 +48,6 @@ export interface ImportResult {
   /** Pieces added, replaced or newly deleted: what the restore message counts. */
   pieces: number
 }
-
-const HEX_COLOR = /^#[0-9a-f]{6}$/i
 
 const readFileBytes: ReadBytes = async (file) =>
   new Uint8Array(await file.arrayBuffer())
@@ -100,58 +107,21 @@ function unpack(bytes: Uint8Array): { json: BackupJson; files: Unzipped } {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
-const isStringOrAbsent = (v: unknown) =>
-  v === undefined || typeof v === 'string'
-
-/**
- * Rows must be objects with a string id and the other listed string keys, and
- * `deletedAt` must be a string or absent.
- */
-const areRows = (
-  v: unknown,
-  stringKeys: string[] = [],
-  extra: (row: Record<string, unknown>) => boolean = () => true,
-) =>
-  Array.isArray(v) &&
-  v.every(
-    (row) =>
-      isObject(row) &&
-      ['id', ...stringKeys].every((k) => typeof row[k] === 'string') &&
-      isStringOrAbsent(row.deletedAt) &&
-      extra(row),
-  )
-
-const isEntry = (row: Record<string, unknown>) =>
-  STAGES.includes(row.stage as never) &&
-  ['photoId', 'date', 'note'].every((k) => isStringOrAbsent(row[k]))
-
-const isLayer = (row: Record<string, unknown>) => typeof row.order === 'number'
-
-function areSettings(v: unknown): boolean {
-  if (v == null) return true
-  return (
-    isObject(v) &&
-    ['defaultCone', 'bisqueNote', 'firedNote'].every(
-      (k) => typeof v[k] === 'string',
-    ) &&
-    ['studioName', 'defaultClayId', 'lastBackupAt'].every((k) =>
-      isStringOrAbsent(v[k]),
-    )
-  )
-}
+const areRows = (v: unknown, check: (row: unknown) => boolean) =>
+  Array.isArray(v) && v.every(check)
 
 function isBackup(json: unknown): json is BackupJson {
   return (
     isObject(json) &&
     json.version === BACKUP_VERSION &&
     (json.dbVersion === undefined || typeof json.dbVersion === 'number') &&
-    areRows(json.pieces, ['updatedAt', 'createdAt']) &&
-    areRows(json.entries, ['pieceId'], isEntry) &&
-    areRows(json.glazeApps, ['entryId', 'pieceId', 'glazeId'], isLayer) &&
-    areRows(json.glazes, ['name']) &&
-    areRows(json.clays, ['name']) &&
-    areRows(json.photos, ['hash']) &&
-    areSettings(json.settings)
+    areRows(json.pieces, isPieceRow) &&
+    areRows(json.entries, isEntryRow) &&
+    areRows(json.glazeApps, isLayerRow) &&
+    areRows(json.glazes, isGlazeRow) &&
+    areRows(json.clays, isClayRow) &&
+    areRows(json.photos, (row) => isRow(row, ['hash'])) &&
+    (json.settings == null || isSettingsRow(json.settings))
   )
 }
 
@@ -160,14 +130,7 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
 
   const clays = await matchByName(db.clays, json.clays)
   await mergeKeepingLocal(db.clays, clays.rows, count)
-  const glazes = await matchByName(
-    db.glazes,
-    json.glazes.map((g) =>
-      typeof g.color === 'string' && HEX_COLOR.test(g.color)
-        ? g
-        : { ...g, color: DEFAULT_GLAZE_COLOR },
-    ),
-  )
+  const glazes = await matchByName(db.glazes, json.glazes.map(withValidColor))
   await mergeKeepingLocal(db.glazes, glazes.rows, count)
 
   await mergePieces(
@@ -249,8 +212,6 @@ async function releaseUnusedPhotos(candidates: Map<string, string>) {
 const uniqueById = <T extends { id: string }>(rows: T[]): T[] => [
   ...new Map(rows.map((r) => [r.id, r])).values(),
 ]
-
-const nameKey = (name: string) => name.trim().toLowerCase()
 
 /**
  * Clays and glazes match by id, then by live name ignoring case, as the app
