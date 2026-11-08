@@ -21,7 +21,7 @@ export interface SyncRecord {
   data: Record<string, unknown>
 }
 
-export const PUSH_LIMIT = 50
+export const PUSH_LIMIT = 100
 export const PULL_LIMIT = 200
 export const MAX_DATA_CHARS = 16_384
 export const RECORD_ID = /^[A-Za-z0-9-]{1,64}$/

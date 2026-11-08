@@ -160,9 +160,9 @@ const makeRecords = (n) =>
             }
     return { kind, id, changedAt: T, data }
   })
-// The shared push limit is 50 records; a full pull page is 200.
+// The shared push limit is 100 records; a full pull page is 200.
 const all = makeRecords(200)
-const records = all.slice(0, 50)
+const records = all.slice(0, 100)
 
 const syncRequest = (path, body) =>
   new Request(`${ORIGIN}/api/sync${path}`, {
@@ -201,9 +201,9 @@ const steps = [
       return request('/get-session')
     },
   ],
-  ['sync push 50', 200, () => syncRequest('/push', { records })],
+  ['sync push 100', 200, () => syncRequest('/push', { records })],
   [
-    'sync push 50 again (all rejected)',
+    'sync push 100 again (all rejected)',
     200,
     () => syncRequest('/push', { records }),
   ],
@@ -211,13 +211,13 @@ const steps = [
     'sync pull 200',
     200,
     () => {
-      // Untimed: store the other 150 records so the page is full.
+      // Untimed: store the other 100 records so the page is full.
       const userId = sqlite.prepare('SELECT id FROM users').get().id
       const insert = sqlite.prepare(
         `INSERT INTO records (user_id, kind, id, changed_at, data, seq)
          VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM records))`,
       )
-      for (const r of all.slice(50))
+      for (const r of all.slice(100))
         insert.run(userId, r.kind, r.id, r.changedAt, JSON.stringify(r.data))
       return syncRequest('/pull?since=0')
     },
@@ -265,17 +265,17 @@ for (const [label, expected, make] of steps) {
     if (!set?.includes('__Host-session_token='))
       fail(`${label}: missing refreshed Set-Cookie`)
   }
-  if (label === 'sync push 50') {
+  if (label === 'sync push 100') {
     if (JSON.stringify(JSON.parse(text)) !== '{"rejected":[]}')
       fail(`${label}: expected nothing rejected: ${text.slice(0, 200)}`)
   }
-  if (label === 'sync push 50 again (all rejected)') {
+  if (label === 'sync push 100 again (all rejected)') {
     const { rejected } = JSON.parse(text)
     if (
       rejected.length !== records.length ||
       JSON.stringify(rejected) !== JSON.stringify(records)
     )
-      fail(`${label}: expected the server's 50 copies back`)
+      fail(`${label}: expected the server's 100 copies back`)
   }
   if (label === 'sync pull 200') {
     const pulled = JSON.parse(text)

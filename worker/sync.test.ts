@@ -209,6 +209,10 @@ test('bad batches are refused whole', async () => {
         },
       },
     ],
+    [
+      'duplicate record',
+      { body: { records: [good, rec('x', T1), rec('x', T2)] } },
+    ],
     ['records missing', { body: {} }],
     ['not JSON', { raw: 'not json' }],
   ]
@@ -252,4 +256,16 @@ test('a mixed batch keeps the newer copies and stores the rest', async () => {
   const res = await push({ records: [rec('a', T1), rec('b', T1)] })
   expect(((await res.json()) as PushResponse).rejected).toEqual([rec('a', T3)])
   expect((await pulled()).records.map((r) => r.id)).toEqual(['a', 'b'])
+})
+
+test('a full batch that is all rejected returns every server copy', async () => {
+  const stored = Array.from({ length: PUSH_LIMIT }, (_, i) =>
+    rec(`r${i}`, T2, { v: i }),
+  )
+  await push({ records: stored })
+  const res = await push({
+    records: stored.map((r) => rec(r.id, T1, { v: 'old' })),
+  })
+  expect(((await res.json()) as PushResponse).rejected).toEqual(stored)
+  expect((await pulled()).records).toEqual(stored)
 })

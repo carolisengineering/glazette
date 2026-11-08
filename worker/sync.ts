@@ -41,8 +41,20 @@ async function requireSession(c: Ctx, next: Next) {
   await next()
 }
 
+// The stored copies of the pushed records. CROSS JOIN keeps the batch as the outer
+// loop, so it is parsed once. ?2 is the batch as JSON: [{k, i, c, d}].
+const STORED = `SELECT r.kind, r.id, r.changed_at, r.data
+  FROM json_each(?2) j
+  CROSS JOIN records r ON r.user_id = ?1
+    AND r.kind = json_extract(j.value, '$.k') AND r.id = json_extract(j.value, '$.i')`
+
+// One statement for the whole batch. Each record's seq is above every stored seq
+// and follows push order, so pulls see them in the order they were pushed.
 const UPSERT = `INSERT INTO records (user_id, kind, id, changed_at, data, seq)
-  VALUES (?1, ?2, ?3, ?4, ?5, (SELECT COALESCE(MAX(seq), 0) + 1 FROM records))
+  SELECT ?1, json_extract(value, '$.k'), json_extract(value, '$.i'),
+    json_extract(value, '$.c'), json_extract(value, '$.d'),
+    (SELECT COALESCE(MAX(seq), 0) FROM records) + key + 1
+  FROM json_each(?2) WHERE true
   ON CONFLICT (user_id, kind, id) DO UPDATE SET
     changed_at = excluded.changed_at, data = excluded.data, seq = excluded.seq
   WHERE excluded.changed_at > records.changed_at`
@@ -86,31 +98,33 @@ export function syncRoutes() {
       }
       if (records.length === 0) return c.json({ rejected: [] })
 
+      // Two copies of one record in a push would make the outcome ill-defined.
+      const keys = new Set(records.map((r) => `${r.kind}/${r.id}`))
+      if (keys.size !== records.length) return badRequest(c)
+
       const db = c.env.DB
       const userId = c.get('userId')
-      const results = await db.batch(
-        records.map((r) =>
-          db
-            .prepare(UPSERT)
-            .bind(userId, r.kind, r.id, r.changedAt, JSON.stringify(r.data)),
-        ),
+      const batch = JSON.stringify(
+        records.map((r) => ({
+          k: r.kind,
+          i: r.id,
+          c: r.changedAt,
+          d: JSON.stringify(r.data),
+        })),
       )
-      const refused = records.filter((_, i) => results[i].meta.changes === 0)
-      if (refused.length === 0) return c.json({ rejected: [] })
-
-      // The server's current copy of each record it didn't take.
-      const copies = await db.batch<StoredRow>(
-        refused.map((r) =>
-          db
-            .prepare(
-              'SELECT kind, id, changed_at, data FROM records WHERE user_id = ? AND kind = ? AND id = ?',
-            )
-            .bind(userId, r.kind, r.id),
-        ),
-      )
+      // A constant number of statements, however many records. The read runs
+      // first, so it sees the copies as they were before this push.
+      const [stored] = await db.batch<StoredRow>([
+        db.prepare(STORED).bind(userId, batch),
+        db.prepare(UPSERT).bind(userId, batch),
+      ])
+      const pushed = new Map(records.map((r) => [`${r.kind}/${r.id}`, r]))
       const rejected: SyncRecord[] = []
-      for (const { results: rows } of copies) {
-        for (const row of rows) {
+      for (const row of stored.results) {
+        if (
+          row.changed_at >=
+          (pushed.get(`${row.kind}/${row.id}`)?.changedAt ?? '')
+        ) {
           rejected.push({
             kind: row.kind as SyncRecord['kind'],
             id: row.id,
