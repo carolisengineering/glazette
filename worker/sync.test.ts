@@ -177,6 +177,21 @@ test('each user sees only their own records', async () => {
   ])
 })
 
+test("rejected copies come from the caller's own records", async () => {
+  await push({ records: [rec('a', T2, { who: 'one' })] }, { cookie: cookie1 })
+  await push({ records: [rec('a', T2, { who: 'two' })] }, { cookie: cookie2 })
+
+  const res = await push(
+    { records: [rec('a', T1, { who: 'two, older' })] },
+    { cookie: cookie2 },
+  )
+
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({
+    rejected: [rec('a', T2, { who: 'two' })],
+  })
+})
+
 test('bad batches are refused whole', async () => {
   const good = rec('good')
   const bads: [string, { body?: unknown; raw?: string }][] = [
