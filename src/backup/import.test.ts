@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { db } from '../db/db'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { Photo, Piece, Settings } from '../db/types'
+import type { Glaze, Photo, Piece, Settings, StageEntry } from '../db/types'
 import { lenientBytes } from '../test/bytes'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
@@ -71,14 +71,23 @@ const photoRow = (id: string, hash: string, deletedAt?: string): Photo => ({
 const withoutBytes = (photos: Photo[]) =>
   photos.map(({ blob: _b, thumb: _t, ...meta }) => meta)
 
+/**
+ * A row without the sync marks every local write gets (see src/sync/track.ts).
+ * Not for pieces: their updatedAt is the app's own.
+ */
+function unmarked<T extends { dirty?: 1; updatedAt?: string }>(row: T) {
+  const { dirty: _dirty, updatedAt: _updatedAt, ...rest } = row
+  return rest
+}
+
 async function snapshot() {
   return {
     pieces: await db.pieces.toArray(),
-    entries: await db.entries.toArray(),
-    glazeApps: await db.glazeApps.toArray(),
-    glazes: await db.glazes.toArray(),
-    clays: await db.clays.toArray(),
-    settings: await db.settings.toArray(),
+    entries: (await db.entries.toArray()).map(unmarked),
+    glazeApps: (await db.glazeApps.toArray()).map(unmarked),
+    glazes: (await db.glazes.toArray()).map(unmarked),
+    clays: (await db.clays.toArray()).map(unmarked),
+    settings: (await db.settings.toArray()).map(unmarked),
     photos: withoutBytes(await db.photos.toArray()),
   }
 }
@@ -113,7 +122,7 @@ async function seedEverything() {
   })
   await db.glazes.add({ id: 'gl1', name: 'Celadon', color: '#9dbbaa' })
   await db.clays.add({ id: 'c1', name: 'Buff' })
-  await db.settings.add(SETTINGS)
+  await db.settings.add({ ...SETTINGS }) // a copy: writes mark the object they are given
   await db.photos.bulkAdd([
     photoRow('ph1', 'h1'),
     photoRow('ph2', 'h2', '2026-11-03'),
@@ -160,7 +169,7 @@ test('restore on a fresh install brings back the studio name and default clay', 
 
   const result = await importZip(zip)
 
-  expect(await db.settings.get('app')).toEqual(SETTINGS)
+  expect(unmarked((await db.settings.get('app')) as Settings)).toEqual(SETTINGS)
   expect(result).toMatchObject({ added: 1, updated: 1 }) // the clay; the settings
 })
 
@@ -270,7 +279,7 @@ test('an undated step and a tombstoned piece round-trip unchanged', async () => 
     deletedAt: '2026-11-04T00:00:00.000Z',
   })
   await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
-  await db.settings.add(SETTINGS)
+  await db.settings.add({ ...SETTINGS }) // a copy: writes mark the object they are given
   const before = await snapshot()
   const zip = await exportZip()
   await clearAll()
@@ -342,14 +351,16 @@ test('an incoming tombstone deletes an existing live step', async () => {
 
   const result = await importZip(zip)
 
-  expect(await db.entries.get('e1')).toEqual({
+  const step = (await db.entries.get('e1')) as StageEntry
+  expect(unmarked(step)).toEqual({
     id: 'e1',
     pieceId: 'p1',
     stage: 'thrown',
     note: 'local',
     deletedAt: 'z',
   })
-  expect(await db.glazes.get('gl1')).toEqual({
+  expect(step.dirty).toBe(1) // the tombstone is a change to sync
+  expect(unmarked((await db.glazes.get('gl1')) as Glaze)).toEqual({
     id: 'gl1',
     name: 'Local',
     color: '#111111',
@@ -448,7 +459,7 @@ test('a glaze made on both devices becomes one glaze that the layers use', async
 
   await importZip(zip)
 
-  expect(await db.glazes.toArray()).toEqual([
+  expect((await db.glazes.toArray()).map(unmarked)).toEqual([
     { id: 'local-gl', name: 'Celadon', color: '#111111' },
   ])
   expect((await db.glazeApps.get('ga1'))?.glazeId).toBe('local-gl')

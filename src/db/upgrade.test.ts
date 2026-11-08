@@ -60,11 +60,11 @@ test('upgrade fills Trimmed for a piece that went Thrown → Bisqued', async () 
   expect(rows).toHaveLength(3)
   const added = rows.find((r) => r.stage === 'trimmed')
   expect(added).toBeDefined()
-  expect(Object.keys(added as StageEntry).sort()).toEqual([
-    'id',
-    'pieceId',
-    'stage',
-  ])
+  // dirty and updatedAt are sync marks (see src/sync/track.ts), not step data.
+  const { dirty, updatedAt, ...step } = added as StageEntry
+  expect(dirty).toBe(1)
+  expect(updatedAt).toBeDefined()
+  expect(Object.keys(step).sort()).toEqual(['id', 'pieceId', 'stage'])
   for (const o of original) expect(rows).toContainEqual(o)
 })
 

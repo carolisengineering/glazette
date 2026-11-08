@@ -350,7 +350,9 @@ test('restagePiece Glazed→Thrown→Bisqued leaves one live step per stage, pho
   let entries = await liveByStage(id)
   expect(entries.map((e) => e.stage)).toEqual(['thrown'])
   expect(entries[0].photoId).toBeTruthy()
-  expect(await db.glazeApps.count()).toBe(0)
+  const apps = await db.glazeApps.toArray()
+  expect(apps).toHaveLength(1)
+  expect(apps[0].deletedAt).toBeDefined()
   await restagePiece(id, 'bisqued')
   entries = await liveByStage(id)
   expect(entries.map((e) => e.stage)).toEqual(['thrown', 'trimmed', 'bisqued'])
@@ -374,6 +376,33 @@ test('addGlazesToPiece attaches to the latest Glazed step and ignores empty or m
   expect(await db.glazeApps.count()).toBe(2)
 })
 
+test('addGlazesToPiece ignores deleted layers', async () => {
+  const id = await createPiece({
+    photo: photo('dl'),
+    stage: 'glazed',
+    glazes: [{ glazeId: 'g1' }, { glazeId: 'g2' }],
+  })
+  // Leaving Glazed tombstones the step's layers; coming back keeps them gone.
+  await restagePiece(id, 'bisqued')
+  await restagePiece(id, 'glazed')
+  await addGlazesToPiece(id, [{ glazeId: 'g3' }])
+  const live = (await db.glazeApps.toArray()).filter((a) => !a.deletedAt)
+  expect(live.map((a) => [a.glazeId, a.order])).toEqual([['g3', 0]])
+  expect(await db.glazeApps.count()).toBe(3)
+})
+
+test('ensureDefaults writes quietly', async () => {
+  await ensureDefaults()
+  const [clay] = await db.clays.toArray()
+  const row = await db.settings.get('app')
+  expect(clay.name).toBe('White stoneware')
+  expect(row?.defaultClayId).toBe(clay.id)
+  for (const r of [clay, row]) {
+    expect(r).not.toHaveProperty('updatedAt')
+    expect(r).not.toHaveProperty('dirty')
+  }
+})
+
 test('setEntryDate sets, then clears, the date', async () => {
   const id = await createPiece({})
   const [entry] = await liveByStage(id)
@@ -389,14 +418,34 @@ test('setEntryDate sets, then clears, the date', async () => {
   expect('date' in ((await db.entries.get(entry.id)) as object)).toBe(false)
 })
 
-test('restagePiece Fired→Thrown→Fired→Thrown leaves no soft-deleted rows and one live step per stage', async () => {
-  const id = await createPiece({ stage: 'fired' })
+test('restagePiece never removes rows', async () => {
+  const id = await createPiece({
+    stage: 'fired',
+    glazes: [{ glazeId: 'g1' }, { glazeId: 'g2' }],
+  })
+  const glazedId = (await liveByStage(id)).find((e) => e.stage === 'glazed')
+    ?.id as string
+  let entryCount = await db.entries.count()
+  let appCount = await db.glazeApps.count()
+  expect(appCount).toBe(2)
   for (const stage of ['thrown', 'fired', 'thrown'] as const) {
     await restagePiece(id, stage)
+    const entries = await db.entries.count()
+    const apps = await db.glazeApps.count()
+    expect(entries).toBeGreaterThanOrEqual(entryCount)
+    expect(apps).toBeGreaterThanOrEqual(appCount)
+    entryCount = entries
+    appCount = apps
   }
+  // The blank steps, and the Glazed step's layers, are tombstones now.
   const all = await db.entries.where('pieceId').equals(id).toArray()
-  expect(all.filter((e) => e.deletedAt)).toEqual([])
-  expect(all.map((e) => e.stage)).toEqual(['thrown'])
+  expect(all.filter((e) => !e.deletedAt).map((e) => e.stage)).toEqual([
+    'thrown',
+  ])
+  expect(all.find((e) => e.id === glazedId)?.deletedAt).toBeDefined()
+  const layers = await db.glazeApps.where('entryId').equals(glazedId).toArray()
+  expect(layers).toHaveLength(2)
+  expect(layers.every((a) => a.deletedAt)).toBe(true)
   await restagePiece(id, 'fired')
   const after = await liveByStage(id)
   expect(after.map((e) => e.stage)).toEqual([

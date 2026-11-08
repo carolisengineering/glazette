@@ -17,13 +17,15 @@ export interface GlazeView {
 
 /**
  * Live glazes, alphabetical, each with the pieces that currently wear it.
- * `pieceViews` must already be live-only (see `buildPieceViews`).
+ * `pieceViews` must already be live-only (see `buildPieceViews`). Deleted
+ * glaze layers are dropped.
  */
 export function buildGlazeViews(
   pieceViews: PieceView[],
-  glazeApps: GlazeApplication[],
+  allGlazeApps: GlazeApplication[],
   glazes: Glaze[],
 ): GlazeView[] {
+  const glazeApps = allGlazeApps.filter(notDeleted)
   const used = new Map<string, PieceView[]>()
   for (const view of pieceViews) {
     const glazed = glazedStepWithGlazes(view.entries, glazeApps)

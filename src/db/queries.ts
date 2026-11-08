@@ -40,15 +40,16 @@ export const notDeleted = (row: { deletedAt?: string }): boolean =>
 const nameWithRetired = (row: { name: string; deletedAt?: string }): string =>
   row.deletedAt ? `${row.name} (retired)` : row.name
 
-/** Joins raw table rows into live piece views. Deleted pieces and entries are dropped; soft delete does not cascade. */
+/** Joins raw table rows into live piece views. Deleted pieces, entries and glaze layers are dropped; soft delete does not cascade. */
 export function buildPieceViews(
   pieces: Piece[],
   entries: StageEntry[],
-  glazeApps: GlazeApplication[],
+  allGlazeApps: GlazeApplication[],
   glazes: Glaze[],
   clays: Clay[],
 ): PieceView[] {
   const liveEntries = entries.filter(notDeleted)
+  const glazeApps = allGlazeApps.filter(notDeleted)
   const entriesByPiece = new Map<string, StageEntry[]>()
   for (const e of liveEntries) {
     const list = entriesByPiece.get(e.pieceId)
@@ -166,7 +167,7 @@ export function usePiece(id: string): PieceDetail | null | undefined {
     if (!piece || !notDeleted(piece)) return null
     const [entries, glazeApps, clay, settings] = await Promise.all([
       db.entries.where('pieceId').equals(id).toArray(),
-      db.glazeApps.where('pieceId').equals(id).toArray(),
+      db.glazeApps.where('pieceId').equals(id).filter(notDeleted).toArray(),
       piece.clayId ? db.clays.get(piece.clayId) : undefined,
       db.settings.get('app'),
     ])

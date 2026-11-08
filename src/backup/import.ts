@@ -451,7 +451,8 @@ async function reviveReusedPhotos(
  * The backup's settings win, with three exceptions. A default clay that names
  * no live clay after the import keeps the current default. The later
  * lastBackupAt is kept. The retired persistRequested flag is never taken from
- * a backup.
+ * a backup. The sync marks (dirty, updatedAt) stay as they are here, so the
+ * change tracker marks the row only when a synced field really changes.
  */
 async function mergeSettings(
   incoming: Settings | null | undefined,
@@ -460,8 +461,15 @@ async function mergeSettings(
 ) {
   if (!incoming) return
   const current = await db.settings.get('app')
-  const { persistRequested: _ignored, ...rest } = incoming
+  const {
+    persistRequested: _ignored,
+    dirty: _dirty,
+    updatedAt: _updatedAt,
+    ...rest
+  } = incoming
   const next: Settings = { ...rest, id: 'app' }
+  if (current?.updatedAt) next.updatedAt = current.updatedAt
+  if (current?.dirty) next.dirty = current.dirty
 
   if (next.defaultClayId) {
     next.defaultClayId = clayIdMap.get(next.defaultClayId) ?? next.defaultClayId
