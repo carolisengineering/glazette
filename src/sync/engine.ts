@@ -13,6 +13,7 @@ import {
   markAllDirty,
   mergeByName,
   readDirty,
+  recordKey,
 } from './records'
 import { quietly } from './track'
 
@@ -101,12 +102,17 @@ async function run(
 
   // 4. Push what changed here. A row edited while its push is in flight keeps
   // its mark for the next sync. The server's copy is applied before the mark
-  // is cleared, so on a tie the server's copy wins over the dirty row.
+  // is cleared, so on a tie the server's copy wins over the dirty row. A row
+  // whose server copy this version can't use keeps its mark too, so a later
+  // version applies that copy.
   for (const chunk of inPushes(await readDirty(db))) {
     const { rejected } = await transport.push(chunk)
     await quietly(db, async () => {
-      await applyRecords(db, rejected)
-      await clearDirty(db, chunk)
+      const { skippedKeys } = await applyRecords(db, rejected)
+      await clearDirty(
+        db,
+        chunk.filter((record) => !skippedKeys.has(recordKey(record))),
+      )
     })
   }
 

@@ -127,6 +127,17 @@ export function clearDirty(
   })
 }
 
+/** How a record is named across a batch: its kind and id, as `kind/id`. */
+export const recordKey = (record: { kind: unknown; id: unknown }) =>
+  `${String(record.kind)}/${String(record.id)}`
+
+export interface ApplyResult {
+  applied: number
+  skipped: number
+  /** The `kind/id` of each skipped record that has a kind and id. */
+  skippedKeys: Set<string>
+}
+
 /**
  * Writes the records that are newer than (or tie with a dirty copy of) the
  * local row, skipping any this version can't use. Written rows end clean.
@@ -134,22 +145,29 @@ export function clearDirty(
 export function applyRecords(
   db: GlazetteDB,
   records: unknown[],
-): Promise<{ applied: number; skipped: number }> {
+): Promise<ApplyResult> {
   return quietly(db, async () => {
-    let applied = 0
-    let skipped = 0
+    const result: ApplyResult = {
+      applied: 0,
+      skipped: 0,
+      skippedKeys: new Set(),
+    }
     for (const record of records) {
       if (
         !isSyncRecord(record) ||
         !ROW_CHECK[record.kind](record.data) ||
         !(await applyOne(db, record))
       ) {
-        skipped++
+        result.skipped++
+        const named = record as { kind?: unknown; id?: unknown } | null
+        if (typeof named?.kind === 'string' && typeof named.id === 'string') {
+          result.skippedKeys.add(recordKey({ kind: named.kind, id: named.id }))
+        }
       } else {
-        applied++
+        result.applied++
       }
     }
-    return { applied, skipped }
+    return result
   })
 }
 

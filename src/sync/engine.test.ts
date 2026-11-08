@@ -187,6 +187,26 @@ test("an edit made during a sync isn't lost", async () => {
   expect((await a.pieces.get('p1'))?.dirty).toBeUndefined()
 })
 
+test("a row whose rejected copy this version can't use stays waiting", async () => {
+  // A later copy from a newer app version, without a field this one needs.
+  await server.push([
+    {
+      kind: 'piece',
+      id: 'p1',
+      changedAt: T3,
+      data: { id: 'p1', updatedAt: T3, name: 'From the future' },
+    },
+  ])
+  await a.pieces.add(piece('p1', { name: 'Mine', updatedAt: T2 }))
+  await a.pieces.add(piece('p2'))
+
+  expect(await syncOnce(a, server, ME)).toBe('done')
+
+  expect(await a.pieces.get('p1')).toMatchObject({ name: 'Mine', dirty: 1 })
+  expect((await a.pieces.get('p2'))?.dirty).toBeUndefined()
+  expect(onServer('piece', 'p1')?.data.name).toBe('From the future')
+})
+
 test("a stale device can't bring back a deleted piece", async () => {
   // Both devices restored the same backup.
   await a.pieces.add(piece('p1', { updatedAt: T1 }))

@@ -127,7 +127,7 @@ describe('applyRecords follows the later-change rule', () => {
     const result = await applyRecords(db, [
       pieceRecord('p1', T2, { name: 'A' }),
     ])
-    expect(result).toEqual({ applied: 1, skipped: 0 })
+    expect(result).toEqual({ applied: 1, skipped: 0, skippedKeys: new Set() })
     const row = await db.pieces.get('p1')
     expect(row).toMatchObject({ name: 'A', updatedAt: T2 })
     expect(row?.dirty).toBeUndefined()
@@ -199,10 +199,29 @@ test("applyRecords skips what it can't use and applies the rest", async () => {
       data: { id: 'g1', name: 'Shino', color: '#aabbcc' },
     },
   ])
-  expect(result).toEqual({ applied: 1, skipped: 3 })
+  expect(result).toEqual({
+    applied: 1,
+    skipped: 3,
+    skippedKeys: new Set(['sticker/x1', 'entry/e1', 'piece/p2']),
+  })
   expect(await db.glazes.toArray()).toHaveLength(1)
   expect(await db.entries.count()).toBe(0)
   expect(await db.pieces.count()).toBe(0)
+})
+
+test('applyRecords names the records it skipped, including ones the local row beat', async () => {
+  await db.pieces.add(piece('later', { updatedAt: T3 }))
+  const result = await applyRecords(db, [
+    pieceRecord('later', T2),
+    pieceRecord('new', T2),
+    null,
+    { kind: 'piece', changedAt: T1 },
+  ])
+  expect(result).toEqual({
+    applied: 1,
+    skipped: 3,
+    skippedKeys: new Set(['piece/later']),
+  })
 })
 
 test("applyRecords keeps this device's lastBackupAt", async () => {
