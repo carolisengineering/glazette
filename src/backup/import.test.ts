@@ -6,8 +6,12 @@ import { db } from '../db/db'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Photo, Piece, Settings, StageEntry } from '../db/types'
+import { sha256 } from '../photos/hash'
+import { createTestPhotoServer } from '../sync/testPhotoServer'
 import { onLocalChange, quietly } from '../sync/track'
+import { transferPhotos } from '../sync/transfer'
 import { lenientBytes } from '../test/bytes'
+import { realBlobs } from '../test/realBlobs'
 import { exportZip as exportStrict } from './export'
 import type { BackupJson, PhotoMeta } from './format'
 import {
@@ -16,8 +20,16 @@ import {
   NotABackupError,
 } from './import'
 
+// fake-indexeddb loses the bytes of stored Blobs; a restore of an empty file
+// would then look empty, so hand the real ones back.
+realBlobs().watch(db)
+
 const exportZip = () => exportStrict(new Date(), lenientBytes)
 const importZip = (file: Blob) => importStrict(file, lenientBytes)
+
+// Real photo hashes: 64 lowercase hex characters.
+const H1 = 'a1'.repeat(32)
+const H2 = 'b2'.repeat(32)
 
 const SETTINGS: Settings = {
   id: 'app',
@@ -126,8 +138,8 @@ async function seedEverything() {
   await db.clays.add({ id: 'c1', name: 'Buff' })
   await db.settings.add({ ...SETTINGS }) // a copy: writes mark the object they are given
   await db.photos.bulkAdd([
-    { ...photoRow('ph1', 'h1'), needsUpload: 1 },
-    { ...photoRow('ph2', 'h2', '2026-11-03'), needsUpload: 1 },
+    { ...photoRow('ph1', H1), needsUpload: 1 },
+    { ...photoRow('ph2', H2, '2026-11-03'), needsUpload: 1 },
   ])
 }
 
@@ -150,7 +162,7 @@ test('import into an empty database restores every table and photo', async () =>
   for (const key of Object.keys(before) as (keyof typeof before)[]) {
     expect(after[key]).toEqual(before[key])
   }
-  const h1 = await db.photoBytes.get('h1')
+  const h1 = await db.photoBytes.get(H1)
   expect(h1?.blob).toBeDefined()
   expect(h1?.thumb).toBeDefined()
 })
@@ -187,13 +199,13 @@ test('a default clay the backup does not contain keeps the current one', async (
 })
 
 test('a photo already stored under another id is reused and steps are rewritten', async () => {
-  await db.photos.add(photoRow('local-ph', 'h1'))
+  await db.photos.add(photoRow('local-ph', H1))
   const zip = zipOf(
     backup({
       entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
-    ['h1'],
+    [H1],
   )
 
   const result = await importZip(zip)
@@ -205,13 +217,13 @@ test('a photo already stored under another id is reused and steps are rewritten'
 })
 
 test('a reused photo that was deleted here comes back for a live incoming step', async () => {
-  await db.photos.add(photoRow('local-ph', 'h1', '2026-11-03'))
+  await db.photos.add(photoRow('local-ph', H1, '2026-11-03'))
   const zip = zipOf(
     backup({
       entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
-    ['h1'],
+    [H1],
   )
 
   const result = await importZip(zip)
@@ -225,9 +237,9 @@ test('an incoming photo whose id is taken by a different photo gets a new id', a
   const zip = zipOf(
     backup({
       entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
-    ['h1'],
+    [H1],
   )
 
   await importZip(zip)
@@ -235,7 +247,7 @@ test('an incoming photo whose id is taken by a different photo gets a new id', a
   expect((await db.photos.get('ph1'))?.hash).toBe('other-hash')
   const photoId = (await db.entries.get('e1'))?.photoId
   expect(photoId).not.toBe('ph1')
-  expect((await db.photos.get(photoId as string))?.hash).toBe('h1')
+  expect((await db.photos.get(photoId as string))?.hash).toBe(H1)
 })
 
 test('two photos with one hash in the zip become one row', async () => {
@@ -245,9 +257,9 @@ test('two photos with one hash in the zip become one row', async () => {
         { id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' },
         { id: 'e2', pieceId: 'p1', stage: 'trimmed', photoId: 'ph2' },
       ],
-      photos: [photoMeta('ph1', 'h1'), photoMeta('ph2', 'h1')],
+      photos: [photoMeta('ph1', H1), photoMeta('ph2', H1)],
     }),
-    ['h1'],
+    [H1],
   )
 
   const result = await importZip(zip)
@@ -257,20 +269,95 @@ test('two photos with one hash in the zip become one row', async () => {
   expect(result).toMatchObject({ added: 3, updated: 0 })
 })
 
-test('a photo missing from the zip is skipped and the step keeps its photoId', async () => {
+test('a photo whose image is not in the zip is added with details, waiting to download', async () => {
   const zip = zipOf(
     backup({
       entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
     [],
   )
 
   const result = await importZip(zip)
 
-  expect(await db.photos.count()).toBe(0)
+  const row = await db.photos.get('ph1')
+  expect(row).toMatchObject({
+    id: 'ph1',
+    hash: H1,
+    width: 10,
+    height: 20,
+    updatedAt: EPOCH,
+    dirty: 1,
+    needsDownload: 1,
+  })
+  expect(row).not.toHaveProperty('needsUpload')
+  expect(await db.photoBytes.count()).toBe(0)
   expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
-  expect(result).toMatchObject({ added: 1, updated: 0 })
+  // The step and the photo.
+  expect(result).toMatchObject({ added: 2, updated: 0 })
+})
+
+test('a photo added without its image gets it on the next download', async () => {
+  const blob = new Blob(['clay one'], { type: 'image/jpeg' })
+  const hash = await sha256(blob)
+  const server = createTestPhotoServer()
+  await server.upload(hash, 'full', blob, hash)
+  await server.upload(hash, 'thumb', blob, hash)
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', hash)],
+      }),
+    ),
+  )
+
+  expect(await transferPhotos(db, server)).toBe('done')
+
+  expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  expect(await db.photoBytes.get(hash)).toBeDefined()
+  expect((await db.photos.get('ph1'))?.needsDownload).toBeUndefined()
+})
+
+test('a detail-only photo whose id belongs to another photo here gets a fresh id', async () => {
+  await db.photos.add(photoRow('ph1', 'other-hash'))
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', H1)],
+      }),
+    ),
+  )
+  const photoId = (await db.entries.get('e1'))?.photoId as string
+  expect(photoId).not.toBe('ph1')
+  expect(await db.photos.get(photoId)).toMatchObject({
+    hash: H1,
+    needsDownload: 1,
+  })
+  expect((await db.photos.get('ph1'))?.hash).toBe('other-hash')
+})
+
+test('an empty image file in the zip is not stored', async () => {
+  const files = {
+    'glazette.json': strToU8(
+      JSON.stringify(backup({ photos: [photoMeta('ph1', H1)] })),
+    ),
+    [`photos/${H1}.jpg`]: new Uint8Array(0),
+    [`thumbs/${H1}.jpg`]: strToU8('thumb'),
+  }
+  await importZip(new Blob([zipSync(files) as BlobPart]))
+  expect(await db.photoBytes.count()).toBe(0)
+  expect(await db.photos.get('ph1')).toMatchObject({ needsDownload: 1 })
+})
+
+test('a photo row whose hash is not a photo hash is not added', async () => {
+  const zip = zipOf(backup({ photos: [photoMeta('ph1', 'not-a-hash')] }), [
+    'not-a-hash',
+  ])
+  await expect(importZip(zip)).rejects.toBeInstanceOf(NotABackupError)
+  expect(await db.photos.count()).toBe(0)
+  expect(await db.photoBytes.count()).toBe(0)
 })
 
 test('an undated step and a tombstoned piece round-trip unchanged', async () => {
@@ -372,12 +459,12 @@ test('an incoming tombstone deletes an existing live step', async () => {
 
 test('restoring fills in a photo that was waiting to download', async () => {
   await quietly(db, () =>
-    db.photos.add({ ...photoMeta('local-ph', 'h1'), needsDownload: 1 }),
+    db.photos.add({ ...photoMeta('local-ph', H1), needsDownload: 1 }),
   )
   const heard = vi.fn()
   const stop = onLocalChange(db, heard)
   const result = await importZip(
-    zipOf(backup({ photos: [photoMeta('ph1', 'h1')] }), ['h1']),
+    zipOf(backup({ photos: [photoMeta('ph1', H1)] }), [H1]),
   )
   stop()
 
@@ -388,7 +475,7 @@ test('restoring fills in a photo that was waiting to download', async () => {
   // Device-only flags: not a change to sync, but an upload to start.
   expect(row?.dirty).toBeUndefined()
   expect(heard).toHaveBeenCalledTimes(1)
-  const entry = await db.photoBytes.get('h1')
+  const entry = await db.photoBytes.get(H1)
   expect(entry?.blob).toBeDefined()
   expect(entry?.thumb).toBeDefined()
   expect(await db.photos.count()).toBe(1)
@@ -396,57 +483,57 @@ test('restoring fills in a photo that was waiting to download', async () => {
 })
 
 test('a restore puts bytes in the table, not on the row', async () => {
-  await importZip(zipOf(backup({ photos: [photoMeta('ph1', 'h1')] }), ['h1']))
+  await importZip(zipOf(backup({ photos: [photoMeta('ph1', H1)] }), [H1]))
   const row = await db.photos.get('ph1')
   expect(row).not.toHaveProperty('blob')
   expect(row).not.toHaveProperty('thumb')
   expect(row).toMatchObject({ dirty: 1, needsUpload: 1 })
-  const entry = await db.photoBytes.get('h1')
+  const entry = await db.photoBytes.get(H1)
   expect(entry?.blob).toBeDefined()
   expect(entry?.thumb).toBeDefined()
 })
 
 test('a restore never overwrites bytes in the table', async () => {
-  const kept = { hash: 'h1', blob: new Blob(['here first']) }
+  const kept = { hash: H1, blob: new Blob(['here first']) }
   await db.photoBytes.add(kept)
-  const before = await db.photoBytes.get('h1')
-  await db.photos.add({ ...photoMeta('local-ph', 'h1') })
+  const before = await db.photoBytes.get(H1)
+  await db.photos.add({ ...photoMeta('local-ph', H1) })
   await importZip(
-    zipOf(
-      backup({ photos: [photoMeta('ph1', 'h1'), photoMeta('ph2', 'h2')] }),
-      ['h1', 'h2'],
-    ),
+    zipOf(backup({ photos: [photoMeta('ph1', H1), photoMeta('ph2', H2)] }), [
+      H1,
+      H2,
+    ]),
   )
-  expect(await db.photoBytes.get('h1')).toEqual(before)
-  expect((await db.photoBytes.get('h1'))?.thumb).toBeUndefined()
-  expect(await db.photoBytes.get('h2')).toBeDefined()
+  expect(await db.photoBytes.get(H1)).toEqual(before)
+  expect((await db.photoBytes.get(H1))?.thumb).toBeUndefined()
+  expect(await db.photoBytes.get(H2)).toBeDefined()
   expect((await db.photos.get('local-ph'))?.needsUpload).toBeUndefined()
 })
 
 test("a row not moved yet isn't filled from the zip", async () => {
-  await db.photos.add(photoRow('local-ph', 'h1'))
-  await importZip(zipOf(backup({ photos: [photoMeta('ph1', 'h1')] }), ['h1']))
+  await db.photos.add(photoRow('local-ph', H1))
+  await importZip(zipOf(backup({ photos: [photoMeta('ph1', H1)] }), [H1]))
   expect(await db.photoBytes.count()).toBe(0)
   expect((await db.photos.get('local-ph'))?.blob).toBeDefined()
 })
 
 test('a new row uses bytes already in the table when only a merged-away row matches', async () => {
-  const kept = { hash: 'h1', blob: new Blob(['here first']) }
+  const kept = { hash: H1, blob: new Blob(['here first']) }
   await db.photoBytes.add(kept)
-  const before = await db.photoBytes.get('h1')
+  const before = await db.photoBytes.get(H1)
   await db.photos.add({
-    ...photoMeta('dup', 'h1'),
+    ...photoMeta('dup', H1),
     deletedAt: '2026-11-04T09:00:00.000Z',
     mergedInto: 'other',
   })
-  await importZip(zipOf(backup({ photos: [photoMeta('ph1', 'h1')] }), ['h1']))
-  expect(await db.photoBytes.get('h1')).toEqual(before)
+  await importZip(zipOf(backup({ photos: [photoMeta('ph1', H1)] }), [H1]))
+  expect(await db.photoBytes.get(H1)).toEqual(before)
   expect((await db.photos.get('ph1'))?.needsUpload).toBe(1)
 })
 
 test('fields named for bytes in a backup never reach a row', async () => {
-  const meta = { ...photoMeta('ph1', 'h1'), blob: 'junk', thumb: 'junk' }
-  await importZip(zipOf(backup({ photos: [meta] }), ['h1']))
+  const meta = { ...photoMeta('ph1', H1), blob: 'junk', thumb: 'junk' }
+  await importZip(zipOf(backup({ photos: [meta] }), [H1]))
   const row = await db.photos.get('ph1')
   expect(row).not.toHaveProperty('blob')
   expect(row).not.toHaveProperty('thumb')
@@ -456,8 +543,8 @@ test('a failed restore leaves no bytes behind', async () => {
   vi.spyOn(db.settings, 'put').mockRejectedValueOnce(new Error('boom'))
   await expect(
     importZip(
-      zipOf(backup({ photos: [photoMeta('ph1', 'h1')], settings: SETTINGS }), [
-        'h1',
+      zipOf(backup({ photos: [photoMeta('ph1', H1)], settings: SETTINGS }), [
+        H1,
       ]),
     ),
   ).rejects.toThrow()
@@ -471,11 +558,11 @@ test("a restored photo keeps the backup's change time", async () => {
     zipOf(
       backup({
         photos: [
-          { ...photoMeta('ph1', 'h1'), updatedAt: T },
-          photoMeta('ph2', 'h2'),
+          { ...photoMeta('ph1', H1), updatedAt: T },
+          photoMeta('ph2', H2),
         ],
       }),
-      ['h1', 'h2'],
+      [H1, H2],
     ),
   )
 
@@ -492,20 +579,20 @@ test("a restored photo keeps the backup's change time", async () => {
 })
 
 test('a merged duplicate in a backup is ignored', async () => {
-  await db.photos.add(photoRow('local-ph', 'h1'))
+  await db.photos.add(photoRow('local-ph', H1))
   const before = await db.photos.get('local-ph')
   await importZip(
     zipOf(
       backup({
         photos: [
           {
-            ...photoMeta('dup', 'h1'),
+            ...photoMeta('dup', H1),
             mergedInto: 'other',
             deletedAt: '2026-11-04T09:00:00.000Z',
           },
         ],
       }),
-      ['h1'],
+      [H1],
     ),
   )
 
@@ -515,17 +602,17 @@ test('a merged duplicate in a backup is ignored', async () => {
 
 test("a local merged duplicate isn't matched", async () => {
   await db.photos.add({
-    ...photoRow('dup', 'h1', '2026-11-04T09:00:00.000Z'),
+    ...photoRow('dup', H1, '2026-11-04T09:00:00.000Z'),
     mergedInto: 'live',
   })
-  await db.photos.add(photoRow('live', 'h1'))
+  await db.photos.add(photoRow('live', H1))
   await importZip(
     zipOf(
       backup({
         entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-        photos: [photoMeta('ph1', 'h1')],
+        photos: [photoMeta('ph1', H1)],
       }),
-      ['h1'],
+      [H1],
     ),
   )
 
@@ -781,12 +868,12 @@ test('a tombstoned default clay keeps the current one', async () => {
   expect((await db.settings.get('app'))?.defaultClayId).toBe(current)
 })
 
-test('a missing photo whose id belongs to another photo here shows a placeholder', async () => {
+test('a photo without its image whose id belongs to another photo here is added under a fresh id', async () => {
   await db.photos.add(photoRow('ph1', 'other-hash'))
   const zip = zipOf(
     backup({
       entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
     [],
   )
@@ -796,8 +883,11 @@ test('a missing photo whose id belongs to another photo here shows a placeholder
   const photoId = (await db.entries.get('e1'))?.photoId
   expect(photoId).toBeDefined()
   expect(photoId).not.toBe('ph1')
-  expect(await db.photos.get(photoId as string)).toBeUndefined()
-  expect(await db.photos.count()).toBe(1)
+  expect(await db.photos.get(photoId as string)).toMatchObject({
+    hash: H1,
+    needsDownload: 1,
+  })
+  expect(await db.photos.count()).toBe(2)
 })
 
 test('malformed rows and settings are not a backup', async () => {
@@ -856,7 +946,7 @@ test('a piece deleted with the app in the backup deletes the live local copy', a
 })
 
 test('an incoming step tombstone releases its photo when no other live step uses it', async () => {
-  await db.photos.add(photoRow('ph1', 'h1'))
+  await db.photos.add(photoRow('ph1', H1))
   await db.entries.add({
     id: 'e1',
     pieceId: 'p1',
@@ -874,9 +964,9 @@ test('an incoming step tombstone releases its photo when no other live step uses
           deletedAt: '2026-11-04T09:00:00.000Z',
         },
       ],
-      photos: [photoMeta('ph1', 'h1')],
+      photos: [photoMeta('ph1', H1)],
     }),
-    ['h1'],
+    [H1],
   )
 
   await importZip(zip)
@@ -887,7 +977,7 @@ test('an incoming step tombstone releases its photo when no other live step uses
 })
 
 test('an incoming step tombstone keeps a photo another live step still uses', async () => {
-  await db.photos.add(photoRow('ph1', 'h1'))
+  await db.photos.add(photoRow('ph1', H1))
   await db.entries.bulkAdd([
     { id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' },
     { id: 'e2', pieceId: 'p1', stage: 'trimmed', photoId: 'ph1' },
@@ -913,14 +1003,14 @@ test('an incoming step tombstone keeps a photo another live step still uses', as
 })
 
 test('an incoming photo tombstone applies to a local photo with the same hash that no live step uses', async () => {
-  await db.photos.add(photoRow('local-ph', 'h1'))
+  await db.photos.add(photoRow('local-ph', H1))
   const zip = zipOf(
     backup({
       photos: [
-        { ...photoMeta('ph1', 'h1'), deletedAt: '2026-11-04T09:00:00.000Z' },
+        { ...photoMeta('ph1', H1), deletedAt: '2026-11-04T09:00:00.000Z' },
       ],
     }),
-    ['h1'],
+    [H1],
   )
 
   await importZip(zip)
@@ -931,7 +1021,7 @@ test('an incoming photo tombstone applies to a local photo with the same hash th
 })
 
 test('an incoming photo tombstone does not delete a local photo a live step uses', async () => {
-  await db.photos.add(photoRow('local-ph', 'h1'))
+  await db.photos.add(photoRow('local-ph', H1))
   await db.entries.add({
     id: 'e9',
     pieceId: 'p1',
@@ -940,9 +1030,9 @@ test('an incoming photo tombstone does not delete a local photo a live step uses
   })
   const zip = zipOf(
     backup({
-      photos: [{ ...photoMeta('ph1', 'h1'), deletedAt: 'z' }],
+      photos: [{ ...photoMeta('ph1', H1), deletedAt: 'z' }],
     }),
-    ['h1'],
+    [H1],
   )
 
   await importZip(zip)

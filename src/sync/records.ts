@@ -20,7 +20,12 @@ import {
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { hashesHeld } from '../photos/bytes'
-import { DEVICE_ONLY_FIELDS, quietly, type SYNCED_TABLES } from './track'
+import {
+  DEVICE_ONLY_FIELDS,
+  quietly,
+  type SYNCED_TABLES,
+  withoutDeviceFields,
+} from './track'
 
 type TableName = (typeof SYNCED_TABLES)[number]
 
@@ -75,8 +80,7 @@ export function changedAt(row: {
 
 /** A row as a sync record, without the fields that stay on this device. */
 export function toRecord(kind: RecordKind, row: Row): SyncRecord {
-  const data = { ...row }
-  for (const key of DEVICE_ONLY_FIELDS) delete data[key]
+  const data = withoutDeviceFields(row)
   return { kind, id: row.id, changedAt: changedAt(row), data }
 }
 

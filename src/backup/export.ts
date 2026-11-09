@@ -1,6 +1,7 @@
 import { type Zippable, zipSync } from 'fflate'
 import { db } from '../db/db'
 import { bytesOf } from '../photos/bytes'
+import { withoutDeviceFields } from '../sync/track'
 import {
   BACKUP_JSON_PATH,
   BACKUP_VERSION,
@@ -71,16 +72,7 @@ export async function exportZip(
     },
   )
 
-  const photoMeta: PhotoMeta[] = photos.map(
-    ({
-      blob: _blob,
-      thumb: _thumb,
-      dirty: _dirty,
-      needsUpload: _needsUpload,
-      needsDownload: _needsDownload,
-      ...meta
-    }) => meta,
-  )
+  const photoMeta = photos.map(withoutDeviceFields) as PhotoMeta[]
 
   const files: Zippable = {}
   for (const [hash, { blob, thumb }] of images) {

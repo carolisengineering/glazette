@@ -1,4 +1,4 @@
-import { MISSING_LIMIT } from '../../shared/photoProtocol'
+import { MISSING_LIMIT, PHOTO_HASH } from '../../shared/photoProtocol'
 import type { GlazetteDB } from '../db/db'
 import { bytesOf, keepBytes } from '../photos/bytes'
 import { sha256 } from '../photos/hash'
@@ -10,7 +10,8 @@ import { quietly } from './track'
  * Moves photo bytes after a record sync: uploads what this device has and the
  * server doesn't, then downloads what the synced records describe but this
  * device lacks. Never throws. One photo that fails doesn't stop the others;
- * the result is then 'error'. A SyncStopped stops everything at once.
+ * the result is then 'error'. Being offline or signed out stops everything at
+ * once, and is the result.
  *
  * Network calls never run inside a transaction. Each write after one is its
  * own `quietly` call, so a transfer never marks a row changed or waiting.
@@ -28,6 +29,19 @@ export async function transferPhotos(
     if (error instanceof SyncStopped) return error.reason
     console.error(error)
     return 'error'
+  }
+}
+
+/**
+ * Rethrows what stops the whole transfer. Any other failure, including a
+ * SyncStopped('error') from one photo's request, is that photo's alone.
+ */
+function stopsAll(error: unknown) {
+  if (
+    error instanceof SyncStopped &&
+    (error.reason === 'offline' || error.reason === 'signed-out')
+  ) {
+    throw error
   }
 }
 
@@ -60,6 +74,11 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
     try {
       const row = await db.photos.get(id)
       if (!row) continue
+      if (!PHOTO_HASH.test(row.hash)) {
+        // The server would refuse the whole chunk. The row keeps waiting.
+        console.error(`Photo ${id} has a hash that isn't valid; skipped.`)
+        continue
+      }
       if (await bytesOf(db, row)) {
         byHash.set(row.hash, [...(byHash.get(row.hash) ?? []), id])
       } else if (
@@ -72,6 +91,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         noBytes.push(id)
       }
     } catch (error) {
+      stopsAll(error)
       ok = false
       console.error(error)
     }
@@ -81,7 +101,15 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
   const hashes = [...byHash.keys()]
   for (let i = 0; i < hashes.length; i += MISSING_LIMIT) {
     const chunk = hashes.slice(i, i + MISSING_LIMIT)
-    const missing = new Set(await transport.missing(chunk))
+    let missing: Set<string>
+    try {
+      missing = new Set(await transport.missing(chunk))
+    } catch (error) {
+      stopsAll(error)
+      ok = false
+      console.error(error)
+      continue
+    }
     // The server already has these.
     await stopWaitingToUpload(
       db,
@@ -99,6 +127,10 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
           console.error(`Photo ${hash} has no thumbnail; skipped.`)
           continue
         }
+        if (bytes.blob.size === 0 || bytes.thumb.size === 0) {
+          console.error(`Photo ${hash} has an empty image; skipped.`)
+          continue
+        }
         // Thumbnail first, so a full image on the server nearly always means
         // its thumbnail is there too. Try the full image even if it's refused.
         const thumbStored =
@@ -114,7 +146,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         else
           console.error(`The server refused photo ${hash}; will retry later.`)
       } catch (error) {
-        if (error instanceof SyncStopped) throw error
+        stopsAll(error)
         ok = false
         console.error(error)
       }
@@ -136,7 +168,7 @@ async function download(db: GlazetteDB, transport: PhotoTransport) {
     try {
       await downloadOne(db, transport, id)
     } catch (error) {
-      if (error instanceof SyncStopped) throw error
+      stopsAll(error)
       ok = false
       console.error(error)
     }

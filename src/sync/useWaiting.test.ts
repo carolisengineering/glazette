@@ -44,6 +44,25 @@ test('countWaiting counts waiting photos and dirty rows in every synced table', 
   expect(await countWaiting(db)).toEqual({ photos: 1, changes: 2 })
 })
 
+test('rows sharing one image count as one waiting photo', async () => {
+  const shared = (id: string) =>
+    photo(id, {
+      hash: 'same',
+      needsUpload: 1,
+      deletedAt: id === 'b' ? 'x' : undefined,
+    })
+  await quietly(db, () =>
+    db.photos.bulkPut([
+      shared('a'),
+      shared('b'),
+      photo('c', { needsUpload: 1 }),
+    ]),
+  )
+  const { result } = renderHook(() => usePhotosWaiting())
+  await waitFor(() => expect(result.current).toBe(2))
+  expect((await countWaiting(db)).photos).toBe(2)
+})
+
 test('countWaiting is zero when nothing waits', async () => {
   expect(await countWaiting(db)).toEqual({ photos: 0, changes: 0 })
 })

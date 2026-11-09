@@ -1,5 +1,6 @@
 import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
+import { PHOTO_HASH } from '../../shared/photoProtocol'
 import { EPOCH } from '../../shared/syncProtocol'
 import { db, newId } from '../db/db'
 import {
@@ -17,6 +18,7 @@ import {
 import type { Photo, PhotoBytes, Settings } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
 import { changedAt } from '../sync/records'
+import { withoutDeviceFields } from '../sync/track'
 import type { ReadBytes } from './export'
 import {
   BACKUP_JSON_PATH,
@@ -121,7 +123,9 @@ function isBackup(json: unknown): json is BackupJson {
     areRows(json.glazeApps, isLayerRow) &&
     areRows(json.glazes, isGlazeRow) &&
     areRows(json.clays, isClayRow) &&
-    areRows(json.photos, (row) => isRow(row, ['hash'])) &&
+    areRows(json.photos, (row) =>
+      isRow(row, ['hash'], (r) => PHOTO_HASH.test(r.hash as string)),
+    ) &&
     (json.settings == null || isSettingsRow(json.settings))
   )
 }
@@ -321,8 +325,9 @@ const jpeg = (bytes: Uint8Array) =>
 
 /**
  * Photos match by hash. A hash already stored here maps the incoming id to the
- * local one. A new hash is added with its bytes from the zip, or skipped when
- * the zip lacks the image: its steps keep their photoId and show a placeholder.
+ * local one. A new hash is added with its bytes from the zip. When the zip
+ * lacks the image (the backup was made before it downloaded), the details are
+ * added alone and wait to download; the photo shows a placeholder until then.
  * Bytes from the zip go to the bytes table unless it already holds that hash.
  * Returns the incoming-to-local id map and the ids of photos already stored
  * here that matched by hash.
@@ -368,9 +373,13 @@ async function mergePhotos(
   const keepFromZip = (hash: string, full: Uint8Array) => {
     if (held.has(hash)) return
     held.add(hash)
-    const thumb = files[thumbPath(hash)] ?? full
+    const thumb = bytesInZip(thumbPath(hash)) ?? full
     newBytes.push({ hash, blob: jpeg(full), thumb: jpeg(thumb) })
   }
+
+  // An empty file is as good as none: it would never match its hash.
+  const bytesInZip = (path: string) =>
+    files[path]?.length ? files[path] : undefined
 
   const writes: Photo[] = []
   // Local rows that had only details, and now wait to upload what the zip gave.
@@ -378,7 +387,7 @@ async function mergePhotos(
   for (const meta of incoming) {
     const local = localByHash.get(meta.hash)
     if (local) {
-      const full = files[photoPath(meta.hash)]
+      const full = bytesInZip(photoPath(meta.hash))
       if (!local.blob && !held.has(meta.hash) && full) {
         keepFromZip(meta.hash, full)
         fills.push({
@@ -395,14 +404,8 @@ async function mergePhotos(
       }
       continue
     }
-    const full = files[photoPath(meta.hash)]
-    if (!full) {
-      // The step keeps a photoId that shows the placeholder. If that id
-      // belongs to a different photo here, point the step at an unused id.
-      if (usedIds.has(meta.id)) idMap.set(meta.id, newId())
-      continue
-    }
-    keepFromZip(meta.hash, full)
+    const full = bytesInZip(photoPath(meta.hash))
+    if (full) keepFromZip(meta.hash, full)
     // An id taken by a different photo gets a fresh one, never an overwrite.
     const id = usedIds.has(meta.id) ? newId() : meta.id
     if (id !== meta.id) idMap.set(meta.id, id)
@@ -410,19 +413,18 @@ async function mergePhotos(
     // Keeps the backup's change time (1970 when it has none), as other rows
     // do. The change tracker marks it dirty. A backup's JSON shouldn't name
     // bytes, but a row must never seem to hold some it doesn't.
-    const {
-      blob: _blob,
-      thumb: _thumb,
-      dirty: _dirty,
-      needsUpload: _needsUpload,
-      needsDownload: _needsDownload,
-      ...details
-    } = meta as Photo
     const row: Photo = {
-      ...details,
+      ...(withoutDeviceFields(meta) as Photo),
       id,
       updatedAt: meta.updatedAt ?? EPOCH,
-      needsUpload: 1,
+      // Bytes from the zip wait to upload. A row without them is never
+      // uploaded: a signed-in device downloads the image instead, unless the
+      // table already holds it.
+      ...(full
+        ? { needsUpload: 1 as const }
+        : held.has(meta.hash)
+          ? {}
+          : { needsDownload: 1 as const }),
     }
     writes.push(row)
     localByHash.set(meta.hash, row)

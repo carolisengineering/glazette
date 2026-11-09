@@ -467,6 +467,135 @@ test('a stopped transfer returns its reason and keeps what is done', async () =>
   expect((await db.photos.get('b'))?.needsDownload).toBe(1)
 })
 
+test("a photo the server rejects with an error doesn't stop the other uploads or the downloads", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const hashThree = await serverHolds(server, 'clay three')
+  const a = await withBytes('a', 'clay one', { needsUpload: 1 })
+  const b = await withBytes('b', 'clay two', { needsUpload: 1 })
+  await seed(db, [a, b, await withoutBytes('c', 'clay three')])
+  const rejecting: PhotoTransport = {
+    ...server,
+    upload: async (hash, part, bytes, sum) => {
+      if (hash === a.hash) throw new SyncStopped('error')
+      return server.upload(hash, part, bytes, sum)
+    },
+  }
+  expect(await transferPhotos(db, rejecting)).toBe('error')
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
+  expect(server.files().has(`full/${b.hash}`)).toBe(true)
+  expect((await db.photos.get('c'))?.needsDownload).toBeUndefined()
+  expect(await db.photoBytes.get(hashThree)).toBeDefined()
+  expect(error).toHaveBeenCalled()
+})
+
+test("a download that fails with an error doesn't stop the other downloads", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await serverHolds(server, 'clay one')
+  const hashTwo = await serverHolds(server, 'clay two')
+  await seed(db, [
+    await withoutBytes('a', 'clay one'),
+    await withoutBytes('b', 'clay two'),
+  ])
+  const failing: PhotoTransport = {
+    ...server,
+    download: async (hash, part) => {
+      if (hash !== hashTwo) throw new SyncStopped('error')
+      return server.download(hash, part)
+    },
+  }
+  expect(await transferPhotos(db, failing)).toBe('error')
+  expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
+  expect((await db.photos.get('a'))?.needsDownload).toBe(1)
+  expect(error).toHaveBeenCalled()
+})
+
+test("a missing check that fails with an error doesn't stop the downloads", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await serverHolds(server, 'clay two')
+  await seed(db, [
+    await withBytes('a', 'clay one', { needsUpload: 1 }),
+    await withoutBytes('b', 'clay two'),
+  ])
+  const failing: PhotoTransport = {
+    ...server,
+    missing: async () => {
+      throw new SyncStopped('error')
+    },
+  }
+  expect(await transferPhotos(db, failing)).toBe('error')
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
+  expect(error).toHaveBeenCalled()
+})
+
+test('an offline upload stops at once and the downloads never start', async () => {
+  await serverHolds(server, 'clay two')
+  await seed(db, [
+    await withBytes('a', 'clay one', { needsUpload: 1 }),
+    await withBytes('x', 'clay x', { needsUpload: 1 }),
+    await withoutBytes('b', 'clay two'),
+  ])
+  const upload = vi.fn(async () => {
+    throw new SyncStopped('offline')
+  })
+  const download = vi.spyOn(server, 'download')
+  expect(await transferPhotos(db, { ...server, upload })).toBe('offline')
+  expect(upload).toHaveBeenCalledTimes(1)
+  expect(download).not.toHaveBeenCalled()
+})
+
+test('a missing check that goes offline stops at once', async () => {
+  await seed(db, [await withBytes('a', 'clay one', { needsUpload: 1 })])
+  const missing = async () => {
+    throw new SyncStopped('offline')
+  }
+  expect(await transferPhotos(db, { ...server, missing })).toBe('offline')
+})
+
+test('a 0-byte image is skipped and logged, and the others upload', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const empty = await withBytes('a', '', { needsUpload: 1 })
+  const b = await withBytes('b', 'clay two', { needsUpload: 1 })
+  await seed(db, [empty, b])
+  const upload = vi.spyOn(server, 'upload')
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect(upload.mock.calls.every(([hash]) => hash === b.hash)).toBe(true)
+  expect(server.files().has(`full/${b.hash}`)).toBe(true)
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('a 0-byte thumbnail is skipped and logged', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const a = await withBytes('a', 'clay one', {
+    needsUpload: 1,
+    thumb: new Blob([], { type: 'image/jpeg' }),
+  })
+  await seed(db, [a])
+  const upload = vi.spyOn(server, 'upload')
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect(upload).not.toHaveBeenCalled()
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test("a hash that isn't a photo hash stays out of the missing check and keeps waiting", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const bad = await withBytes('a', 'clay one', {
+    needsUpload: 1,
+    hash: 'not-a-hash',
+  })
+  const b = await withBytes('b', 'clay two', { needsUpload: 1 })
+  await seed(db, [bad, b])
+  const missing = vi.spyOn(server, 'missing')
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect(missing).toHaveBeenCalledTimes(1)
+  expect(missing).toHaveBeenCalledWith([b.hash])
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
 test('anything unexpected is an error', async () => {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {})
   await seed(db, [await withBytes('a', 'clay one', { needsUpload: 1 })])

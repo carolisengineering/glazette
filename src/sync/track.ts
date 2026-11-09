@@ -31,6 +31,13 @@ export const DEVICE_ONLY_FIELDS: readonly string[] = [
   'needsDownload',
 ]
 
+/** A copy of a row without the fields that stay on this device. */
+export function withoutDeviceFields<T extends object>(row: T): Partial<T> {
+  const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) }
+  for (const key of DEVICE_ONLY_FIELDS) delete copy[key]
+  return copy as Partial<T>
+}
+
 const quietTransactions = new WeakSet<Transaction>()
 const noticedTransactions = new WeakSet<Transaction>()
 const listenersByDb = new WeakMap<GlazetteDB, Set<() => void>>()
