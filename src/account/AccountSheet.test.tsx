@@ -437,6 +437,25 @@ describe('photos and changes waiting', () => {
     ).toBeVisible()
   })
 
+  test('signing out when counting fails logs it and asks with the changes body', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={() => {}} />)
+    const button = await screen.findByRole('button', { name: 'Sign out' })
+    // Only the next count fails, the one the click starts.
+    vi.spyOn(db.photos, 'where').mockImplementationOnce(() => {
+      throw new Error('boom')
+    })
+    await user.click(button)
+    expect(
+      await screen.findByText(
+        "Some changes haven't synced yet. They'll stay on this device and sync when you sign in again.",
+      ),
+    ).toBeVisible()
+    expect(error).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
   test("signing out with nothing waiting doesn't ask", async () => {
     const user = userEvent.setup()
     render(<AccountSheet onClose={() => {}} />)

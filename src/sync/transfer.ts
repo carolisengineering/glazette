@@ -9,7 +9,8 @@ import { quietly } from './track'
 /**
  * Moves photo bytes after a record sync: uploads what this device has and the
  * server doesn't, then downloads what the synced records describe but this
- * device lacks. Never throws.
+ * device lacks. Never throws. One photo that fails doesn't stop the others;
+ * the result is then 'error'. A SyncStopped stops everything at once.
  *
  * Network calls never run inside a transaction. Each write after one is its
  * own `quietly` call, so a transfer never marks a row changed or waiting.
@@ -19,9 +20,10 @@ export async function transferPhotos(
   transport: PhotoTransport,
 ): Promise<SyncOutcome> {
   try {
-    await upload(db, transport)
-    await download(db, transport)
-    return 'done'
+    // Both run even when a photo in the first failed.
+    const uploaded = await upload(db, transport)
+    const downloaded = await download(db, transport)
+    return uploaded && downloaded ? 'done' : 'error'
   } catch (error) {
     if (error instanceof SyncStopped) return error.reason
     console.error(error)
@@ -40,7 +42,9 @@ function stopWaitingToUpload(db: GlazetteDB, ids: string[]) {
   })
 }
 
+/** True when every photo went well. */
 async function upload(db: GlazetteDB, transport: PhotoTransport) {
+  let ok = true
   // Deleted photos included: a restore (S4) brings them back, bytes and all.
   const ids = (await db.photos
     .where('needsUpload')
@@ -53,18 +57,23 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
   const byHash = new Map<string, string[]>()
   const noBytes: string[] = []
   for (const id of ids) {
-    const row = await db.photos.get(id)
-    if (!row) continue
-    if (await bytesOf(db, row)) {
-      byHash.set(row.hash, [...(byHash.get(row.hash) ?? []), id])
-    } else if (
-      (await db.photos
-        .where('hash')
-        .equals(row.hash)
-        .filter((p) => !!p.blob)
-        .count()) === 0
-    ) {
-      noBytes.push(id)
+    try {
+      const row = await db.photos.get(id)
+      if (!row) continue
+      if (await bytesOf(db, row)) {
+        byHash.set(row.hash, [...(byHash.get(row.hash) ?? []), id])
+      } else if (
+        (await db.photos
+          .where('hash')
+          .equals(row.hash)
+          .filter((p) => !!p.blob)
+          .count()) === 0
+      ) {
+        noBytes.push(id)
+      }
+    } catch (error) {
+      ok = false
+      console.error(error)
     }
   }
   await stopWaitingToUpload(db, noBytes)
@@ -80,26 +89,43 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
     )
     for (const hash of chunk) {
       if (!missing.has(hash)) continue
-      const rowIds = byHash.get(hash) ?? []
-      // Read again: the bytes may have moved while the network was busy.
-      const row = await db.photos.get(rowIds[0])
-      const bytes = row && (await bytesOf(db, row))
-      if (!bytes?.thumb) continue
-      const stored =
-        (await transport.upload(hash, 'full', bytes.blob, hash)) === 'stored' &&
-        (await transport.upload(
-          hash,
-          'thumb',
-          bytes.thumb,
-          await sha256(bytes.thumb),
-        )) === 'stored'
-      if (stored) await stopWaitingToUpload(db, rowIds)
-      else console.error(`The server refused photo ${hash}; will retry later.`)
+      try {
+        const rowIds = byHash.get(hash) ?? []
+        // Read again: the bytes may have moved while the network was busy.
+        const row = await db.photos.get(rowIds[0])
+        const bytes = row && (await bytesOf(db, row))
+        if (!bytes) continue
+        if (!bytes.thumb) {
+          console.error(`Photo ${hash} has no thumbnail; skipped.`)
+          continue
+        }
+        // Thumbnail first, so a full image on the server nearly always means
+        // its thumbnail is there too. Try the full image even if it's refused.
+        const thumbStored =
+          (await transport.upload(
+            hash,
+            'thumb',
+            bytes.thumb,
+            await sha256(bytes.thumb),
+          )) === 'stored'
+        const fullStored =
+          (await transport.upload(hash, 'full', bytes.blob, hash)) === 'stored'
+        if (thumbStored && fullStored) await stopWaitingToUpload(db, rowIds)
+        else
+          console.error(`The server refused photo ${hash}; will retry later.`)
+      } catch (error) {
+        if (error instanceof SyncStopped) throw error
+        ok = false
+        console.error(error)
+      }
     }
   }
+  return ok
 }
 
+/** True when every photo went well. */
 async function download(db: GlazetteDB, transport: PhotoTransport) {
+  let ok = true
   const ids = (await db.photos
     .where('needsDownload')
     .equals(1)
@@ -107,32 +133,43 @@ async function download(db: GlazetteDB, transport: PhotoTransport) {
     .primaryKeys()) as string[]
 
   for (const id of ids) {
-    const row = await db.photos.get(id)
-    if (!row?.needsDownload || row.deletedAt) continue
-    if (await bytesOf(db, row)) {
-      await quietly(db, () =>
-        db.photos.update(id, { needsDownload: undefined }),
-      )
-      continue
+    try {
+      await downloadOne(db, transport, id)
+    } catch (error) {
+      if (error instanceof SyncStopped) throw error
+      ok = false
+      console.error(error)
     }
-
-    const blob = await transport.download(row.hash, 'full')
-    // Not uploaded yet. A later sync picks it up.
-    if (!blob) continue
-    if ((await sha256(blob)) !== row.hash) {
-      console.error(
-        `Discarded a download that doesn't match photo ${row.hash}.`,
-      )
-      continue
-    }
-    const thumb = (await transport.download(row.hash, 'thumb')) ?? blob
-
-    await quietly(db, async () => {
-      await keepBytes(db, { hash: row.hash, blob, thumb })
-      await db.photos
-        .where('hash')
-        .equals(row.hash)
-        .modify({ needsDownload: undefined })
-    })
   }
+  return ok
+}
+
+async function downloadOne(
+  db: GlazetteDB,
+  transport: PhotoTransport,
+  id: string,
+) {
+  const row = await db.photos.get(id)
+  if (!row?.needsDownload || row.deletedAt) return
+  if (await bytesOf(db, row)) {
+    await quietly(db, () => db.photos.update(id, { needsDownload: undefined }))
+    return
+  }
+
+  const blob = await transport.download(row.hash, 'full')
+  // Not uploaded yet. A later sync picks it up.
+  if (!blob) return
+  if ((await sha256(blob)) !== row.hash) {
+    console.error(`Discarded a download that doesn't match photo ${row.hash}.`)
+    return
+  }
+  const thumb = (await transport.download(row.hash, 'thumb')) ?? blob
+
+  await quietly(db, async () => {
+    await keepBytes(db, { hash: row.hash, blob, thumb })
+    await db.photos
+      .where('hash')
+      .equals(row.hash)
+      .modify({ needsDownload: undefined })
+  })
 }

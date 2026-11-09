@@ -118,7 +118,15 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       if (!confirmed) {
-        const { photos, changes } = await countWaiting(db)
+        let photos = 0
+        let changes = 0
+        try {
+          ;({ photos, changes } = await countWaiting(db))
+        } catch (error) {
+          // Can't tell what waits, so ask as if changes do.
+          console.error(error)
+          changes = 1
+        }
         if (photos > 0 || changes > 0) {
           setWarning(
             photos === 1

@@ -228,6 +228,98 @@ test("a refused upload doesn't hold up the others", async () => {
   expect(error).toHaveBeenCalledTimes(1)
 })
 
+test("one photo that throws doesn't stop the other uploads", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const a = await withBytes('a', 'clay one', { needsUpload: 1 })
+  const b = await withBytes('b', 'clay two', { needsUpload: 1 })
+  await seed(db, [a, b])
+  const breaking: PhotoTransport = {
+    ...server,
+    upload: async (hash, part, bytes, sum) => {
+      if (hash === a.hash) throw new Error('boom')
+      return server.upload(hash, part, bytes, sum)
+    },
+  }
+  expect(await transferPhotos(db, breaking)).toBe('error')
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
+  expect(server.files().has(`full/${b.hash}`)).toBe(true)
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('a signed-out upload still stops everything at once', async () => {
+  const a = await withBytes('a', 'clay one', { needsUpload: 1 })
+  const b = await withBytes('b', 'clay two', { needsUpload: 1 })
+  await seed(db, [a, b])
+  const upload = vi.fn(async () => {
+    throw new SyncStopped('signed-out')
+  })
+  expect(await transferPhotos(db, { ...server, upload })).toBe('signed-out')
+  expect(upload).toHaveBeenCalledTimes(1)
+})
+
+test("one download that throws doesn't stop the other downloads", async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await serverHolds(server, 'clay one')
+  const hashTwo = await serverHolds(server, 'clay two')
+  await seed(db, [
+    await withoutBytes('a', 'clay one'),
+    await withoutBytes('b', 'clay two'),
+  ])
+  const breaking: PhotoTransport = {
+    ...server,
+    download: async (hash, part) => {
+      if (hash !== hashTwo) throw new Error('boom')
+      return server.download(hash, part)
+    },
+  }
+  expect(await transferPhotos(db, breaking)).toBe('error')
+  expect((await db.photos.get('a'))?.needsDownload).toBe(1)
+  expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
+  expect(await db.photoBytes.count()).toBe(1)
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('the thumbnail uploads first, and the full image is tried when it is refused', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const a = await stored('a', 'clay one', { needsUpload: 1 })
+  await seed(db, [a])
+  const parts: string[] = []
+  const refusingThumb: PhotoTransport = {
+    ...server,
+    upload: async (hash, part, bytes, sum) => {
+      parts.push(part)
+      return part === 'thumb'
+        ? 'refused'
+        : server.upload(hash, part, bytes, sum)
+    },
+  }
+  expect(await transferPhotos(db, refusingThumb)).toBe('done')
+  expect(parts).toEqual(['thumb', 'full'])
+  expect(server.files().has(`full/${a.hash}`)).toBe(true)
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('a photo whose bytes have no thumbnail is logged and skipped', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const blob = new Blob(['clay one'], { type: 'image/jpeg' })
+  const hash = await sha256(blob)
+  await quietly(db, () => db.photoBytes.add({ hash, blob }))
+  await seed(db, [await stored('a', 'clay one', { needsUpload: 1 })])
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect(server.files().size).toBe(0)
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+  expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('a downloaded row does not wait to upload', async () => {
+  await serverHolds(server, 'clay one')
+  await seed(db, [await withoutBytes('a', 'clay one')])
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect((await db.photos.get('a'))?.needsUpload).toBeUndefined()
+})
+
 test('a photo is downloaded, verified and kept in the table', async () => {
   const hash = await serverHolds(server, 'clay one')
   await seed(db, [await withoutBytes('a', 'clay one')])
