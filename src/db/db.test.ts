@@ -8,23 +8,87 @@ beforeEach(async () => {
 
 const SYNCED = ['pieces', 'entries', 'glazeApps', 'glazes', 'clays', 'settings']
 
-test('schema has the eight tables and compound index entries.[pieceId+date]', () => {
+test('schema has the nine tables and compound index entries.[pieceId+date]', () => {
   expect(db.tables.map((t) => t.name).sort()).toEqual(
-    [...SYNCED, 'photos', 'syncState'].sort(),
+    [...SYNCED, 'photos', 'photoBytes', 'syncState'].sort(),
   )
   const indexes = db.table('entries').schema.indexes.map((i) => i.name)
   expect(indexes).toContain('[pieceId+date]')
 })
 
-test('version 3 indexes dirty on the six synced tables only', () => {
-  expect(db.verno).toBe(3)
+test('version 4 indexes dirty on the six synced tables and the photo flags', () => {
+  expect(db.verno).toBe(4)
   for (const name of SYNCED) {
     const indexes = db.table(name).schema.indexes.map((i) => i.name)
     expect(indexes, name).toContain('dirty')
   }
   const photoIndexes = db.table('photos').schema.indexes.map((i) => i.name)
-  expect(photoIndexes).not.toContain('dirty')
+  expect(photoIndexes.sort()).toEqual(
+    ['hash', 'dirty', 'needsUpload', 'needsDownload'].sort(),
+  )
   expect(db.table('syncState').schema.primKey.name).toBe('id')
+})
+
+test('the photoBytes table exists at version 4, keyed by hash', () => {
+  expect(db.verno).toBe(4)
+  expect(db.table('photoBytes').schema.primKey.name).toBe('hash')
+  expect(db.table('photoBytes').schema.indexes).toEqual([])
+})
+
+test('the upgrade to version 4 leaves bytes on their rows', async () => {
+  const name = `upgrade4-${crypto.randomUUID()}`
+  const old = new Dexie(name)
+  old.version(3).stores({
+    pieces: 'id, updatedAt, deletedAt, dirty',
+    entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
+    glazeApps: 'id, entryId, pieceId, glazeId, dirty',
+    glazes: 'id, name, deletedAt, dirty',
+    clays: 'id, name, deletedAt, dirty',
+    photos: 'id, hash',
+    settings: 'id, dirty',
+    syncState: 'id',
+  })
+  await old.open()
+  await old.table('photos').add({ id: 'ph1', hash: 'h', blob: new Blob(['b']) })
+  old.close()
+  const upgraded = new GlazetteDB(name)
+  try {
+    await upgraded.open()
+    expect((await upgraded.photos.get('ph1'))?.blob).toBeDefined()
+    expect(await upgraded.photoBytes.count()).toBe(0)
+  } finally {
+    await upgraded.delete()
+  }
+})
+
+test('opening version 4 forgets the last sync', async () => {
+  const name = `upgrade4-${crypto.randomUUID()}`
+  const old = new Dexie(name)
+  old.version(3).stores({
+    pieces: 'id, updatedAt, deletedAt, dirty',
+    entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
+    glazeApps: 'id, entryId, pieceId, glazeId, dirty',
+    glazes: 'id, name, deletedAt, dirty',
+    clays: 'id, name, deletedAt, dirty',
+    photos: 'id, hash',
+    settings: 'id, dirty',
+    syncState: 'id',
+  })
+  await old.open()
+  await old.table('syncState').add({
+    id: 'state',
+    account: 'me',
+    cursor: 5,
+    lastSyncedAt: '2026-11-08T10:00:00.000Z',
+  })
+  old.close()
+  const upgraded = new GlazetteDB(name)
+  try {
+    await upgraded.open()
+    expect(await upgraded.syncState.count()).toBe(0)
+  } finally {
+    await upgraded.delete()
+  }
 })
 
 describe('the version 3 upgrade', () => {

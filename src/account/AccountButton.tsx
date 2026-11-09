@@ -1,3 +1,4 @@
+import { usePhotosWaiting } from '../sync/useWaiting'
 import { useAccount } from './useAccount'
 
 /** The round Account button in the shelf header: a person outline, or the email's initial when signed in. */
@@ -5,14 +6,17 @@ export function AccountButton({ onClick }: { onClick: () => void }) {
   const email = useAccount((s) =>
     s.status === 'signed-in' ? s.email : undefined,
   )
+  const waiting = usePhotosWaiting() > 0 && !!email
   return (
     <button
       type="button"
       aria-label={
-        email ? `Account, signed in as ${email}` : 'Account, signed out'
+        email
+          ? `Account, signed in as ${email}${waiting ? ', photos waiting to upload' : ''}`
+          : 'Account, signed out'
       }
       onClick={onClick}
-      className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
+      className="relative flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
     >
       {email ? (
         <span aria-hidden="true" className="text-[16px] font-semibold">
@@ -33,6 +37,13 @@ export function AccountButton({ onClick }: { onClick: () => void }) {
           <circle cx="12" cy="8" r="4" />
           <path d="M4 20c0-3.9 3.6-6 8-6s8 2.1 8 6" />
         </svg>
+      )}
+      {waiting && (
+        <span
+          aria-hidden="true"
+          data-testid="waiting-dot"
+          className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-accent ring-2 ring-background"
+        />
       )}
     </button>
   )

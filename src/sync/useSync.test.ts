@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
+import * as bytes from '../photos/bytes'
 import * as engine from './engine'
+import { quietly } from './track'
+import * as transfer from './transfer'
 import {
   CHANGE_DELAY_MS,
   requestSync,
   startSync,
   stopSync,
   useSync,
+  WAIT_RETRY_MAX_MS,
+  WAIT_RETRY_START_MS,
 } from './useSync'
 
 vi.mock('./engine', async (orig) => ({
@@ -15,7 +20,16 @@ vi.mock('./engine', async (orig) => ({
   syncOnce: vi.fn(),
 }))
 
+vi.mock('./transfer', () => ({ transferPhotos: vi.fn() }))
+
+vi.mock('../photos/bytes', async (orig) => ({
+  ...(await orig<typeof import('../photos/bytes')>()),
+  moveBytesApart: vi.fn(),
+}))
+
 const syncOnce = vi.mocked(engine.syncOnce)
+const transferPhotos = vi.mocked(transfer.transferPhotos)
+const moveBytesApart = vi.mocked(bytes.moveBytesApart)
 
 function setAccount(email?: string) {
   useAccount.setState(
@@ -27,18 +41,133 @@ function setAccount(email?: string) {
 
 const realRefresh = useAccount.getState().refresh
 
-const flush = () => vi.advanceTimersByTimeAsync(0)
+// Also lets the database's real, unfaked async work finish: a run ends with a
+// read of the photo rows.
+const flush = async () => {
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(0)
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   syncOnce.mockReset().mockResolvedValue('done')
+  transferPhotos.mockReset().mockResolvedValue('done')
+  moveBytesApart.mockReset().mockResolvedValue(undefined)
   useSync.setState({ syncing: false, failed: false })
   useAccount.setState({ refresh: realRefresh })
   setAccount(undefined)
 })
-afterEach(() => {
+afterEach(async () => {
   stopSync()
+  setAccount(undefined)
+  requestSync() // clears a wait check left by a test that never started sync
   vi.useRealTimers()
+  await quietly(db, () => db.photos.clear())
+})
+
+const MIN = 60_000
+
+const waitingPhoto = (id: string, extra = {}) => ({
+  id,
+  hash: id,
+  width: 1,
+  height: 1,
+  takenAt: '2026-11-09T00:00:00.000Z',
+  needsDownload: 1 as const,
+  ...extra,
+})
+
+test('a photo waiting on the other device is checked again, with growing delays', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  expect(WAIT_RETRY_START_MS).toBe(MIN)
+  let calls = 1
+  for (const delay of [1, 2, 4, 8, 16, 30, 30, 30]) {
+    await vi.advanceTimersByTimeAsync(delay * MIN - 1)
+    expect(syncOnce).toHaveBeenCalledTimes(calls)
+    await vi.advanceTimersByTimeAsync(1)
+    await flush() // the run ends and sets the next timer
+    calls += 1
+    expect(syncOnce).toHaveBeenCalledTimes(calls)
+  }
+  expect(WAIT_RETRY_MAX_MS).toBe(30 * MIN)
+})
+
+test('the wait check stops, and starts over, when nothing waits', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN) // second run, next delay 2 minutes
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  await quietly(db, () => db.photos.update('a', { needsDownload: undefined }))
+  requestSync() // another reason; it finds nothing waiting
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  // A later wait starts at one minute again.
+  await quietly(db, () => db.photos.update('a', { needsDownload: 1 }))
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN)
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(5)
+})
+
+test('a sync for another reason keeps the backoff while a photo still waits', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN) // next delay is 2 minutes
+  await flush()
+  requestSync()
+  await flush() // delay now 4 minutes, one timer only
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(4 * MIN - 1)
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(1)
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(4)
+})
+
+test('signing out clears the wait check', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  startSync()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  setAccount(undefined)
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+})
+
+test('stopping sync clears the wait check', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  startSync()
+  await flush()
+  stopSync()
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+})
+
+test('no wait check when only a deleted photo waits', async () => {
+  await quietly(db, () =>
+    db.photos.put(waitingPhoto('a', { deletedAt: '2026-11-09T00:00:00.000Z' })),
+  )
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
 })
 
 test('signed out, nothing syncs', async () => {
@@ -49,6 +178,7 @@ test('signed out, nothing syncs', async () => {
   await db.glazes.put({ id: 'g-out', name: 'Shino' } as never)
   await vi.advanceTimersByTimeAsync(CHANGE_DELAY_MS * 2)
   expect(syncOnce).not.toHaveBeenCalled()
+  expect(moveBytesApart).not.toHaveBeenCalled()
 })
 
 test('signing in syncs once', async () => {
@@ -146,4 +276,123 @@ test('a dead session signs the device out', async () => {
   requestSync()
   await flush()
   expect(refresh).toHaveBeenCalledTimes(1)
+})
+
+test('photos transfer after a successful sync', async () => {
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  expect(transferPhotos).toHaveBeenCalledTimes(1)
+  expect(transferPhotos).toHaveBeenCalledWith(db, expect.anything())
+})
+
+test('no transfer when the sync stops', async () => {
+  setAccount('carol@example.com')
+  syncOnce.mockResolvedValueOnce('offline')
+  requestSync()
+  await flush()
+  expect(transferPhotos).not.toHaveBeenCalled()
+})
+
+test('a transfer error shows like a sync error', async () => {
+  setAccount('carol@example.com')
+  transferPhotos.mockResolvedValueOnce('error')
+  requestSync()
+  await flush()
+  expect(useSync.getState().failed).toBe(true)
+})
+
+test('a transfer that finds the session dead signs the device out', async () => {
+  setAccount('carol@example.com')
+  const refresh = vi.fn().mockResolvedValue(undefined)
+  useAccount.setState({ refresh })
+  transferPhotos.mockResolvedValueOnce('signed-out')
+  requestSync()
+  await flush()
+  expect(refresh).toHaveBeenCalledTimes(1)
+})
+
+test('syncing stays on through the transfer, and a request leads to one more run', async () => {
+  setAccount('carol@example.com')
+  let finish: (o: 'done') => void = () => {}
+  transferPhotos.mockImplementationOnce(() => new Promise((r) => (finish = r)))
+  requestSync()
+  await flush()
+  expect(useSync.getState().syncing).toBe(true)
+  requestSync()
+  requestSync()
+  finish('done')
+  await flush()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  expect(useSync.getState().syncing).toBe(false)
+})
+
+test('existing photos move before the first sync', async () => {
+  const real =
+    await vi.importActual<typeof import('../photos/bytes')>('../photos/bytes')
+  moveBytesApart.mockImplementationOnce(real.moveBytesApart)
+  const hash = 'a'.repeat(64)
+  await quietly(db, () =>
+    db.photos.add({
+      id: 'old',
+      hash,
+      blob: new Blob(['full']),
+      thumb: new Blob(['thumb']),
+      width: 1,
+      height: 1,
+      takenAt: '2026-01-01T00:00:00.000Z',
+    }),
+  )
+  let atSync: { onRow: boolean; inTable: boolean } | undefined
+  syncOnce.mockImplementationOnce(async () => {
+    atSync = {
+      onRow: !!(await db.photos.get('old'))?.blob,
+      inTable: !!(await db.photoBytes.get(hash)),
+    }
+    return 'done'
+  })
+  setAccount('carol@example.com')
+  requestSync()
+  await vi.waitFor(() => expect(atSync).toBeDefined())
+  expect(atSync).toEqual({ onRow: false, inTable: true })
+  await quietly(db, async () => {
+    await db.photos.clear()
+    await db.photoBytes.clear()
+  })
+})
+
+test('the sync waits for the move, and every run tries it', async () => {
+  setAccount('carol@example.com')
+  let finish: () => void = () => {}
+  moveBytesApart.mockImplementationOnce(
+    () => new Promise<void>((r) => (finish = r)),
+  )
+  requestSync()
+  await flush()
+  expect(moveBytesApart).toHaveBeenCalledWith(db)
+  expect(syncOnce).not.toHaveBeenCalled()
+  expect(useSync.getState().syncing).toBe(true)
+  finish()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+
+  requestSync()
+  await flush()
+  expect(moveBytesApart).toHaveBeenCalledTimes(2)
+})
+
+test('signing out during the move stops the run before it syncs', async () => {
+  setAccount('carol@example.com')
+  let finish: () => void = () => {}
+  moveBytesApart.mockImplementationOnce(
+    () => new Promise<void>((r) => (finish = r)),
+  )
+  requestSync()
+  await flush()
+  setAccount(undefined)
+  finish()
+  await flush()
+  expect(syncOnce).not.toHaveBeenCalled()
+  expect(useSync.getState().syncing).toBe(false)
 })

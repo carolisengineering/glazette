@@ -7,6 +7,7 @@ import {
   type SyncRecord,
 } from '../../shared/syncProtocol'
 import type { GlazetteDB } from '../db/db'
+import { mergePhotosByHash } from './photoMerge'
 import {
   applyRecords,
   clearDirty,
@@ -40,7 +41,8 @@ export type SyncOutcome = 'done' | StopReason
 
 /**
  * One sync with the account: pull and apply what changed there, merge
- * same-named glazes and clays on the first sync for this account, then push
+ * same-named glazes and clays on the first sync for this account, merge
+ * photos of the same image, then push
  * what changed here. Never throws.
  */
 export async function syncOnce(
@@ -99,6 +101,10 @@ async function run(
 
   // 3. The first sync for this account joins same-named glazes and clays.
   if (full) await mergeByName(db, accountIds)
+
+  // The same image under two ids becomes one photo, so its changes are in
+  // the push below.
+  await mergePhotosByHash(db)
 
   // 4. Push what changed here. A row edited while its push is in flight keeps
   // its mark for the next sync. The server's copy is applied before the mark

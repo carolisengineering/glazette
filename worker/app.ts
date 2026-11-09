@@ -3,6 +3,7 @@ import { authRoutes } from './auth'
 import { resendSender, type SendCode } from './email'
 import type { Env } from './env'
 import { trustedOriginOnly } from './origin'
+import { photoRoutes } from './photos'
 import { syncRoutes } from './sync'
 
 // Collaborators tests can swap out.
@@ -15,6 +16,7 @@ export function createApp(deps: AppDeps = {}) {
   const { sendCode } = deps
   app.route('/auth', authRoutes(sendCode ? () => sendCode : resendSender))
   app.route('/sync', syncRoutes())
+  app.route('/photos', photoRoutes())
   app.notFound((c) => c.json({ error: 'not_found' }, 404))
   // Anything unexpected is logged and answered as JSON, never as plain text.
   app.onError((error, c) => {

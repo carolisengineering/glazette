@@ -1,7 +1,10 @@
 import Dexie, { type Transaction } from 'dexie'
 import type { GlazetteDB } from '../db/db'
 
-/** The tables whose rows travel between devices. Photos stay out. */
+/**
+ * The tables whose rows travel between devices. A photo's row travels, but
+ * not its bytes.
+ */
 export const SYNCED_TABLES = [
   'pieces',
   'entries',
@@ -9,19 +12,31 @@ export const SYNCED_TABLES = [
   'glazes',
   'clays',
   'settings',
+  'photos',
 ] as const
 
 /**
  * Fields that stay on this device and never travel in a sync record: the sync
- * mark itself, and settings kept per device. A change to only these isn't a
- * change to sync. A write that changes nothing (a `put` of the same row)
- * isn't one either.
+ * mark itself, settings kept per device, and a photo's bytes and transfer
+ * flags. A change to only these isn't a change to sync. A write that changes
+ * nothing (a `put` of the same row) isn't one either.
  */
 export const DEVICE_ONLY_FIELDS: readonly string[] = [
   'dirty',
   'lastBackupAt',
   'persistRequested',
+  'blob',
+  'thumb',
+  'needsUpload',
+  'needsDownload',
 ]
+
+/** A copy of a row without the fields that stay on this device. */
+export function withoutDeviceFields<T extends object>(row: T): Partial<T> {
+  const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) }
+  for (const key of DEVICE_ONLY_FIELDS) delete copy[key]
+  return copy as Partial<T>
+}
 
 const quietTransactions = new WeakSet<Transaction>()
 const noticedTransactions = new WeakSet<Transaction>()
@@ -84,14 +99,23 @@ export function trackChanges(db: GlazetteDB): void {
     )
     table.hook(
       'updating',
-      (modifications: { updatedAt?: unknown }, _key, _obj, trans) => {
+      (
+        modifications: { updatedAt?: unknown; needsUpload?: unknown },
+        _key,
+        _obj,
+        trans,
+      ) => {
         if (isQuiet(trans)) return
+        // A photo that starts waiting to upload isn't a change to sync, but
+        // the upload should start soon. Checked before the device-only early
+        // return below, which would skip it.
+        if (modifications.needsUpload === 1) notice(db, trans)
         if (
           Object.keys(modifications).every((k) =>
             DEVICE_ONLY_FIELDS.includes(k),
           )
         ) {
-          return
+          return undefined
         }
         notice(db, trans)
         const givesTime = modifications.updatedAt !== undefined
@@ -104,12 +128,16 @@ export function trackChanges(db: GlazetteDB): void {
 }
 
 /**
- * Runs `fn` in one read-write transaction over the synced tables and the sync
- * state. Its writes land exactly as written: not stamped, not marked, and not
- * reported to `onLocalChange` listeners.
+ * Runs `fn` in one read-write transaction over the synced tables, the sync
+ * state and the photo bytes. Its writes land exactly as written: not stamped,
+ * not marked, and not reported to `onLocalChange` listeners.
  */
 export function quietly<T>(db: GlazetteDB, fn: () => Promise<T>): Promise<T> {
-  const tables = [...SYNCED_TABLES.map((name) => db.table(name)), db.syncState]
+  const tables = [
+    ...SYNCED_TABLES.map((name) => db.table(name)),
+    db.syncState,
+    db.photoBytes,
+  ]
   // Must be an async function: Dexie keeps the transaction across native
   // awaits only when the scope function itself is async.
   return db.transaction('rw', tables, async () => {

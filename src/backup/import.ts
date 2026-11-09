@@ -1,5 +1,6 @@
 import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
+import { PHOTO_HASH } from '../../shared/photoProtocol'
 import { EPOCH } from '../../shared/syncProtocol'
 import { db, newId } from '../db/db'
 import {
@@ -14,8 +15,10 @@ import {
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
-import type { Photo, Settings } from '../db/types'
+import type { Photo, PhotoBytes, Settings } from '../db/types'
+import { hashesHeld } from '../photos/bytes'
 import { changedAt } from '../sync/records'
+import { withoutDeviceFields } from '../sync/track'
 import type { ReadBytes } from './export'
 import {
   BACKUP_JSON_PATH,
@@ -74,6 +77,7 @@ export async function importZip(
       db.clays,
       db.settings,
       db.photos,
+      db.photoBytes,
     ],
     // Must be an async function: Dexie keeps the transaction across native
     // awaits only when the scope function itself is async.
@@ -119,7 +123,9 @@ function isBackup(json: unknown): json is BackupJson {
     areRows(json.glazeApps, isLayerRow) &&
     areRows(json.glazes, isGlazeRow) &&
     areRows(json.clays, isClayRow) &&
-    areRows(json.photos, (row) => isRow(row, ['hash'])) &&
+    areRows(json.photos, (row) =>
+      isRow(row, ['hash'], (r) => PHOTO_HASH.test(r.hash as string)),
+    ) &&
     (json.settings == null || isSettingsRow(json.settings))
   )
 }
@@ -319,13 +325,15 @@ const jpeg = (bytes: Uint8Array) =>
 
 /**
  * Photos match by hash. A hash already stored here maps the incoming id to the
- * local one. A new hash is added with its bytes from the zip, or skipped when
- * the zip lacks the image: its steps keep their photoId and show a placeholder.
+ * local one. A new hash is added with its bytes from the zip. When the zip
+ * lacks the image (the backup was made before it downloaded), the details are
+ * added alone and wait to download; the photo shows a placeholder until then.
+ * Bytes from the zip go to the bytes table unless it already holds that hash.
  * Returns the incoming-to-local id map and the ids of photos already stored
  * here that matched by hash.
  */
 async function mergePhotos(
-  incoming: PhotoMeta[],
+  allIncoming: PhotoMeta[],
   files: Unzipped,
   count: ImportResult,
 ) {
@@ -333,13 +341,18 @@ async function mergePhotos(
   const matched = new Set<string>()
   // Local photo id -> date of an incoming tombstone for the same hash.
   const tombstones = new Map<string, string>()
+  // A merged duplicate is ignored here: it must not reach `tombstones`, or
+  // it would delete the live photo of the same hash.
+  const incoming = allIncoming.filter((p) => !p.mergedInto)
   if (incoming.length === 0) return { idMap, matched, tombstones }
 
   const localByHash = new Map<string, Photo>()
-  const sameHash = await db.photos
-    .where('hash')
-    .anyOf(incoming.map((p) => p.hash))
-    .toArray()
+  const sameHash = (
+    await db.photos
+      .where('hash')
+      .anyOf(incoming.map((p) => p.hash))
+      .toArray()
+  ).filter((p) => !p.mergedInto)
   for (const p of sameHash) {
     const seen = localByHash.get(p.hash)
     // Prefer a live row when duplicates exist.
@@ -351,10 +364,37 @@ async function mergePhotos(
       .map((p) => p.id),
   )
 
+  const held = await hashesHeld(
+    db,
+    incoming.map((p) => p.hash),
+  )
+  const newBytes: PhotoBytes[] = []
+  // A missing thumbnail falls back to the full image rather than losing the photo.
+  const keepFromZip = (hash: string, full: Uint8Array) => {
+    if (held.has(hash)) return
+    held.add(hash)
+    const thumb = bytesInZip(thumbPath(hash)) ?? full
+    newBytes.push({ hash, blob: jpeg(full), thumb: jpeg(thumb) })
+  }
+
+  // An empty file is as good as none: it would never match its hash.
+  const bytesInZip = (path: string) =>
+    files[path]?.length ? files[path] : undefined
+
   const writes: Photo[] = []
+  // Local rows that had only details, and now wait to upload what the zip gave.
+  const fills: { key: string; changes: Partial<Photo> }[] = []
   for (const meta of incoming) {
     const local = localByHash.get(meta.hash)
     if (local) {
+      const full = bytesInZip(photoPath(meta.hash))
+      if (!local.blob && !held.has(meta.hash) && full) {
+        keepFromZip(meta.hash, full)
+        fills.push({
+          key: local.id,
+          changes: { needsUpload: 1, needsDownload: undefined },
+        })
+      }
       if (local.id !== meta.id) idMap.set(meta.id, local.id)
       // Only photos stored before this import; a duplicate hash in the zip
       // just maps to the copy added a moment ago.
@@ -364,25 +404,35 @@ async function mergePhotos(
       }
       continue
     }
-    const full = files[photoPath(meta.hash)]
-    if (!full) {
-      // The step keeps a photoId that shows the placeholder. If that id
-      // belongs to a different photo here, point the step at an unused id.
-      if (usedIds.has(meta.id)) idMap.set(meta.id, newId())
-      continue
-    }
-    // A missing thumbnail falls back to the full image rather than losing the photo.
-    const thumb = files[thumbPath(meta.hash)] ?? full
+    const full = bytesInZip(photoPath(meta.hash))
+    if (full) keepFromZip(meta.hash, full)
     // An id taken by a different photo gets a fresh one, never an overwrite.
     const id = usedIds.has(meta.id) ? newId() : meta.id
     if (id !== meta.id) idMap.set(meta.id, id)
     usedIds.add(id)
-    const row: Photo = { ...meta, id, blob: jpeg(full), thumb: jpeg(thumb) }
+    // Keeps the backup's change time (1970 when it has none), as other rows
+    // do. The change tracker marks it dirty. A backup's JSON shouldn't name
+    // bytes, but a row must never seem to hold some it doesn't.
+    const row: Photo = {
+      ...(withoutDeviceFields(meta) as Photo),
+      id,
+      updatedAt: meta.updatedAt ?? EPOCH,
+      // Bytes from the zip wait to upload. A row without them is never
+      // uploaded: a signed-in device downloads the image instead, unless the
+      // table already holds it.
+      ...(full
+        ? { needsUpload: 1 as const }
+        : held.has(meta.hash)
+          ? {}
+          : { needsDownload: 1 as const }),
+    }
     writes.push(row)
     localByHash.set(meta.hash, row)
   }
   count.added += writes.length
+  if (newBytes.length > 0) await db.photoBytes.bulkAdd(newBytes)
   if (writes.length > 0) await db.photos.bulkPut(writes)
+  if (fills.length > 0) await db.photos.bulkUpdate(fills)
   return { idMap, matched, tombstones }
 }
 

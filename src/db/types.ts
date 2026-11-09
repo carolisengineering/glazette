@@ -61,13 +61,31 @@ export interface Clay {
 
 export interface Photo {
   id: string
-  blob: Blob // stored locally (IndexedDB), JPEG
-  thumb: Blob // ~400px thumbnail for grids
+  // Set only on a row whose bytes haven't moved to photoBytes yet. Nothing
+  // writes these any more.
+  blob?: Blob
+  thumb?: Blob
   hash: string // content hash; dedupes re-imports
   width: number
   height: number
   takenAt: string
   deletedAt?: string // soft delete (tombstone for v2 sync)
+  updatedAt?: string // stamped on every local change
+  mergedInto?: string // id of the photo this duplicate was merged into
+  dirty?: 1 // changed here since the last sync
+  needsUpload?: 1 // this device has the bytes and the server may not
+  needsDownload?: 1 // the details are here but the bytes aren't
+}
+
+/**
+ * An image's bytes, one entry per hash. Apart from the photo rows, so writing a
+ * row never stores its Blobs again. Stays on this device: never tracked and
+ * never in a record. Nothing ever deletes from this table.
+ */
+export interface PhotoBytes {
+  hash: string
+  blob: Blob // JPEG
+  thumb?: Blob // ~400px thumbnail for grids
 }
 
 export interface Settings {

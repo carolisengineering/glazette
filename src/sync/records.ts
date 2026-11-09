@@ -12,13 +12,20 @@ import {
   isEntryRow,
   isGlazeRow,
   isLayerRow,
+  isPhotoRow,
   isPieceRow,
   isSettingsRow,
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import { DEVICE_ONLY_FIELDS, quietly, type SYNCED_TABLES } from './track'
+import { hashesHeld } from '../photos/bytes'
+import {
+  DEVICE_ONLY_FIELDS,
+  quietly,
+  type SYNCED_TABLES,
+  withoutDeviceFields,
+} from './track'
 
 type TableName = (typeof SYNCED_TABLES)[number]
 
@@ -29,6 +36,8 @@ const TABLE_OF: Record<RecordKind, TableName> = {
   glaze: 'glazes',
   clay: 'clays',
   settings: 'settings',
+  // Last, so a push sends a step's change before its photo's.
+  photo: 'photos',
 }
 
 const KINDS = Object.keys(TABLE_OF) as RecordKind[]
@@ -39,6 +48,7 @@ const ROW_CHECK: Record<RecordKind, (row: unknown) => boolean> = {
   glazeApp: isLayerRow,
   glaze: isGlazeRow,
   clay: isClayRow,
+  photo: isPhotoRow,
   settings: (row) =>
     isSettingsRow(row) && (row as { id: unknown }).id === 'app',
 }
@@ -70,8 +80,7 @@ export function changedAt(row: {
 
 /** A row as a sync record, without the fields that stay on this device. */
 export function toRecord(kind: RecordKind, row: Row): SyncRecord {
-  const data = { ...row }
-  for (const key of DEVICE_ONLY_FIELDS) delete data[key]
+  const data = withoutDeviceFields(row)
   return { kind, id: row.id, changedAt: changedAt(row), data }
 }
 
@@ -99,8 +108,19 @@ export async function readDirty(db: GlazetteDB): Promise<SyncRecord[]> {
 /** Marks every row to be sent. Change times stay as they are. */
 export function markAllDirty(db: GlazetteDB): Promise<void> {
   return quietly(db, async () => {
+    const held = new Set(await db.photoBytes.toCollection().primaryKeys())
     for (const kind of KINDS) {
-      await db.table(TABLE_OF[kind]).toCollection().modify({ dirty: 1 })
+      await db
+        .table(TABLE_OF[kind])
+        .toCollection()
+        .modify(
+          kind === 'photo'
+            ? (row: Row & { hash: string }) => {
+                row.dirty = 1
+                if (row.blob || held.has(row.hash)) row.needsUpload = 1
+              }
+            : { dirty: 1 },
+        )
     }
   })
 }
@@ -200,9 +220,16 @@ export function applyRecords(
     }
     for (const [kind, group] of byKind(usable)) {
       const rows = await rowsById(db, kind, group)
+      const held =
+        kind === 'photo'
+          ? await hashesHeld(
+              db,
+              group.map((r) => r.data.hash as string),
+            )
+          : new Set<string>()
       const writes = new Map<string, Row>()
       for (const record of group) {
-        const row = winningRow(record, rows.get(record.id))
+        const row = winningRow(record, rows.get(record.id), held)
         if (!row) {
           skip(record)
           continue
@@ -219,10 +246,14 @@ export function applyRecords(
   })
 }
 
-/** The row to write for the record, or undefined when the local row stays. */
+/**
+ * The row to write for the record, or undefined when the local row stays.
+ * `heldHashes` says which of the photo hashes the bytes table holds.
+ */
 function winningRow(
   record: SyncRecord,
   mine: Row | undefined,
+  heldHashes: Set<string>,
 ): Row | undefined {
   if (mine) {
     const local = changedAt(mine)
@@ -234,13 +265,20 @@ function winningRow(
   delete row.dirty
   if (record.kind === 'glaze')
     row = withValidColor(row as Row & { color?: unknown })
-  if (record.kind === 'settings' && mine) {
-    // This device's own settings stay; the row is written clean.
+  if ((record.kind === 'settings' || record.kind === 'photo') && mine) {
+    // This device's own settings, and a photo's bytes, stay; the row is
+    // written clean.
     for (const key of DEVICE_ONLY_FIELDS) {
       if (key === 'dirty') continue
       delete row[key]
       if (mine[key] !== undefined) row[key] = mine[key]
     }
+  }
+  if (record.kind === 'photo') {
+    // Details without bytes here: the bytes are fetched later.
+    const hasBytes = !!row.blob || heldHashes.has(row.hash as string)
+    if (!row.deletedAt && !hasBytes) row.needsDownload = 1
+    else delete row.needsDownload
   }
   return row
 }
@@ -290,7 +328,8 @@ export function mergeByName(
 }
 
 /** The ISO time 1 ms after `time`, a valid change time. */
-const justAfter = (time: string) => new Date(Date.parse(time) + 1).toISOString()
+export const justAfter = (time: string) =>
+  new Date(Date.parse(time) + 1).toISOString()
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto

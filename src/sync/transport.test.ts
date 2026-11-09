@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { SyncRecord } from '../../shared/syncProtocol'
 import { SyncStopped } from './engine'
-import { fetchTransport, SYNC_TIMEOUT_MS } from './transport'
+import { fetchTransport, SYNC_TIMEOUT_MS, timedFetch } from './transport'
 
 function stub(status: number, body?: unknown) {
   const fn = vi
@@ -119,6 +119,41 @@ test('a request that never settles is offline after the timeout', async () => {
   } finally {
     vi.useRealTimers()
   }
+})
+
+describe('timedFetch', () => {
+  test('hands the response to read and returns its answer', async () => {
+    const fn = stub(200, 'hello')
+    const answer = await timedFetch('/x', { method: 'GET' }, 1_000, (res) =>
+      res.text(),
+    )
+    expect(answer).toBe('hello')
+    expect(fn.mock.calls[0][1].credentials).toBe('same-origin')
+  })
+
+  test('a read that throws something else is an error', async () => {
+    stub(200, 'hello')
+    const stopped = stoppedWith(
+      timedFetch('/x', {}, 1_000, async () => {
+        throw new Error('bad body')
+      }),
+    )
+    expect(await stopped).toBe('error')
+  })
+
+  test('a read that never finishes is offline after the timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      stub(200, 'hello')
+      const stopped = stoppedWith(
+        timedFetch('/x', {}, 1_000, () => new Promise(() => {})),
+      )
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(await stopped).toBe('offline')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 test("a record it can't use is passed on, for the engine to skip", async () => {

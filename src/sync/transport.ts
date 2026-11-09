@@ -9,8 +9,18 @@ import { SyncStopped, type Transport } from './engine'
 /** How long one request may take before the sync gives up on it as offline. */
 export const SYNC_TIMEOUT_MS = 30_000
 
-/** The server's answer as JSON. Throws SyncStopped for anything but a 2xx JSON answer. */
-async function request(url: string, init: RequestInit): Promise<unknown> {
+/**
+ * One fetch, with `read` turning the response into the answer, all under one
+ * timeout. Throws SyncStopped('offline') on a network failure or timeout.
+ * `read` throws SyncStopped for answers it can't use. Anything else it throws
+ * becomes a SyncStopped too: offline if the timeout aborted it, else error.
+ */
+export async function timedFetch<T>(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  read: (res: Response) => Promise<T>,
+): Promise<T> {
   // One sync runs at a time, so a request that hangs would stall every later
   // sync. The timeout also rejects by itself, in case fetch ignores the abort.
   const controller = new AbortController()
@@ -19,7 +29,7 @@ async function request(url: string, init: RequestInit): Promise<unknown> {
     timer = setTimeout(() => {
       controller.abort()
       reject(new SyncStopped('offline'))
-    }, SYNC_TIMEOUT_MS)
+    }, timeoutMs)
   })
   const answer = (async () => {
     let res: Response
@@ -32,11 +42,10 @@ async function request(url: string, init: RequestInit): Promise<unknown> {
     } catch {
       throw new SyncStopped('offline')
     }
-    if (res.status === 401) throw new SyncStopped('signed-out')
-    if (!res.ok) throw new SyncStopped('error')
     try {
-      return (await res.json()) as unknown
-    } catch {
+      return await read(res)
+    } catch (error) {
+      if (error instanceof SyncStopped) throw error
       throw new SyncStopped(controller.signal.aborted ? 'offline' : 'error')
     }
   })()
@@ -48,6 +57,15 @@ async function request(url: string, init: RequestInit): Promise<unknown> {
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** The server's answer as JSON. Throws SyncStopped for anything but a 2xx JSON answer. */
+function request(url: string, init: RequestInit): Promise<unknown> {
+  return timedFetch(url, init, SYNC_TIMEOUT_MS, async (res) => {
+    if (res.status === 401) throw new SyncStopped('signed-out')
+    if (!res.ok) throw new SyncStopped('error')
+    return (await res.json()) as unknown
+  })
 }
 
 // Only the envelope is checked. Each record is checked when it's applied, so

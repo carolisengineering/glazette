@@ -5,12 +5,13 @@ import type {
   Glaze,
   GlazeApplication,
   Photo,
+  PhotoBytes,
   Piece,
   Settings,
   StageEntry,
   SyncState,
 } from './types'
-import { dateOldRows, fillSkippedStages } from './upgrade'
+import { dateOldRows, fillSkippedStages, forgetLastSync } from './upgrade'
 
 export class GlazetteDB extends Dexie {
   pieces!: EntityTable<Piece, 'id'>
@@ -19,6 +20,7 @@ export class GlazetteDB extends Dexie {
   glazes!: EntityTable<Glaze, 'id'>
   clays!: EntityTable<Clay, 'id'>
   photos!: EntityTable<Photo, 'id'>
+  photoBytes!: EntityTable<PhotoBytes, 'hash'>
   settings!: EntityTable<Settings, 'id'>
   syncState!: EntityTable<SyncState, 'id'>
 
@@ -50,6 +52,15 @@ export class GlazetteDB extends Dexie {
         syncState: 'id',
       })
       .upgrade(dateOldRows)
+    // Photos sync as records. The upgrade makes every device's first sync
+    // after updating a full one. Bytes move to their own table later, row by
+    // row, in moveBytesApart: not here, where a long upgrade could abort.
+    this.version(4)
+      .stores({
+        photos: 'id, hash, dirty, needsUpload, needsDownload',
+        photoBytes: 'hash',
+      })
+      .upgrade(forgetLastSync)
     trackChanges(this)
   }
 }

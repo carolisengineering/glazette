@@ -613,18 +613,18 @@ test('a sync saves the account, cursor and time', async () => {
   expect(Number.isNaN(Date.parse(state?.lastSyncedAt ?? ''))).toBe(false)
 })
 
-test('photos are never touched', async () => {
-  const photo = (id: string) => ({
+test("photo details sync, and each device's bytes stay where they are", async () => {
+  const photo = (id: string, n: string) => ({
     id,
     blob: new Blob(['full'], { type: 'image/jpeg' }),
     thumb: new Blob(['th'], { type: 'image/jpeg' }),
-    hash: `h-${id}`,
+    hash: n.repeat(64),
     width: 1,
     height: 1,
     takenAt: T1,
   })
-  await a.photos.add(photo('ph-a'))
-  await b.photos.add(photo('ph-b'))
+  await a.photos.add(photo('ph-a', 'a'))
+  await b.photos.add(photo('ph-b', 'b'))
   await a.pieces.add(piece('p1'))
   await a.entries.add({
     id: 'e1',
@@ -632,15 +632,95 @@ test('photos are never touched', async () => {
     stage: 'thrown',
     photoId: 'ph-a',
   })
-  const bPhotosBefore = await b.photos.toArray()
 
   await syncOnce(a, server, ME)
   await syncOnce(b, server, ME)
+  await syncOnce(a, server, ME)
 
-  expect(server.records().map((r) => r.id)).not.toContain('ph-a')
-  expect(server.records().map((r) => r.kind)).not.toContain('photo')
-  expect(await b.photos.toArray()).toEqual(bPhotosBefore)
-  expect((await a.photos.toArray()).map((p) => p.id)).toEqual(['ph-a'])
+  const sent = server.records().filter((r) => r.kind === 'photo')
+  expect(sent.map((r) => r.id).sort()).toEqual(['ph-a', 'ph-b'])
+  for (const r of sent) expect(r.data).not.toHaveProperty('blob')
+
+  // B has A's photo as details only, waiting for its bytes.
+  const pulledPhoto = await b.photos.get('ph-a')
+  expect(pulledPhoto?.needsDownload).toBe(1)
+  expect(pulledPhoto?.blob).toBeUndefined()
+  expect((await b.entries.get('e1'))?.photoId).toBe('ph-a')
+  // Each device still holds its own bytes.
+  expect((await b.photos.get('ph-b'))?.blob).toBeDefined()
+  expect((await a.photos.get('ph-a'))?.blob).toBeDefined()
+  expect((await a.photos.get('ph-b'))?.needsDownload).toBe(1)
+})
+
+test('the same image under two ids becomes one on both devices', async () => {
+  const photo = (id: string) => ({
+    id,
+    hash: 'a'.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+  const bytes = { hash: 'a'.repeat(64), blob: new Blob(['full']) }
+  await a.photoBytes.add(bytes)
+  await a.photos.add({ ...photo('ph-b'), needsUpload: 1 })
+  await a.pieces.add(piece('p1'))
+  await a.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'ph-b',
+  })
+  await b.photoBytes.add(bytes)
+  await b.photos.add(photo('ph-a'))
+  await b.pieces.add(piece('p2'))
+  await b.entries.add({
+    id: 'e2',
+    pieceId: 'p2',
+    stage: 'thrown',
+    photoId: 'ph-a',
+  })
+
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+  await syncOnce(a, server, ME)
+
+  for (const db of [a, b]) {
+    const live = (await db.photos.toArray()).filter((p) => !p.deletedAt)
+    expect(live.map((p) => p.id)).toEqual(['ph-a'])
+    expect(await db.photoBytes.count()).toBe(1)
+    expect(live[0].needsDownload).toBeUndefined()
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph-a')
+    expect((await db.entries.get('e2'))?.photoId).toBe('ph-a')
+    expect((await db.photos.get('ph-b'))?.mergedInto).toBe('ph-a')
+    // A full sync set each device's copy waiting. Whichever row it's on, the
+    // image still gets its upload, once.
+    expect(await db.photos.where('needsUpload').equals(1).count()).toBe(1)
+  }
+})
+
+test('a photo made on one device arrives as details first', async () => {
+  await a.photos.add({
+    id: 'ph-a',
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['th'], { type: 'image/jpeg' }),
+    hash: 'a'.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+  await a.pieces.add(piece('p1'))
+  await a.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'ph-a',
+  })
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+
+  const row = await b.photos.get('ph-a')
+  expect(row?.needsDownload).toBe(1)
+  expect(row?.blob).toBeUndefined()
   expect((await b.entries.get('e1'))?.photoId).toBe('ph-a')
 })
 

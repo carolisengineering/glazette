@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono'
 import type { Env } from './env'
 
-// The trusted origins for the last settings seen, so each POST doesn't parse them again.
+// The trusted origins for the last settings seen, so each request doesn't parse them again.
 let originsCache: { from: string; origins: Set<string> } | undefined
 
 function trustedOrigins(env: Env): Set<string> {
@@ -31,12 +31,17 @@ function fromTrustedOrigin(c: Context<{ Bindings: Env }>) {
   return origin !== undefined && trustedOrigins(c.env).has(origin)
 }
 
-// Every POST must come from the app itself, before anything is read or written.
+// Every request that isn't a GET or HEAD must come from the app itself, before
+// anything is read or written.
 export async function trustedOriginOnly(
   c: Context<{ Bindings: Env }>,
   next: Next,
 ) {
-  if (c.req.method === 'POST' && !fromTrustedOrigin(c)) {
+  if (
+    c.req.method !== 'GET' &&
+    c.req.method !== 'HEAD' &&
+    !fromTrustedOrigin(c)
+  ) {
     return c.json(
       {
         code: 'BAD_ORIGIN',
