@@ -90,7 +90,12 @@ export const fetchPhotoTransport: PhotoTransport = {
       async (res) => {
         if (res.status === 404) return null
         rejectUnlessOk(res)
-        return await res.blob()
+        // A connection lost mid-body is being offline, not a server fault.
+        try {
+          return await res.blob()
+        } catch {
+          throw new SyncStopped('offline')
+        }
       },
     )
   },

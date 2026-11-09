@@ -121,6 +121,15 @@ describe('download', () => {
     expect(init.credentials).toBe('same-origin')
   })
 
+  test('a connection lost during the body is offline', async () => {
+    const res = new Response(null, { status: 200 })
+    vi.spyOn(res, 'blob').mockRejectedValue(new TypeError('connection lost'))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res))
+    expect(await stoppedWith(fetchPhotoTransport.download(HASH, 'full'))).toBe(
+      'offline',
+    )
+  })
+
   test('404 is null; everything else maps to a stop', async () => {
     stub(404, json({ code: 'NO_PHOTO', message: 'no' }))
     expect(await fetchPhotoTransport.download(HASH, 'full')).toBeNull()
