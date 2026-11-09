@@ -36,15 +36,17 @@ type Line = keyof typeof LINES
 export function AccountSheet({ onClose }: { onClose: () => void }) {
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
-  useModal(titleRef, onClose)
+  const [warning, setWarning] = useState<string>()
+  // The confirm dialog handles its own Escape; the sheet stays put meanwhile.
+  useModal(titleRef, () => {
+    if (!warning) onClose()
+  })
   const status = useAccount((s) => s.status)
   const accountEmail = useAccount((s) => s.email)
   const signOut = useAccount((s) => s.signOut)
   const syncing = useSync((s) => s.syncing)
   const failed = useSync((s) => s.failed)
   const photosWaiting = usePhotosWaiting()
-  // The warning shown before signing out with something still waiting.
-  const [warning, setWarning] = useState<string>()
   const syncState = useLiveQuery(() => db.syncState.get('state'), [])
   // Only a sync with this account counts as this account's last sync.
   const lastSyncedAt =

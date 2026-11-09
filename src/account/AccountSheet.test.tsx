@@ -395,6 +395,22 @@ describe('photos and changes waiting', () => {
     }
   })
 
+  test('Escape on the sign-out question cancels it and leaves the sheet open', async () => {
+    await waiting(2)
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={onClose} />)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('dialog', { name: 'Sign out?' })
+    await user.keyboard('{Escape}')
+    expect(
+      screen.queryByRole('dialog', { name: 'Sign out?' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Account' })).toBeVisible()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(useAccount.getState().status).toBe('signed-in')
+  })
+
   test('one waiting photo uses the singular body', async () => {
     await waiting(1)
     const user = userEvent.setup()
