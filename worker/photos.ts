@@ -117,7 +117,9 @@ export function photoRoutes() {
         sha256: checksum,
         httpMetadata: { contentType: 'image/jpeg' },
       })
-    } catch {
+    } catch (error) {
+      // Any failure answers as a mismatch, so log it: an R2 outage must be visible.
+      console.error('Photo upload to R2 failed:', error)
       return fail(
         c,
         400,

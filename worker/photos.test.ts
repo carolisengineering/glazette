@@ -190,7 +190,10 @@ test('an uploaded photo comes back byte for byte', async () => {
 })
 
 test("a full image that doesn't match its hash is refused", async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
   const res = await put(C, 'full', A_BYTES, { checksum: C })
+  expect(logged).toHaveBeenCalled()
+  logged.mockRestore()
   expect(res.status).toBe(400)
   expect((await body(res)).code).toBe('PHOTO_MISMATCH')
   expect((await get(C, 'full')).status).toBe(404)
@@ -198,7 +201,10 @@ test("a full image that doesn't match its hash is refused", async () => {
 })
 
 test("a thumbnail that doesn't match its header is refused", async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
   const res = await put(A, 'thumb', photo(2), { checksum: sha(photo(9)) })
+  expect(logged).toHaveBeenCalled()
+  logged.mockRestore()
   expect(res.status).toBe(400)
   expect((await body(res)).code).toBe('PHOTO_MISMATCH')
   expect((await get(A, 'thumb')).status).toBe(404)
