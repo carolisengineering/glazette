@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import * as engine from './engine'
+import * as transfer from './transfer'
 import {
   CHANGE_DELAY_MS,
   requestSync,
@@ -15,7 +16,10 @@ vi.mock('./engine', async (orig) => ({
   syncOnce: vi.fn(),
 }))
 
+vi.mock('./transfer', () => ({ transferPhotos: vi.fn() }))
+
 const syncOnce = vi.mocked(engine.syncOnce)
+const transferPhotos = vi.mocked(transfer.transferPhotos)
 
 function setAccount(email?: string) {
   useAccount.setState(
@@ -32,6 +36,7 @@ const flush = () => vi.advanceTimersByTimeAsync(0)
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   syncOnce.mockReset().mockResolvedValue('done')
+  transferPhotos.mockReset().mockResolvedValue('done')
   useSync.setState({ syncing: false, failed: false })
   useAccount.setState({ refresh: realRefresh })
   setAccount(undefined)
@@ -146,4 +151,54 @@ test('a dead session signs the device out', async () => {
   requestSync()
   await flush()
   expect(refresh).toHaveBeenCalledTimes(1)
+})
+
+test('photos transfer after a successful sync', async () => {
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  expect(transferPhotos).toHaveBeenCalledTimes(1)
+  expect(transferPhotos).toHaveBeenCalledWith(db, expect.anything())
+})
+
+test('no transfer when the sync stops', async () => {
+  setAccount('carol@example.com')
+  syncOnce.mockResolvedValueOnce('offline')
+  requestSync()
+  await flush()
+  expect(transferPhotos).not.toHaveBeenCalled()
+})
+
+test('a transfer error shows like a sync error', async () => {
+  setAccount('carol@example.com')
+  transferPhotos.mockResolvedValueOnce('error')
+  requestSync()
+  await flush()
+  expect(useSync.getState().failed).toBe(true)
+})
+
+test('a transfer that finds the session dead signs the device out', async () => {
+  setAccount('carol@example.com')
+  const refresh = vi.fn().mockResolvedValue(undefined)
+  useAccount.setState({ refresh })
+  transferPhotos.mockResolvedValueOnce('signed-out')
+  requestSync()
+  await flush()
+  expect(refresh).toHaveBeenCalledTimes(1)
+})
+
+test('syncing stays on through the transfer, and a request leads to one more run', async () => {
+  setAccount('carol@example.com')
+  let finish: (o: 'done') => void = () => {}
+  transferPhotos.mockImplementationOnce(() => new Promise((r) => (finish = r)))
+  requestSync()
+  await flush()
+  expect(useSync.getState().syncing).toBe(true)
+  requestSync()
+  requestSync()
+  finish('done')
+  await flush()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  expect(useSync.getState().syncing).toBe(false)
 })

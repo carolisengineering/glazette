@@ -2,7 +2,9 @@ import { create } from 'zustand'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import { syncOnce } from './engine'
+import { fetchPhotoTransport } from './photoTransport'
 import { onLocalChange } from './track'
+import { transferPhotos } from './transfer'
 import { fetchTransport } from './transport'
 
 /** How long after the last local change a sync starts. */
@@ -43,7 +45,11 @@ async function loop(): Promise<void> {
       const { status, email } = useAccount.getState()
       if (status !== 'signed-in' || !email) break
       useSync.setState({ syncing: true })
-      const outcome = await syncOnce(db, fetchTransport, email)
+      let outcome = await syncOnce(db, fetchTransport, email)
+      // Photo bytes follow the records, in the same run.
+      if (outcome === 'done') {
+        outcome = await transferPhotos(db, fetchPhotoTransport)
+      }
       if (outcome === 'signed-out') void useAccount.getState().refresh()
       else useSync.setState({ failed: outcome === 'error' })
     } while (again)
