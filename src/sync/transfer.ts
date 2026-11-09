@@ -10,7 +10,9 @@ import { quietly } from './track'
  * Moves photo bytes after a record sync: uploads what this device has and the
  * server doesn't, then downloads what the synced records describe but this
  * device lacks. Never throws. One photo that fails doesn't stop the others;
- * the result is then 'error'. Being offline or signed out stops everything at
+ * the result is then 'error', as it is for a photo that can't upload (refused,
+ * empty, no thumbnail, bad hash); it keeps waiting and is tried every sync. A
+ * photo not on the server yet to download isn't an error. Being offline or signed out stops everything at
  * once, and is the result.
  *
  * Network calls never run inside a transaction. Each write after one is its
@@ -77,6 +79,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
       if (!PHOTO_HASH.test(row.hash)) {
         // The server would refuse the whole chunk. The row keeps waiting.
         console.error(`Photo ${id} has a hash that isn't valid; skipped.`)
+        ok = false
         continue
       }
       if (await bytesOf(db, row)) {
@@ -125,10 +128,12 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         if (!bytes) continue
         if (!bytes.thumb) {
           console.error(`Photo ${hash} has no thumbnail; skipped.`)
+          ok = false
           continue
         }
         if (bytes.blob.size === 0 || bytes.thumb.size === 0) {
           console.error(`Photo ${hash} has an empty image; skipped.`)
+          ok = false
           continue
         }
         // Thumbnail first, so a full image on the server nearly always means
@@ -143,8 +148,10 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         const fullStored =
           (await transport.upload(hash, 'full', bytes.blob, hash)) === 'stored'
         if (thumbStored && fullStored) await stopWaitingToUpload(db, rowIds)
-        else
+        else {
           console.error(`The server refused photo ${hash}; will retry later.`)
+          ok = false
+        }
       } catch (error) {
         stopsAll(error)
         ok = false

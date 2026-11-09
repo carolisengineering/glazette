@@ -11,6 +11,8 @@ import {
   startSync,
   stopSync,
   useSync,
+  WAIT_RETRY_MAX_MS,
+  WAIT_RETRY_START_MS,
 } from './useSync'
 
 vi.mock('./engine', async (orig) => ({
@@ -39,7 +41,14 @@ function setAccount(email?: string) {
 
 const realRefresh = useAccount.getState().refresh
 
-const flush = () => vi.advanceTimersByTimeAsync(0)
+// Also lets the database's real, unfaked async work finish: a run ends with a
+// read of the photo rows.
+const flush = async () => {
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(0)
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -50,9 +59,115 @@ beforeEach(() => {
   useAccount.setState({ refresh: realRefresh })
   setAccount(undefined)
 })
-afterEach(() => {
+afterEach(async () => {
   stopSync()
+  setAccount(undefined)
+  requestSync() // clears a wait check left by a test that never started sync
   vi.useRealTimers()
+  await quietly(db, () => db.photos.clear())
+})
+
+const MIN = 60_000
+
+const waitingPhoto = (id: string, extra = {}) => ({
+  id,
+  hash: id,
+  width: 1,
+  height: 1,
+  takenAt: '2026-11-09T00:00:00.000Z',
+  needsDownload: 1 as const,
+  ...extra,
+})
+
+test('a photo waiting on the other device is checked again, with growing delays', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  expect(WAIT_RETRY_START_MS).toBe(MIN)
+  let calls = 1
+  for (const delay of [1, 2, 4, 8, 16, 30, 30, 30]) {
+    await vi.advanceTimersByTimeAsync(delay * MIN - 1)
+    expect(syncOnce).toHaveBeenCalledTimes(calls)
+    await vi.advanceTimersByTimeAsync(1)
+    await flush() // the run ends and sets the next timer
+    calls += 1
+    expect(syncOnce).toHaveBeenCalledTimes(calls)
+  }
+  expect(WAIT_RETRY_MAX_MS).toBe(30 * MIN)
+})
+
+test('the wait check stops, and starts over, when nothing waits', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN) // second run, next delay 2 minutes
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  await quietly(db, () => db.photos.update('a', { needsDownload: undefined }))
+  requestSync() // another reason; it finds nothing waiting
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  // A later wait starts at one minute again.
+  await quietly(db, () => db.photos.update('a', { needsDownload: 1 }))
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN)
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(5)
+})
+
+test('a sync for another reason keeps the backoff while a photo still waits', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(MIN) // next delay is 2 minutes
+  await flush()
+  requestSync()
+  await flush() // delay now 4 minutes, one timer only
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(4 * MIN - 1)
+  expect(syncOnce).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(1)
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(4)
+})
+
+test('signing out clears the wait check', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  startSync()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  setAccount(undefined)
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+})
+
+test('stopping sync clears the wait check', async () => {
+  await quietly(db, () => db.photos.put(waitingPhoto('a')))
+  setAccount('carol@example.com')
+  startSync()
+  await flush()
+  stopSync()
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+})
+
+test('no wait check when only a deleted photo waits', async () => {
+  await quietly(db, () =>
+    db.photos.put(waitingPhoto('a', { deletedAt: '2026-11-09T00:00:00.000Z' })),
+  )
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  await vi.advanceTimersByTimeAsync(60 * MIN)
+  expect(syncOnce).toHaveBeenCalledTimes(1)
 })
 
 test('signed out, nothing syncs', async () => {

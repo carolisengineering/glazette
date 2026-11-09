@@ -221,7 +221,7 @@ test("a refused upload doesn't hold up the others", async () => {
     upload: async (hash, part, bytes, sum) =>
       hash === a.hash ? 'refused' : server.upload(hash, part, bytes, sum),
   }
-  expect(await transferPhotos(db, refusing)).toBe('done')
+  expect(await transferPhotos(db, refusing)).toBe('error')
   expect((await db.photos.get('a'))?.needsUpload).toBe(1)
   expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
   expect(server.files().has(`full/${b.hash}`)).toBe(true)
@@ -294,7 +294,7 @@ test('the thumbnail uploads first, and the full image is tried when it is refuse
         : server.upload(hash, part, bytes, sum)
     },
   }
-  expect(await transferPhotos(db, refusingThumb)).toBe('done')
+  expect(await transferPhotos(db, refusingThumb)).toBe('error')
   expect(parts).toEqual(['thumb', 'full'])
   expect(server.files().has(`full/${a.hash}`)).toBe(true)
   expect((await db.photos.get('a'))?.needsUpload).toBe(1)
@@ -307,7 +307,7 @@ test('a photo whose bytes have no thumbnail is logged and skipped', async () => 
   const hash = await sha256(blob)
   await quietly(db, () => db.photoBytes.add({ hash, blob }))
   await seed(db, [await stored('a', 'clay one', { needsUpload: 1 })])
-  expect(await transferPhotos(db, server)).toBe('done')
+  expect(await transferPhotos(db, server)).toBe('error')
   expect(server.files().size).toBe(0)
   expect((await db.photos.get('a'))?.needsUpload).toBe(1)
   expect(error).toHaveBeenCalledTimes(1)
@@ -559,7 +559,7 @@ test('a 0-byte image is skipped and logged, and the others upload', async () => 
   const b = await withBytes('b', 'clay two', { needsUpload: 1 })
   await seed(db, [empty, b])
   const upload = vi.spyOn(server, 'upload')
-  expect(await transferPhotos(db, server)).toBe('done')
+  expect(await transferPhotos(db, server)).toBe('error')
   expect(upload.mock.calls.every(([hash]) => hash === b.hash)).toBe(true)
   expect(server.files().has(`full/${b.hash}`)).toBe(true)
   expect((await db.photos.get('a'))?.needsUpload).toBe(1)
@@ -574,7 +574,7 @@ test('a 0-byte thumbnail is skipped and logged', async () => {
   })
   await seed(db, [a])
   const upload = vi.spyOn(server, 'upload')
-  expect(await transferPhotos(db, server)).toBe('done')
+  expect(await transferPhotos(db, server)).toBe('error')
   expect(upload).not.toHaveBeenCalled()
   expect(error).toHaveBeenCalledTimes(1)
 })
@@ -588,7 +588,7 @@ test("a hash that isn't a photo hash stays out of the missing check and keeps wa
   const b = await withBytes('b', 'clay two', { needsUpload: 1 })
   await seed(db, [bad, b])
   const missing = vi.spyOn(server, 'missing')
-  expect(await transferPhotos(db, server)).toBe('done')
+  expect(await transferPhotos(db, server)).toBe('error')
   expect(missing).toHaveBeenCalledTimes(1)
   expect(missing).toHaveBeenCalledWith([b.hash])
   expect((await db.photos.get('a'))?.needsUpload).toBe(1)
