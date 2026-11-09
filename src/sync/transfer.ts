@@ -10,10 +10,11 @@ import { quietly } from './track'
  * Moves photo bytes after a record sync: uploads what this device has and the
  * server doesn't, then downloads what the synced records describe but this
  * device lacks. Never throws. One photo that fails doesn't stop the others;
- * the result is then 'error', as it is for a photo that can't upload (refused,
- * empty, no thumbnail, bad hash); it keeps waiting and is tried every sync. A
- * photo not on the server yet to download isn't an error. Being offline or signed out stops everything at
- * once, and is the result.
+ * the result is then 'error', as it is for a live photo that can't upload
+ * (refused, empty, no thumbnail, bad hash); it keeps waiting and is tried every
+ * sync. A deleted photo that can't upload is tried again too, but doesn't make
+ * the result 'error'. A photo not on the server yet to download isn't an error.
+ * Being offline or signed out stops everything at once, and is the result.
  *
  * Network calls never run inside a transaction. Each write after one is its
  * own `quietly` call, so a transfer never marks a row changed or waiting.
