@@ -85,8 +85,23 @@ const DB = {
   },
 }
 
+// An in-memory stand-in for R2. put doesn't read the stream, so its own work isn't timed.
+const objects = new Set()
+const PHOTOS = {
+  async put(key, body) {
+    await body?.cancel()
+    objects.add(key)
+    return {}
+  },
+  async get(key) {
+    if (!objects.has(key)) return null
+    return { body: new Blob([new Uint8Array(1024)]).stream() }
+  },
+}
+
 const env = {
   DB,
+  PHOTOS,
   // The Worker's existing secret name.
   BETTER_AUTH_SECRET: 'x'.repeat(40),
   APP_ORIGIN: ORIGIN,
@@ -176,6 +191,27 @@ const syncRequest = (path, body) =>
     },
   })
 
+const photoRequest = (method, path, body, headers = {}) =>
+  new Request(`${ORIGIN}/api/photos${path}`, {
+    method,
+    body,
+    headers: {
+      origin: ORIGIN,
+      'cf-connecting-ip': '1.2.3.4',
+      cookie,
+      ...headers,
+    },
+  })
+
+// Realistic JPEG-sized bodies. The Worker never reads them, so their content doesn't matter.
+const FULL_HASH = 'a'.repeat(64)
+const THUMB_SUM = 'b'.repeat(64)
+const FULL_BYTES = new Uint8Array(1_000_000)
+const THUMB_BYTES = new Uint8Array(40_000)
+const missingHashes = Array.from({ length: 200 }, (_, i) =>
+  i.toString(16).padStart(64, '0'),
+)
+
 const steps = [
   ['get-session (no cookie)', 200, () => request('/get-session')],
   [
@@ -222,6 +258,38 @@ const steps = [
       return syncRequest('/pull?since=0')
     },
   ],
+  [
+    'photo put full 1 MB',
+    200,
+    () =>
+      photoRequest('PUT', `/${FULL_HASH}/full`, FULL_BYTES, {
+        'content-length': String(FULL_BYTES.byteLength),
+        'x-content-sha256': FULL_HASH,
+        'content-type': 'image/jpeg',
+      }),
+  ],
+  [
+    'photo put thumb 40 KB',
+    200,
+    () =>
+      photoRequest('PUT', `/${FULL_HASH}/thumb`, THUMB_BYTES, {
+        'content-length': String(THUMB_BYTES.byteLength),
+        'x-content-sha256': THUMB_SUM,
+        'content-type': 'image/jpeg',
+      }),
+  ],
+  [
+    'photo missing 200',
+    200,
+    () =>
+      photoRequest(
+        'POST',
+        '/missing',
+        JSON.stringify({ hashes: missingHashes }),
+        { 'content-type': 'application/json' },
+      ),
+  ],
+  ['photo get full', 200, () => photoRequest('GET', `/${FULL_HASH}/full`)],
   ['sign-out', 200, () => request('/sign-out', {})],
 ]
 
@@ -277,6 +345,12 @@ for (const [label, expected, make] of steps) {
     )
       fail(`${label}: expected the server's 100 copies back`)
   }
+  if (label === 'photo missing 200') {
+    if (JSON.parse(text).missing.length !== missingHashes.length)
+      fail(`${label}: expected all 200 hashes missing: ${text.slice(0, 200)}`)
+  }
+  if (label === 'photo get full' && text.length !== 1024)
+    fail(`${label}: expected the stand-in's 1024 bytes, got ${text.length}`)
   if (label === 'sync pull 200') {
     const pulled = JSON.parse(text)
     if (

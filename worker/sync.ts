@@ -1,4 +1,4 @@
-import type { Context, Next } from 'hono'
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -11,10 +11,9 @@ import {
   type SyncRecord,
 } from '../shared/syncProtocol'
 import type { Env } from './env'
-import { readSession, sessionCookie, tokenFromCookie } from './sessions'
+import { requireSession, type SessionVars } from './sessions'
 
-type Vars = { userId: string }
-type Ctx = Context<{ Bindings: Env; Variables: Vars }>
+type Ctx = Context<{ Bindings: Env; Variables: SessionVars }>
 
 function fail(
   c: Ctx,
@@ -27,18 +26,6 @@ function fail(
 
 const badRequest = (c: Ctx) =>
   fail(c, 400, 'BAD_SYNC_REQUEST', 'The sync request is malformed.')
-
-// Only a live session gets in. Like get-session, a day-old one is renewed.
-async function requireSession(c: Ctx, next: Next) {
-  const token = tokenFromCookie(c.req.header('cookie'))
-  const session = token ? await readSession(c.env.DB, token, Date.now()) : null
-  if (!token || !session) {
-    return fail(c, 401, 'NO_SESSION', 'You are not signed in.')
-  }
-  if (session.refreshed) c.header('Set-Cookie', sessionCookie(token))
-  c.set('userId', session.userId)
-  await next()
-}
 
 // The stored copies of the pushed records. CROSS JOIN keeps the batch as the outer
 // loop, so it is parsed once. ?2 is the batch as JSON: [{k, i, c, d}].
@@ -66,7 +53,7 @@ type StoredRow = {
 }
 
 export function syncRoutes() {
-  const routes = new Hono<{ Bindings: Env; Variables: Vars }>()
+  const routes = new Hono<{ Bindings: Env; Variables: SessionVars }>()
 
   routes.use('*', requireSession)
 

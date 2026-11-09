@@ -1,4 +1,6 @@
+import type { Context, Next } from 'hono'
 import { randomToken, sha256Hex } from './crypto'
+import type { Env } from './env'
 
 export const SESSION_COOKIE = '__Host-session_token'
 export const SESSION_TTL_MS = 365 * 86_400_000
@@ -91,4 +93,24 @@ export function tokenFromCookie(
     }
   }
   return null
+}
+
+export type SessionVars = { userId: string }
+
+// Only a live session gets in. Like get-session, a day-old one is renewed.
+export async function requireSession(
+  c: Context<{ Bindings: Env; Variables: SessionVars }>,
+  next: Next,
+) {
+  const token = tokenFromCookie(c.req.header('cookie'))
+  const session = token ? await readSession(c.env.DB, token, Date.now()) : null
+  if (!token || !session) {
+    return c.json(
+      { code: 'NO_SESSION', message: 'You are not signed in.' },
+      401,
+    )
+  }
+  if (session.refreshed) c.header('Set-Cookie', sessionCookie(token))
+  c.set('userId', session.userId)
+  await next()
 }
