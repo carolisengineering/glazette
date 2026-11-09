@@ -1,6 +1,7 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
+import { quietly } from '../sync/track'
 import { useSync } from '../sync/useSync'
 import { AccountSheet } from './AccountSheet'
 import { requestCode, signOutRemote, verifyCode } from './api'
@@ -316,5 +317,119 @@ describe('the sync line', () => {
     render(<AccountSheet onClose={() => {}} />)
     expect(screen.queryByText(/synced/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
+  })
+})
+
+describe('photos and changes waiting', () => {
+  const EMAIL = 'carol@example.com'
+  const photo = (id: string, extra = {}) => ({
+    id,
+    hash: `hash-${id}`,
+    width: 1,
+    height: 1,
+    takenAt: '2026-11-08T00:00:00.000Z',
+    blob: new Blob([`bytes ${id}`], { type: 'image/jpeg' }),
+    ...extra,
+  })
+  const waiting = (n: number) =>
+    quietly(db, () =>
+      db.photos.bulkPut(
+        Array.from({ length: n }, (_, i) => photo(`p${i}`, { needsUpload: 1 })),
+      ),
+    )
+
+  beforeEach(async () => {
+    await quietly(db, async () => {
+      await db.photos.clear()
+      await db.glazes.clear()
+    })
+    useAccount.setState({ status: 'signed-in', email: EMAIL })
+  })
+
+  test('the sheet says how many photos wait', async () => {
+    await waiting(1)
+    const { unmount } = render(<AccountSheet onClose={() => {}} />)
+    expect(await screen.findByText('1 photo waiting to upload')).toBeVisible()
+    unmount()
+    await waiting(3)
+    render(<AccountSheet onClose={() => {}} />)
+    expect(await screen.findByText('3 photos waiting to upload')).toBeVisible()
+  })
+
+  test('nothing is said at 0', async () => {
+    render(<AccountSheet onClose={() => {}} />)
+    await screen.findByText('Not synced yet')
+    expect(screen.queryByText(/waiting to upload/)).not.toBeInTheDocument()
+  })
+
+  test('signing out with photos waiting asks first', async () => {
+    await waiting(2)
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Sign out?' })
+    expect(
+      within(dialog).getByText(
+        "2 photos haven't uploaded yet. They'll stay on this device and upload when you sign in again.",
+      ),
+    ).toBeVisible()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(
+      screen.queryByRole('dialog', { name: 'Sign out?' }),
+    ).not.toBeInTheDocument()
+    expect(useAccount.getState().status).toBe('signed-in')
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    const again = await screen.findByRole('dialog', { name: 'Sign out?' })
+    await user.click(within(again).getByRole('button', { name: 'Sign out' }))
+    await vi.waitFor(() =>
+      expect(useAccount.getState().status).toBe('signed-out'),
+    )
+    const rows = await db.photos.toArray()
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      // fake-indexeddb can't hand the bytes back, so the test checks they're still there.
+      expect(row.blob).toBeDefined()
+      expect(row.needsUpload).toBe(1)
+    }
+  })
+
+  test('one waiting photo uses the singular body', async () => {
+    await waiting(1)
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(
+      await screen.findByText(
+        "1 photo hasn't uploaded yet. It will stay on this device and upload when you sign in again.",
+      ),
+    ).toBeVisible()
+  })
+
+  test('signing out with only changes waiting asks with the changes body', async () => {
+    await quietly(db, () =>
+      db.glazes.put({ id: 'g', name: 'Celadon', dirty: 1 } as never),
+    )
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(
+      await screen.findByText(
+        "Some changes haven't synced yet. They'll stay on this device and sync when you sign in again.",
+      ),
+    ).toBeVisible()
+  })
+
+  test("signing out with nothing waiting doesn't ask", async () => {
+    const user = userEvent.setup()
+    render(<AccountSheet onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await vi.waitFor(() =>
+      expect(useAccount.getState().status).toBe('signed-out'),
+    )
+    expect(
+      screen.queryByRole('dialog', { name: 'Sign out?' }),
+    ).not.toBeInTheDocument()
   })
 })

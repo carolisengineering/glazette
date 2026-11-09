@@ -1,9 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useId, useRef, useState } from 'react'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useModal } from '../components/useModal'
 import { db } from '../db/db'
 import { lastSyncedLabel } from '../sync/label'
 import { useSync } from '../sync/useSync'
+import { countWaiting, usePhotosWaiting } from '../sync/useWaiting'
 import { requestCode, verifyCode } from './api'
 import { useAccount } from './useAccount'
 
@@ -40,6 +42,9 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const signOut = useAccount((s) => s.signOut)
   const syncing = useSync((s) => s.syncing)
   const failed = useSync((s) => s.failed)
+  const photosWaiting = usePhotosWaiting()
+  // The warning shown before signing out with something still waiting.
+  const [warning, setWarning] = useState<string>()
   const syncState = useLiveQuery(() => db.syncState.get('state'), [])
   // Only a sync with this account counts as this account's last sync.
   const lastSyncedAt =
@@ -106,10 +111,23 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const leave = async () => {
+  const leave = async (confirmed = false) => {
     if (busy) return
     setBusy(true)
     try {
+      if (!confirmed) {
+        const { photos, changes } = await countWaiting(db)
+        if (photos > 0 || changes > 0) {
+          setWarning(
+            photos === 1
+              ? "1 photo hasn't uploaded yet. It will stay on this device and upload when you sign in again."
+              : photos > 1
+                ? `${photos} photos haven't uploaded yet. They'll stay on this device and upload when you sign in again.`
+                : "Some changes haven't synced yet. They'll stay on this device and sync when you sign in again.",
+          )
+          return
+        }
+      }
       await signOut()
       setEmail('')
       setCode('')
@@ -156,6 +174,13 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
               <p className="text-[14px] text-muted">
                 {lastSyncedLabel(lastSyncedAt, syncing, new Date())}
               </p>
+              {photosWaiting > 0 && (
+                <p className="text-[14px] text-muted">
+                  {photosWaiting === 1
+                    ? '1 photo waiting to upload'
+                    : `${photosWaiting} photos waiting to upload`}
+                </p>
+              )}
               {failed && (
                 <p className="text-[14px] text-muted">
                   Couldn&apos;t sync. It will try again later.
@@ -251,6 +276,18 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={onClose} className={secondary}>
           Close
         </button>
+        {warning && (
+          <ConfirmDialog
+            title="Sign out?"
+            body={warning}
+            confirmLabel="Sign out"
+            onConfirm={() => {
+              setWarning(undefined)
+              void leave(true)
+            }}
+            onCancel={() => setWarning(undefined)}
+          />
+        )}
       </div>
     </div>
   )
