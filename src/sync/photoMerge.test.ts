@@ -132,3 +132,58 @@ test('a chain of merges is followed to its end', async () => {
   expect((await db.entries.get('e1'))?.photoId).toBe('c-z')
   expect((await db.entries.get('e2'))?.photoId).toBe('c-z')
 })
+
+describe('bytes on a row another device merged away', () => {
+  const gone = (extra: Partial<Photo> = {}) =>
+    photo('b-x', { deletedAt: T2, mergedInto: 'a-y', ...extra })
+
+  test('move to the target when it has none', async () => {
+    await seed([
+      photo('a-y', { blob: undefined, thumb: undefined, needsDownload: 1 }),
+      gone(),
+    ])
+    await mergePhotosByHash(db)
+    const target = await db.photos.get('a-y')
+    expect(target?.blob).toBeDefined()
+    expect(target?.thumb).toBeDefined()
+    expect(target?.needsDownload).toBeUndefined()
+    expect((await db.photos.get('b-x'))?.blob).toBeUndefined()
+  })
+
+  test('are dropped when the target holds its own, which stay', async () => {
+    await seed([photo('a-y'), gone()])
+    const before = (await db.photos.get('a-y'))?.blob
+    await mergePhotosByHash(db)
+    const row = await db.photos.get('b-x')
+    expect(row?.blob).toBeUndefined()
+    expect(row?.thumb).toBeUndefined()
+    expect((await db.photos.get('a-y'))?.blob).toBeDefined()
+    expect((await db.photos.get('a-y'))?.blob).toEqual(before)
+  })
+
+  test('stay when the target is deleted', async () => {
+    await seed([
+      photo('a-y', { blob: undefined, thumb: undefined, deletedAt: T2 }),
+      gone(),
+    ])
+    await mergePhotosByHash(db)
+    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
+    expect((await db.photos.get('a-y'))?.blob).toBeUndefined()
+  })
+
+  test('stay when the target has a different hash', async () => {
+    await seed([
+      photo('a-y', { hash: 'b'.repeat(64), blob: undefined, thumb: undefined }),
+      gone(),
+    ])
+    await mergePhotosByHash(db)
+    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
+    expect((await db.photos.get('a-y'))?.blob).toBeUndefined()
+  })
+
+  test("stay when the target isn't on this device", async () => {
+    await seed([gone()])
+    await mergePhotosByHash(db)
+    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
+  })
+})
