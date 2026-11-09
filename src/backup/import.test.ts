@@ -370,6 +370,87 @@ test('an incoming tombstone deletes an existing live step', async () => {
   expect(result).toMatchObject({ added: 0, updated: 1 })
 })
 
+test('restoring fills in a photo that was waiting to download', async () => {
+  await db.photos.add({ ...photoMeta('local-ph', 'h1'), needsDownload: 1 })
+  const result = await importZip(
+    zipOf(backup({ photos: [photoMeta('ph1', 'h1')] }), ['h1']),
+  )
+
+  const row = await db.photos.get('local-ph')
+  expect(row?.blob).toBeDefined()
+  expect(row?.thumb).toBeDefined()
+  expect(row?.needsDownload).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+  expect(result.added).toBe(0)
+})
+
+test("a restored photo keeps the backup's change time", async () => {
+  const T = '2026-10-01T09:00:00.000Z'
+  await importZip(
+    zipOf(
+      backup({
+        photos: [
+          { ...photoMeta('ph1', 'h1'), updatedAt: T },
+          photoMeta('ph2', 'h2'),
+        ],
+      }),
+      ['h1', 'h2'],
+    ),
+  )
+
+  expect(await db.photos.get('ph1')).toMatchObject({
+    updatedAt: T,
+    dirty: 1,
+    needsUpload: 1,
+  })
+  expect(await db.photos.get('ph2')).toMatchObject({
+    updatedAt: EPOCH,
+    dirty: 1,
+    needsUpload: 1,
+  })
+})
+
+test('a merged duplicate in a backup is ignored', async () => {
+  await db.photos.add(photoRow('local-ph', 'h1'))
+  const before = await db.photos.get('local-ph')
+  await importZip(
+    zipOf(
+      backup({
+        photos: [
+          {
+            ...photoMeta('dup', 'h1'),
+            mergedInto: 'other',
+            deletedAt: '2026-11-04T09:00:00.000Z',
+          },
+        ],
+      }),
+      ['h1'],
+    ),
+  )
+
+  expect(await db.photos.get('local-ph')).toEqual(before)
+  expect(await db.photos.get('dup')).toBeUndefined()
+})
+
+test("a local merged duplicate isn't matched", async () => {
+  await db.photos.add({
+    ...photoRow('dup', 'h1', '2026-11-04T09:00:00.000Z'),
+    mergedInto: 'live',
+  })
+  await db.photos.add(photoRow('live', 'h1'))
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', 'h1')],
+      }),
+      ['h1'],
+    ),
+  )
+
+  expect((await db.entries.get('e1'))?.photoId).toBe('live')
+})
+
 test('a bad glaze color becomes the default color', async () => {
   const zip = zipOf(
     backup({

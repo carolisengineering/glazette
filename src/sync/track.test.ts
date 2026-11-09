@@ -1,6 +1,6 @@
 import { CHANGED_AT, EPOCH } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
-import type { StageEntry } from '../db/types'
+import type { Photo, StageEntry } from '../db/types'
 import { onLocalChange, quietly } from './track'
 
 let db: GlazetteDB
@@ -197,20 +197,66 @@ test('quiet writes leave rows as written', async () => {
   expect(after?.updatedAt).toBe(stamped)
 })
 
-test('photos are not tracked', async () => {
-  await db.photos.add({
-    id: 'ph1',
-    blob: new Blob(['a']),
-    thumb: new Blob(['b']),
-    hash: 'h',
-    width: 1,
-    height: 1,
-    takenAt: '2026-11-08T10:00:00.000Z',
-  })
+const photo = (id: string, extra: Partial<Photo> = {}): Photo => ({
+  id,
+  hash: 'a'.repeat(64),
+  width: 1,
+  height: 1,
+  takenAt: '2026-11-08T10:00:00.000Z',
+  ...extra,
+})
+
+const withBytes = { blob: new Blob(['a']), thumb: new Blob(['b']) }
+
+test('a new photo with bytes is dirty, stamped and waiting to upload', async () => {
+  const listener = vi.fn()
+  const stop = onLocalChange(db, listener)
+  await db.photos.add(photo('ph1', withBytes))
+  stop()
   const row = await db.photos.get('ph1')
-  expect(row).toBeDefined()
-  expect(row).not.toHaveProperty('dirty')
-  expect(row).not.toHaveProperty('updatedAt')
+  expect(row?.dirty).toBe(1)
+  expect(row?.needsUpload).toBe(1)
+  expect(row?.updatedAt).toMatch(CHANGED_AT)
+  expect(listener).toHaveBeenCalledTimes(1)
+})
+
+test("a photo row without bytes isn't waiting to upload", async () => {
+  await db.photos.add(photo('ph1'))
+  const row = await db.photos.get('ph1')
+  expect(row?.dirty).toBe(1)
+  expect(row?.needsUpload).toBeUndefined()
+})
+
+test("adding bytes to a photo marks it waiting to upload, and removing them doesn't", async () => {
+  await quietly(db, () => db.photos.add(photo('ph1')))
+  const listener = vi.fn()
+  const stop = onLocalChange(db, listener)
+
+  await db.photos.update('ph1', withBytes)
+  expect((await db.photos.get('ph1'))?.needsUpload).toBe(1)
+  expect(listener).toHaveBeenCalledTimes(1)
+
+  await quietly(db, () => db.photos.update('ph1', { needsUpload: undefined }))
+  await db.photos.update('ph1', { blob: undefined, thumb: undefined })
+  stop()
+  expect((await db.photos.get('ph1'))?.needsUpload).toBeUndefined()
+  expect(listener).toHaveBeenCalledTimes(1)
+})
+
+test("device-only photo fields don't count as a change", async () => {
+  const T = '2026-01-01T00:00:00.000Z'
+  await quietly(db, () => db.photos.add(photo('ph1', { updatedAt: T })))
+  for (const changes of [
+    { needsUpload: 1 as const },
+    { needsDownload: 1 as const },
+    { thumb: new Blob(['t']) },
+    { blob: new Blob(['x']) },
+  ]) {
+    await db.photos.update('ph1', changes)
+    const row = await db.photos.get('ph1')
+    expect(row?.dirty).toBeUndefined()
+    expect(row?.updatedAt).toBe(T)
+  }
 })
 
 test('listeners hear about committed local changes only', async () => {

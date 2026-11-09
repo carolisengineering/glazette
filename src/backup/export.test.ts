@@ -98,6 +98,42 @@ test('export holds every table, tombstones included, and photos by hash', async 
   // Contents aren't checked: fake-indexeddb drops stored Blob bytes.
 })
 
+test("a backup saves while some photos haven't downloaded", async () => {
+  await db.photos.bulkAdd([
+    {
+      id: 'ph1',
+      blob: new Blob(['full'], { type: 'image/jpeg' }),
+      thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
+      hash: 'h1',
+      width: 1,
+      height: 1,
+      takenAt: 't',
+    },
+    {
+      id: 'ph2',
+      hash: 'h2',
+      width: 1,
+      height: 1,
+      takenAt: 't',
+      needsDownload: 1,
+    },
+  ])
+
+  const { files, json } = await unpack(await exportZip())
+
+  expect(json.photos.map((p) => p.hash).sort()).toEqual(['h1', 'h2'])
+  expect(Object.keys(files).sort()).toEqual([
+    'glazette.json',
+    'photos/h1.jpg',
+    'thumbs/h1.jpg',
+  ])
+  for (const meta of json.photos) {
+    expect(meta).not.toHaveProperty('dirty')
+    expect(meta).not.toHaveProperty('needsUpload')
+    expect(meta).not.toHaveProperty('needsDownload')
+  }
+})
+
 test('an undated step exports with no date key', async () => {
   await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
   const { json } = await unpack(await exportZip())

@@ -57,11 +57,22 @@ export async function exportZip(
 
   const files: Zippable = {}
   const photoMeta: PhotoMeta[] = []
-  for (const { blob, thumb, ...meta } of photos) {
+  for (const {
+    blob,
+    thumb,
+    dirty: _dirty,
+    needsUpload: _needsUpload,
+    needsDownload: _needsDownload,
+    ...meta
+  } of photos) {
     photoMeta.push(meta)
+    // A photo whose bytes haven't downloaded yet has details only.
+    if (!blob) continue
     // JPEGs are already compressed, so store them.
     files[photoPath(meta.hash)] = [await readBytes(blob), { level: 0 }]
-    files[thumbPath(meta.hash)] = [await readBytes(thumb), { level: 0 }]
+    if (thumb) {
+      files[thumbPath(meta.hash)] = [await readBytes(thumb), { level: 0 }]
+    }
   }
 
   const json: BackupJson = {

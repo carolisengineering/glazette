@@ -29,6 +29,16 @@ export async function fillSkippedStages(tx: Transaction): Promise<void> {
   if (added.length > 0) await tx.table('entries').bulkAdd(added)
 }
 
+/**
+ * Version 4 upgrade: forget where the last sync stood, so the first sync after
+ * updating is a full one. It uploads the photos this device already holds and
+ * fetches any record an older version skipped. Photos that were stored before
+ * stay undated, so they count as unchanged since 1970 unless deleted.
+ */
+export async function forgetLastSync(tx: Transaction): Promise<void> {
+  await tx.table('syncState').clear()
+}
+
 /** The synced settings that ensureDefaults sets; device-only ones don't count. */
 const SETTINGS_COMPARED = [
   'defaultCone',

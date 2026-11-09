@@ -613,18 +613,18 @@ test('a sync saves the account, cursor and time', async () => {
   expect(Number.isNaN(Date.parse(state?.lastSyncedAt ?? ''))).toBe(false)
 })
 
-test('photos are never touched', async () => {
-  const photo = (id: string) => ({
+test("photo details sync, and each device's bytes stay where they are", async () => {
+  const photo = (id: string, n: string) => ({
     id,
     blob: new Blob(['full'], { type: 'image/jpeg' }),
     thumb: new Blob(['th'], { type: 'image/jpeg' }),
-    hash: `h-${id}`,
+    hash: n.repeat(64),
     width: 1,
     height: 1,
     takenAt: T1,
   })
-  await a.photos.add(photo('ph-a'))
-  await b.photos.add(photo('ph-b'))
+  await a.photos.add(photo('ph-a', 'a'))
+  await b.photos.add(photo('ph-b', 'b'))
   await a.pieces.add(piece('p1'))
   await a.entries.add({
     id: 'e1',
@@ -632,16 +632,24 @@ test('photos are never touched', async () => {
     stage: 'thrown',
     photoId: 'ph-a',
   })
-  const bPhotosBefore = await b.photos.toArray()
 
   await syncOnce(a, server, ME)
   await syncOnce(b, server, ME)
+  await syncOnce(a, server, ME)
 
-  expect(server.records().map((r) => r.id)).not.toContain('ph-a')
-  expect(server.records().map((r) => r.kind)).not.toContain('photo')
-  expect(await b.photos.toArray()).toEqual(bPhotosBefore)
-  expect((await a.photos.toArray()).map((p) => p.id)).toEqual(['ph-a'])
+  const sent = server.records().filter((r) => r.kind === 'photo')
+  expect(sent.map((r) => r.id).sort()).toEqual(['ph-a', 'ph-b'])
+  for (const r of sent) expect(r.data).not.toHaveProperty('blob')
+
+  // B has A's photo as details only, waiting for its bytes.
+  const pulledPhoto = await b.photos.get('ph-a')
+  expect(pulledPhoto?.needsDownload).toBe(1)
+  expect(pulledPhoto?.blob).toBeUndefined()
   expect((await b.entries.get('e1'))?.photoId).toBe('ph-a')
+  // Each device still holds its own bytes.
+  expect((await b.photos.get('ph-b'))?.blob).toBeDefined()
+  expect((await a.photos.get('ph-a'))?.blob).toBeDefined()
+  expect((await a.photos.get('ph-b'))?.needsDownload).toBe(1)
 })
 
 test('a full sync pulls from the start and an incremental one from the cursor', async () => {

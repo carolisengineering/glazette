@@ -8,6 +8,8 @@ export const RECORD_KINDS = [
   'glaze',
   'clay',
   'settings',
+  // Last, so a push sends a step's change before its photo's.
+  'photo',
 ] as const
 
 export type RecordKind = (typeof RECORD_KINDS)[number]

@@ -88,6 +88,26 @@ const pulled = async (query?: string, cookie?: string) =>
 const count = () =>
   env.DB.prepare('SELECT COUNT(*) AS n FROM records').first<number>('n')
 
+test('a photo record is accepted', async () => {
+  const record: SyncRecord = {
+    kind: 'photo',
+    id: 'ph1',
+    changedAt: T1,
+    data: {
+      id: 'ph1',
+      hash: 'a'.repeat(64),
+      width: 10,
+      height: 20,
+      takenAt: T1,
+      updatedAt: T1,
+    },
+  }
+  const res = await push({ records: [record] })
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ rejected: [] })
+  expect((await pulled()).records).toEqual([record])
+})
+
 test('push and pull need a session', async () => {
   for (const cookie of [null, '__Host-session_token=unknown']) {
     const a = await push({ records: [] }, { cookie })

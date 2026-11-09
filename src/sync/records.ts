@@ -12,6 +12,7 @@ import {
   isEntryRow,
   isGlazeRow,
   isLayerRow,
+  isPhotoRow,
   isPieceRow,
   isSettingsRow,
   nameKey,
@@ -29,6 +30,8 @@ const TABLE_OF: Record<RecordKind, TableName> = {
   glaze: 'glazes',
   clay: 'clays',
   settings: 'settings',
+  // Last, so a push sends a step's change before its photo's.
+  photo: 'photos',
 }
 
 const KINDS = Object.keys(TABLE_OF) as RecordKind[]
@@ -39,6 +42,7 @@ const ROW_CHECK: Record<RecordKind, (row: unknown) => boolean> = {
   glazeApp: isLayerRow,
   glaze: isGlazeRow,
   clay: isClayRow,
+  photo: isPhotoRow,
   settings: (row) =>
     isSettingsRow(row) && (row as { id: unknown }).id === 'app',
 }
@@ -100,7 +104,17 @@ export async function readDirty(db: GlazetteDB): Promise<SyncRecord[]> {
 export function markAllDirty(db: GlazetteDB): Promise<void> {
   return quietly(db, async () => {
     for (const kind of KINDS) {
-      await db.table(TABLE_OF[kind]).toCollection().modify({ dirty: 1 })
+      await db
+        .table(TABLE_OF[kind])
+        .toCollection()
+        .modify(
+          kind === 'photo'
+            ? (row: Row) => {
+                row.dirty = 1
+                if (row.blob) row.needsUpload = 1
+              }
+            : { dirty: 1 },
+        )
     }
   })
 }
@@ -234,13 +248,19 @@ function winningRow(
   delete row.dirty
   if (record.kind === 'glaze')
     row = withValidColor(row as Row & { color?: unknown })
-  if (record.kind === 'settings' && mine) {
-    // This device's own settings stay; the row is written clean.
+  if ((record.kind === 'settings' || record.kind === 'photo') && mine) {
+    // This device's own settings, and a photo's bytes, stay; the row is
+    // written clean.
     for (const key of DEVICE_ONLY_FIELDS) {
       if (key === 'dirty') continue
       delete row[key]
       if (mine[key] !== undefined) row[key] = mine[key]
     }
+  }
+  if (record.kind === 'photo') {
+    // Details without bytes here: the bytes are fetched later.
+    if (!row.deletedAt && !row.blob) row.needsDownload = 1
+    else delete row.needsDownload
   }
   return row
 }

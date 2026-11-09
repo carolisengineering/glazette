@@ -325,7 +325,7 @@ const jpeg = (bytes: Uint8Array) =>
  * here that matched by hash.
  */
 async function mergePhotos(
-  incoming: PhotoMeta[],
+  allIncoming: PhotoMeta[],
   files: Unzipped,
   count: ImportResult,
 ) {
@@ -333,13 +333,18 @@ async function mergePhotos(
   const matched = new Set<string>()
   // Local photo id -> date of an incoming tombstone for the same hash.
   const tombstones = new Map<string, string>()
+  // A merged duplicate is ignored here: it must not reach `tombstones`, or
+  // it would delete the live photo of the same hash.
+  const incoming = allIncoming.filter((p) => !p.mergedInto)
   if (incoming.length === 0) return { idMap, matched, tombstones }
 
   const localByHash = new Map<string, Photo>()
-  const sameHash = await db.photos
-    .where('hash')
-    .anyOf(incoming.map((p) => p.hash))
-    .toArray()
+  const sameHash = (
+    await db.photos
+      .where('hash')
+      .anyOf(incoming.map((p) => p.hash))
+      .toArray()
+  ).filter((p) => !p.mergedInto)
   for (const p of sameHash) {
     const seen = localByHash.get(p.hash)
     // Prefer a live row when duplicates exist.
@@ -352,9 +357,23 @@ async function mergePhotos(
   )
 
   const writes: Photo[] = []
+  // Local rows that had only details, given the bytes from the zip.
+  const fills = new Map<string, { key: string; changes: Partial<Photo> }>()
   for (const meta of incoming) {
     const local = localByHash.get(meta.hash)
     if (local) {
+      const full = files[photoPath(meta.hash)]
+      if (!local.blob && full && !fills.has(local.id)) {
+        const thumb = files[thumbPath(meta.hash)] ?? full
+        fills.set(local.id, {
+          key: local.id,
+          changes: {
+            blob: jpeg(full),
+            thumb: jpeg(thumb),
+            needsDownload: undefined,
+          },
+        })
+      }
       if (local.id !== meta.id) idMap.set(meta.id, local.id)
       // Only photos stored before this import; a duplicate hash in the zip
       // just maps to the copy added a moment ago.
@@ -377,12 +396,27 @@ async function mergePhotos(
     const id = usedIds.has(meta.id) ? newId() : meta.id
     if (id !== meta.id) idMap.set(meta.id, id)
     usedIds.add(id)
-    const row: Photo = { ...meta, id, blob: jpeg(full), thumb: jpeg(thumb) }
+    // Keeps the backup's change time (1970 when it has none), as other rows
+    // do. The change tracker marks it dirty and waiting to upload.
+    const {
+      dirty: _dirty,
+      needsUpload: _needsUpload,
+      needsDownload: _needsDownload,
+      ...details
+    } = meta
+    const row: Photo = {
+      ...details,
+      id,
+      updatedAt: meta.updatedAt ?? EPOCH,
+      blob: jpeg(full),
+      thumb: jpeg(thumb),
+    }
     writes.push(row)
     localByHash.set(meta.hash, row)
   }
   count.added += writes.length
   if (writes.length > 0) await db.photos.bulkPut(writes)
+  if (fills.size > 0) await db.photos.bulkUpdate([...fills.values()])
   return { idMap, matched, tombstones }
 }
 

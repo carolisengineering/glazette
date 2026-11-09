@@ -16,15 +16,47 @@ test('schema has the eight tables and compound index entries.[pieceId+date]', ()
   expect(indexes).toContain('[pieceId+date]')
 })
 
-test('version 3 indexes dirty on the six synced tables only', () => {
-  expect(db.verno).toBe(3)
+test('version 4 indexes dirty on the six synced tables and the photo flags', () => {
+  expect(db.verno).toBe(4)
   for (const name of SYNCED) {
     const indexes = db.table(name).schema.indexes.map((i) => i.name)
     expect(indexes, name).toContain('dirty')
   }
   const photoIndexes = db.table('photos').schema.indexes.map((i) => i.name)
-  expect(photoIndexes).not.toContain('dirty')
+  expect(photoIndexes.sort()).toEqual(
+    ['hash', 'dirty', 'needsUpload', 'needsDownload'].sort(),
+  )
   expect(db.table('syncState').schema.primKey.name).toBe('id')
+})
+
+test('opening version 4 forgets the last sync', async () => {
+  const name = `upgrade4-${crypto.randomUUID()}`
+  const old = new Dexie(name)
+  old.version(3).stores({
+    pieces: 'id, updatedAt, deletedAt, dirty',
+    entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
+    glazeApps: 'id, entryId, pieceId, glazeId, dirty',
+    glazes: 'id, name, deletedAt, dirty',
+    clays: 'id, name, deletedAt, dirty',
+    photos: 'id, hash',
+    settings: 'id, dirty',
+    syncState: 'id',
+  })
+  await old.open()
+  await old.table('syncState').add({
+    id: 'state',
+    account: 'me',
+    cursor: 5,
+    lastSyncedAt: '2026-11-08T10:00:00.000Z',
+  })
+  old.close()
+  const upgraded = new GlazetteDB(name)
+  try {
+    await upgraded.open()
+    expect(await upgraded.syncState.count()).toBe(0)
+  } finally {
+    await upgraded.delete()
+  }
 })
 
 describe('the version 3 upgrade', () => {

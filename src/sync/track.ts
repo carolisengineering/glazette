@@ -1,7 +1,10 @@
 import Dexie, { type Transaction } from 'dexie'
 import type { GlazetteDB } from '../db/db'
 
-/** The tables whose rows travel between devices. Photos stay out. */
+/**
+ * The tables whose rows travel between devices. A photo's row travels, but
+ * not its bytes.
+ */
 export const SYNCED_TABLES = [
   'pieces',
   'entries',
@@ -9,18 +12,23 @@ export const SYNCED_TABLES = [
   'glazes',
   'clays',
   'settings',
+  'photos',
 ] as const
 
 /**
  * Fields that stay on this device and never travel in a sync record: the sync
- * mark itself, and settings kept per device. A change to only these isn't a
- * change to sync. A write that changes nothing (a `put` of the same row)
- * isn't one either.
+ * mark itself, settings kept per device, and a photo's bytes and transfer
+ * flags. A change to only these isn't a change to sync. A write that changes
+ * nothing (a `put` of the same row) isn't one either.
  */
 export const DEVICE_ONLY_FIELDS: readonly string[] = [
   'dirty',
   'lastBackupAt',
   'persistRequested',
+  'blob',
+  'thumb',
+  'needsUpload',
+  'needsDownload',
 ]
 
 const quietTransactions = new WeakSet<Transaction>()
@@ -73,31 +81,48 @@ export function trackChanges(db: GlazetteDB): void {
     const table = db.table(name)
     table.hook(
       'creating',
-      (_key, obj: { dirty?: 1; updatedAt?: string }, trans) => {
+      (
+        _key,
+        obj: { dirty?: 1; updatedAt?: string; blob?: unknown; needsUpload?: 1 },
+        trans,
+      ) => {
         if (isQuiet(trans)) return
         obj.dirty = 1
         if (name !== 'pieces' && obj.updatedAt === undefined) {
           obj.updatedAt = new Date().toISOString()
         }
+        if (name === 'photos' && obj.blob instanceof Blob) obj.needsUpload = 1
         notice(db, trans)
       },
     )
     table.hook(
       'updating',
-      (modifications: { updatedAt?: unknown }, _key, _obj, trans) => {
+      (
+        modifications: { updatedAt?: unknown; blob?: unknown },
+        _key,
+        _obj,
+        trans,
+      ) => {
         if (isQuiet(trans)) return
+        // Bytes given to a photo are waiting to upload, even though `blob`
+        // itself isn't a change to sync. Checked before the device-only
+        // early return below, which would skip it.
+        const gotBytes = name === 'photos' && modifications.blob instanceof Blob
+        if (gotBytes) notice(db, trans)
         if (
           Object.keys(modifications).every((k) =>
             DEVICE_ONLY_FIELDS.includes(k),
           )
         ) {
-          return
+          return gotBytes ? { needsUpload: 1 } : undefined
         }
         notice(db, trans)
         const givesTime = modifications.updatedAt !== undefined
-        return name === 'pieces' || givesTime
-          ? { dirty: 1 }
-          : { dirty: 1, updatedAt: new Date().toISOString() }
+        const marks =
+          name === 'pieces' || givesTime
+            ? { dirty: 1 }
+            : { dirty: 1, updatedAt: new Date().toISOString() }
+        return gotBytes ? { ...marks, needsUpload: 1 } : marks
       },
     )
   }

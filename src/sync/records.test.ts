@@ -5,7 +5,7 @@ import {
 } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { Glaze, Piece } from '../db/types'
+import type { Glaze, Photo, Piece } from '../db/types'
 import {
   applyRecords,
   changedAt,
@@ -130,6 +130,122 @@ test('markAllDirty marks every row without changing its time', async () => {
   await quietly(db, () => db.pieces.add(piece('p1')))
   await markAllDirty(db)
   expect(await db.pieces.get('p1')).toMatchObject({ dirty: 1, updatedAt: T1 })
+})
+
+const HASH = 'a'.repeat(64)
+
+const photoRow = (id: string, extra: Partial<Photo> = {}): Photo => ({
+  id,
+  hash: HASH,
+  width: 10,
+  height: 20,
+  takenAt: T1,
+  updatedAt: T1,
+  ...extra,
+})
+
+const photoRecord = (
+  id: string,
+  changed: string,
+  extra: Record<string, unknown> = {},
+): SyncRecord => ({
+  kind: 'photo',
+  id,
+  changedAt: changed,
+  data: {
+    id,
+    hash: HASH,
+    width: 10,
+    height: 20,
+    takenAt: T1,
+    updatedAt: changed,
+    ...extra,
+  },
+})
+
+const bytes = { blob: new Blob(['full']), thumb: new Blob(['thumb']) }
+
+test("toRecord leaves a photo's bytes and flags behind", () => {
+  const record = toRecord(
+    'photo',
+    photoRow('ph1', {
+      ...bytes,
+      dirty: 1,
+      needsUpload: 1,
+      needsDownload: 1,
+    }) as never,
+  )
+  expect(record.data).toEqual({
+    id: 'ph1',
+    hash: HASH,
+    width: 10,
+    height: 20,
+    takenAt: T1,
+    updatedAt: T1,
+  })
+})
+
+describe('photo records', () => {
+  test('a pulled photo with no bytes here waits to download', async () => {
+    await applyRecords(db, [photoRecord('ph1', T2)])
+    const row = await db.photos.get('ph1')
+    expect(row).toMatchObject({ id: 'ph1', needsDownload: 1 })
+    expect(row?.blob).toBeUndefined()
+    expect(row?.dirty).toBeUndefined()
+  })
+
+  test('a pulled photo keeps the bytes already here', async () => {
+    await quietly(db, () =>
+      db.photos.add(photoRow('ph1', { ...bytes, needsUpload: 1 })),
+    )
+    await applyRecords(db, [photoRecord('ph1', T2)])
+    const row = await db.photos.get('ph1')
+    expect(row?.blob).toBeDefined()
+    expect(row?.thumb).toBeDefined()
+    expect(row?.needsUpload).toBe(1)
+    expect(row?.needsDownload).toBeUndefined()
+    expect(row?.updatedAt).toBe(T2)
+  })
+
+  test('a pulled photo tombstone keeps the bytes here', async () => {
+    await quietly(db, () => db.photos.add(photoRow('ph1', bytes)))
+    await applyRecords(db, [photoRecord('ph1', T2, { deletedAt: T2 })])
+    const row = await db.photos.get('ph1')
+    expect(row?.deletedAt).toBe(T2)
+    expect(row?.blob).toBeDefined()
+    expect(row?.needsDownload).toBeUndefined()
+  })
+
+  test('a photo record with a bad hash is skipped', async () => {
+    const result = await applyRecords(db, [
+      photoRecord('ph1', T2, { hash: 'nope' }),
+    ])
+    expect(result.skipped).toBe(1)
+    expect(await db.photos.count()).toBe(0)
+  })
+
+  test('markAllDirty marks every photo with bytes as waiting to upload', async () => {
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('with', bytes))
+      await db.photos.add(photoRow('without', { hash: 'b'.repeat(64) }))
+    })
+    await markAllDirty(db)
+    expect(await db.photos.get('with')).toMatchObject({
+      dirty: 1,
+      needsUpload: 1,
+      updatedAt: T1,
+    })
+    const without = await db.photos.get('without')
+    expect(without?.dirty).toBe(1)
+    expect(without?.needsUpload).toBeUndefined()
+  })
+
+  test('a push sends steps before photos', async () => {
+    await db.photos.add(photoRow('ph1'))
+    await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'thrown' })
+    const kinds = (await readDirty(db)).map((r) => r.kind)
+    expect(kinds).toEqual(['entry', 'photo'])
+  })
 })
 
 describe('applyRecords follows the later-change rule', () => {

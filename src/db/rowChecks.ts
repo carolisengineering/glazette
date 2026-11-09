@@ -1,3 +1,4 @@
+import { PHOTO_HASH } from '../../shared/photoProtocol'
 import { DEFAULT_GLAZE_COLOR } from './seed'
 import { STAGES } from './stage'
 
@@ -52,6 +53,23 @@ export const isLayerRow = (row: unknown) =>
 export const isGlazeRow = (row: unknown) => isRow(row, ['name'])
 
 export const isClayRow = (row: unknown) => isRow(row, ['name'])
+
+const isPositive = (v: unknown) => typeof v === 'number' && v > 0
+
+/** A photo as a record: details only, so blob and thumb are absent. */
+export const isPhotoRow = (row: unknown) =>
+  isRow(
+    row,
+    ['hash', 'takenAt'],
+    (r) =>
+      PHOTO_HASH.test(r.hash as string) &&
+      isPositive(r.width) &&
+      isPositive(r.height) &&
+      r.blob === undefined &&
+      r.thumb === undefined &&
+      isStringOrAbsent(r.updatedAt) &&
+      isStringOrAbsent(r.mergedInto),
+  )
 
 export function isSettingsRow(row: unknown): boolean {
   return (

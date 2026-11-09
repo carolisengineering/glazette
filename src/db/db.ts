@@ -10,7 +10,7 @@ import type {
   StageEntry,
   SyncState,
 } from './types'
-import { dateOldRows, fillSkippedStages } from './upgrade'
+import { dateOldRows, fillSkippedStages, forgetLastSync } from './upgrade'
 
 export class GlazetteDB extends Dexie {
   pieces!: EntityTable<Piece, 'id'>
@@ -50,6 +50,11 @@ export class GlazetteDB extends Dexie {
         syncState: 'id',
       })
       .upgrade(dateOldRows)
+    // Photos sync as records. The upgrade makes every device's first sync
+    // after updating a full one.
+    this.version(4)
+      .stores({ photos: 'id, hash, dirty, needsUpload, needsDownload' })
+      .upgrade(forgetLastSync)
     trackChanges(this)
   }
 }
