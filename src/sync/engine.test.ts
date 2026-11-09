@@ -652,6 +652,74 @@ test("photo details sync, and each device's bytes stay where they are", async ()
   expect((await a.photos.get('ph-b'))?.needsDownload).toBe(1)
 })
 
+test('the same image under two ids becomes one on both devices', async () => {
+  const photo = (id: string) => ({
+    id,
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['th'], { type: 'image/jpeg' }),
+    hash: 'a'.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+  await a.photos.add(photo('ph-b'))
+  await a.pieces.add(piece('p1'))
+  await a.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'ph-b',
+  })
+  await b.photos.add(photo('ph-a'))
+  await b.pieces.add(piece('p2'))
+  await b.entries.add({
+    id: 'e2',
+    pieceId: 'p2',
+    stage: 'thrown',
+    photoId: 'ph-a',
+  })
+
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+  await syncOnce(a, server, ME)
+
+  for (const db of [a, b]) {
+    const live = (await db.photos.toArray()).filter((p) => !p.deletedAt)
+    expect(live.map((p) => p.id)).toEqual(['ph-a'])
+    expect(live[0].blob).toBeDefined()
+    expect(live[0].needsDownload).toBeUndefined()
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph-a')
+    expect((await db.entries.get('e2'))?.photoId).toBe('ph-a')
+    expect((await db.photos.get('ph-b'))?.mergedInto).toBe('ph-a')
+  }
+})
+
+test('a photo made on one device arrives as details first', async () => {
+  await a.photos.add({
+    id: 'ph-a',
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['th'], { type: 'image/jpeg' }),
+    hash: 'a'.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+  await a.pieces.add(piece('p1'))
+  await a.entries.add({
+    id: 'e1',
+    pieceId: 'p1',
+    stage: 'thrown',
+    photoId: 'ph-a',
+  })
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+
+  const row = await b.photos.get('ph-a')
+  expect(row?.needsDownload).toBe(1)
+  expect(row?.blob).toBeUndefined()
+  expect((await b.entries.get('e1'))?.photoId).toBe('ph-a')
+})
+
 test('a full sync pulls from the start and an incremental one from the cursor', async () => {
   await a.pieces.add(piece('p1'))
   await syncOnce(a, server, ME)

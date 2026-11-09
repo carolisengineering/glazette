@@ -310,7 +310,8 @@ export function mergeByName(
 }
 
 /** The ISO time 1 ms after `time`, a valid change time. */
-const justAfter = (time: string) => new Date(Date.parse(time) + 1).toISOString()
+export const justAfter = (time: string) =>
+  new Date(Date.parse(time) + 1).toISOString()
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto
