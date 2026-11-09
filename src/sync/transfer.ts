@@ -58,6 +58,20 @@ function stopWaitingToUpload(db: GlazetteDB, ids: string[]) {
   })
 }
 
+/**
+ * Whether a photo that can't upload counts as a failure: only when some row
+ * with that hash is live. A deleted photo keeps waiting without an error.
+ */
+async function isLive(db: GlazetteDB, hash: string) {
+  return (
+    (await db.photos
+      .where('hash')
+      .equals(hash)
+      .filter((p) => !p.deletedAt)
+      .count()) > 0
+  )
+}
+
 /** True when every photo went well. */
 async function upload(db: GlazetteDB, transport: PhotoTransport) {
   let ok = true
@@ -79,7 +93,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
       if (!PHOTO_HASH.test(row.hash)) {
         // The server would refuse the whole chunk. The row keeps waiting.
         console.error(`Photo ${id} has a hash that isn't valid; skipped.`)
-        ok = false
+        if (await isLive(db, row.hash)) ok = false
         continue
       }
       if (await bytesOf(db, row)) {
@@ -128,12 +142,12 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         if (!bytes) continue
         if (!bytes.thumb) {
           console.error(`Photo ${hash} has no thumbnail; skipped.`)
-          ok = false
+          if (await isLive(db, hash)) ok = false
           continue
         }
         if (bytes.blob.size === 0 || bytes.thumb.size === 0) {
           console.error(`Photo ${hash} has an empty image; skipped.`)
-          ok = false
+          if (await isLive(db, hash)) ok = false
           continue
         }
         // Thumbnail first, so a full image on the server nearly always means
@@ -150,7 +164,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         if (thumbStored && fullStored) await stopWaitingToUpload(db, rowIds)
         else {
           console.error(`The server refused photo ${hash}; will retry later.`)
-          ok = false
+          if (await isLive(db, hash)) ok = false
         }
       } catch (error) {
         stopsAll(error)

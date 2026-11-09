@@ -625,3 +625,97 @@ test('transfers never mark rows as changed', async () => {
   expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
   expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
 })
+
+// A photo that can't upload is an error only while it is live. A deleted one
+// keeps waiting and logs, but the transfer stays 'done'.
+const CANT_UPLOAD: [string, (deletedAt?: string) => Promise<PhotoTransport>][] =
+  [
+    [
+      'a refused upload',
+      async (deletedAt) => {
+        const a = await withBytes('a', 'clay one', {
+          needsUpload: 1,
+          deletedAt,
+        })
+        await seed(db, [a])
+        return { ...server, upload: async () => 'refused' as const }
+      },
+    ],
+    [
+      'a 0-byte image',
+      async (deletedAt) => {
+        await seed(db, [
+          await withBytes('a', '', { needsUpload: 1, deletedAt }),
+        ])
+        return server
+      },
+    ],
+    [
+      'a 0-byte thumbnail',
+      async (deletedAt) => {
+        await seed(db, [
+          await withBytes('a', 'clay one', {
+            needsUpload: 1,
+            deletedAt,
+            thumb: new Blob([], { type: 'image/jpeg' }),
+          }),
+        ])
+        return server
+      },
+    ],
+    [
+      'a hash that is not a photo hash',
+      async (deletedAt) => {
+        await seed(db, [
+          await withBytes('a', 'clay one', {
+            needsUpload: 1,
+            deletedAt,
+            hash: 'not-a-hash',
+          }),
+        ])
+        return server
+      },
+    ],
+    [
+      'bytes with no thumbnail',
+      async (deletedAt) => {
+        const blob = new Blob(['clay one'], { type: 'image/jpeg' })
+        const hash = await sha256(blob)
+        await quietly(db, () => db.photoBytes.add({ hash, blob }))
+        await seed(db, [
+          await stored('a', 'clay one', { needsUpload: 1, deletedAt }),
+        ])
+        return server
+      },
+    ],
+  ]
+
+test.each(CANT_UPLOAD)('%s: an error when live', async (_name, setup) => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const transport = await setup()
+  expect(await transferPhotos(db, transport)).toBe('error')
+  expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+})
+
+test.each(CANT_UPLOAD)(
+  '%s: still waiting but no error when deleted',
+  async (_name, setup) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const transport = await setup(T1)
+    expect(await transferPhotos(db, transport)).toBe('done')
+    expect((await db.photos.get('a'))?.needsUpload).toBe(1)
+    expect(error).toHaveBeenCalledTimes(1)
+  },
+)
+
+test('rows sharing a hash count as live when any one is live', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const live = await withBytes('a', 'clay one', { needsUpload: 1 })
+  const dead = await withBytes('b', 'clay one', {
+    needsUpload: 1,
+    deletedAt: T1,
+  })
+  await seed(db, [live, dead])
+  const refusing = { ...server, upload: async () => 'refused' as const }
+  expect(await transferPhotos(db, refusing)).toBe('error')
+})
