@@ -14,7 +14,8 @@ import {
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
-import type { Photo, Settings } from '../db/types'
+import type { Photo, PhotoBytes, Settings } from '../db/types'
+import { hashesHeld } from '../photos/bytes'
 import { changedAt } from '../sync/records'
 import type { ReadBytes } from './export'
 import {
@@ -74,6 +75,7 @@ export async function importZip(
       db.clays,
       db.settings,
       db.photos,
+      db.photoBytes,
     ],
     // Must be an async function: Dexie keeps the transaction across native
     // awaits only when the scope function itself is async.
@@ -321,6 +323,7 @@ const jpeg = (bytes: Uint8Array) =>
  * Photos match by hash. A hash already stored here maps the incoming id to the
  * local one. A new hash is added with its bytes from the zip, or skipped when
  * the zip lacks the image: its steps keep their photoId and show a placeholder.
+ * Bytes from the zip go to the bytes table unless it already holds that hash.
  * Returns the incoming-to-local id map and the ids of photos already stored
  * here that matched by hash.
  */
@@ -356,22 +359,31 @@ async function mergePhotos(
       .map((p) => p.id),
   )
 
+  const held = await hashesHeld(
+    db,
+    incoming.map((p) => p.hash),
+  )
+  const newBytes: PhotoBytes[] = []
+  // A missing thumbnail falls back to the full image rather than losing the photo.
+  const keepFromZip = (hash: string, full: Uint8Array) => {
+    if (held.has(hash)) return
+    held.add(hash)
+    const thumb = files[thumbPath(hash)] ?? full
+    newBytes.push({ hash, blob: jpeg(full), thumb: jpeg(thumb) })
+  }
+
   const writes: Photo[] = []
-  // Local rows that had only details, given the bytes from the zip.
-  const fills = new Map<string, { key: string; changes: Partial<Photo> }>()
+  // Local rows that had only details, and now wait to upload what the zip gave.
+  const fills: { key: string; changes: Partial<Photo> }[] = []
   for (const meta of incoming) {
     const local = localByHash.get(meta.hash)
     if (local) {
       const full = files[photoPath(meta.hash)]
-      if (!local.blob && full && !fills.has(local.id)) {
-        const thumb = files[thumbPath(meta.hash)] ?? full
-        fills.set(local.id, {
+      if (!local.blob && !held.has(meta.hash) && full) {
+        keepFromZip(meta.hash, full)
+        fills.push({
           key: local.id,
-          changes: {
-            blob: jpeg(full),
-            thumb: jpeg(thumb),
-            needsDownload: undefined,
-          },
+          changes: { needsUpload: 1, needsDownload: undefined },
         })
       }
       if (local.id !== meta.id) idMap.set(meta.id, local.id)
@@ -390,33 +402,35 @@ async function mergePhotos(
       if (usedIds.has(meta.id)) idMap.set(meta.id, newId())
       continue
     }
-    // A missing thumbnail falls back to the full image rather than losing the photo.
-    const thumb = files[thumbPath(meta.hash)] ?? full
+    keepFromZip(meta.hash, full)
     // An id taken by a different photo gets a fresh one, never an overwrite.
     const id = usedIds.has(meta.id) ? newId() : meta.id
     if (id !== meta.id) idMap.set(meta.id, id)
     usedIds.add(id)
     // Keeps the backup's change time (1970 when it has none), as other rows
-    // do. The change tracker marks it dirty and waiting to upload.
+    // do. The change tracker marks it dirty. A backup's JSON shouldn't name
+    // bytes, but a row must never seem to hold some it doesn't.
     const {
+      blob: _blob,
+      thumb: _thumb,
       dirty: _dirty,
       needsUpload: _needsUpload,
       needsDownload: _needsDownload,
       ...details
-    } = meta
+    } = meta as Photo
     const row: Photo = {
       ...details,
       id,
       updatedAt: meta.updatedAt ?? EPOCH,
-      blob: jpeg(full),
-      thumb: jpeg(thumb),
+      needsUpload: 1,
     }
     writes.push(row)
     localByHash.set(meta.hash, row)
   }
   count.added += writes.length
+  if (newBytes.length > 0) await db.photoBytes.bulkAdd(newBytes)
   if (writes.length > 0) await db.photos.bulkPut(writes)
-  if (fills.size > 0) await db.photos.bulkUpdate([...fills.values()])
+  if (fills.length > 0) await db.photos.bulkUpdate(fills)
   return { idMap, matched, tombstones }
 }
 

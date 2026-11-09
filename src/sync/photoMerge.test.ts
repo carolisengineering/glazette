@@ -20,8 +20,6 @@ const HASH = 'a'.repeat(64)
 
 const photo = (id: string, extra: Partial<Photo> = {}): Photo => ({
   id,
-  blob: new Blob([id], { type: 'image/jpeg' }),
-  thumb: new Blob(['t'], { type: 'image/jpeg' }),
   hash: HASH,
   width: 1,
   height: 1,
@@ -49,43 +47,68 @@ const seed = (photos: Photo[], steps: StageEntry[] = []) =>
 
 test('two rows with one hash become one', async () => {
   await seed(
-    [photo('b-x'), photo('a-y')],
+    [
+      photo('b-x', { needsUpload: 1, needsDownload: 1 }),
+      photo('a-y', { needsDownload: 1 }),
+    ],
     [step('e1', 'b-x'), step('e2', 'a-y')],
   )
   expect(await mergePhotosByHash(db)).toBe(1)
   const kept = await db.photos.get('a-y')
   const gone = await db.photos.get('b-x')
   expect(kept?.deletedAt).toBeUndefined()
-  expect(kept?.blob).toBeDefined()
   expect(gone?.deletedAt).toBeTruthy()
   expect(gone?.mergedInto).toBe('a-y')
-  expect(gone?.blob).toBeUndefined()
-  expect(gone?.thumb).toBeUndefined()
   expect(gone?.needsUpload).toBeUndefined()
   expect(gone?.needsDownload).toBeUndefined()
   expect((await db.entries.get('e1'))?.photoId).toBe('a-y')
   expect((await db.entries.get('e2'))?.photoId).toBe('a-y')
 })
 
-test('the kept row gets the bytes when it has none', async () => {
+test('merging leaves the bytes table alone', async () => {
+  const entry = { hash: HASH, blob: new Blob(['full']) }
+  await seed([photo('b-x'), photo('a-y')])
+  await quietly(db, () => db.photoBytes.add(entry))
+  const before = await db.photoBytes.toArray()
+  await mergePhotosByHash(db)
+  expect(await db.photoBytes.toArray()).toEqual(before)
+  expect(before).toHaveLength(1)
+})
+
+test('merging leaves bytes on a row not moved yet', async () => {
   await seed([
-    photo('a-y', { blob: undefined, thumb: undefined, needsDownload: 1 }),
-    photo('b-x'),
+    photo('a-y', { needsDownload: 1 }),
+    photo('b-x', { blob: new Blob(['full']), thumb: new Blob(['t']) }),
   ])
   await mergePhotosByHash(db)
   const kept = await db.photos.get('a-y')
-  expect(kept?.blob).toBeDefined()
-  expect(kept?.thumb).toBeDefined()
-  expect(kept?.needsDownload).toBeUndefined()
-  expect((await db.photos.get('b-x'))?.blob).toBeUndefined()
+  const gone = await db.photos.get('b-x')
+  expect(gone?.mergedInto).toBe('a-y')
+  expect(gone?.blob).toBeDefined()
+  expect(gone?.thumb).toBeDefined()
+  expect(kept?.blob).toBeUndefined()
+  expect(kept?.needsDownload).toBe(1)
+})
+
+test('the kept row waits to upload if a duplicate did', async () => {
+  await seed([photo('a-y'), photo('b-x', { needsUpload: 1 })])
+  await mergePhotosByHash(db)
+  expect((await db.photos.get('a-y'))?.needsUpload).toBe(1)
+  expect((await db.photos.get('b-x'))?.needsUpload).toBeUndefined()
+})
+
+test("the kept row doesn't start waiting to upload if no duplicate did", async () => {
+  await seed([photo('a-y'), photo('b-x')])
+  await mergePhotosByHash(db)
+  expect((await db.photos.get('a-y'))?.needsUpload).toBeUndefined()
 })
 
 test("a deleted row isn't merged", async () => {
-  await seed([photo('a-y'), photo('b-x', { deletedAt: T2 })])
+  await seed([photo('a-y'), photo('b-x', { deletedAt: T2, needsUpload: 1 })])
   expect(await mergePhotosByHash(db)).toBe(0)
   const other = await db.photos.get('b-x')
   expect(other?.mergedInto).toBeUndefined()
-  expect(other?.blob).toBeDefined()
+  expect(other?.needsUpload).toBe(1)
 })
 
 test('nothing to merge changes nothing', async () => {
@@ -109,10 +132,7 @@ test('a repoint moves a step just past its last change', async () => {
 
 test('a step pointing at a merged-away photo follows it', async () => {
   await seed(
-    [
-      photo('a-y'),
-      photo('b-x', { deletedAt: T2, mergedInto: 'a-y', blob: undefined }),
-    ],
+    [photo('a-y'), photo('b-x', { deletedAt: T2, mergedInto: 'a-y' })],
     [step('e1', 'b-x')],
   )
   await mergePhotosByHash(db)
@@ -133,57 +153,18 @@ test('a chain of merges is followed to its end', async () => {
   expect((await db.entries.get('e2'))?.photoId).toBe('c-z')
 })
 
-describe('bytes on a row another device merged away', () => {
-  const gone = (extra: Partial<Photo> = {}) =>
-    photo('b-x', { deletedAt: T2, mergedInto: 'a-y', ...extra })
-
-  test('move to the target when it has none', async () => {
-    await seed([
-      photo('a-y', { blob: undefined, thumb: undefined, needsDownload: 1 }),
-      gone(),
-    ])
-    await mergePhotosByHash(db)
-    const target = await db.photos.get('a-y')
-    expect(target?.blob).toBeDefined()
-    expect(target?.thumb).toBeDefined()
-    expect(target?.needsDownload).toBeUndefined()
-    expect((await db.photos.get('b-x'))?.blob).toBeUndefined()
-  })
-
-  test('are dropped when the target holds its own, which stay', async () => {
-    await seed([photo('a-y'), gone()])
-    const before = (await db.photos.get('a-y'))?.blob
-    await mergePhotosByHash(db)
-    const row = await db.photos.get('b-x')
-    expect(row?.blob).toBeUndefined()
-    expect(row?.thumb).toBeUndefined()
-    expect((await db.photos.get('a-y'))?.blob).toBeDefined()
-    expect((await db.photos.get('a-y'))?.blob).toEqual(before)
-  })
-
-  test('stay when the target is deleted', async () => {
-    await seed([
-      photo('a-y', { blob: undefined, thumb: undefined, deletedAt: T2 }),
-      gone(),
-    ])
-    await mergePhotosByHash(db)
-    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
-    expect((await db.photos.get('a-y'))?.blob).toBeUndefined()
-  })
-
-  test('stay when the target has a different hash', async () => {
-    await seed([
-      photo('a-y', { hash: 'b'.repeat(64), blob: undefined, thumb: undefined }),
-      gone(),
-    ])
-    await mergePhotosByHash(db)
-    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
-    expect((await db.photos.get('a-y'))?.blob).toBeUndefined()
-  })
-
-  test("stay when the target isn't on this device", async () => {
-    await seed([gone()])
-    await mergePhotosByHash(db)
-    expect((await db.photos.get('b-x'))?.blob).toBeDefined()
-  })
+test('a row another device merged away keeps its bytes and its wait to upload here', async () => {
+  await seed([
+    photo('a-y', { needsDownload: 1 }),
+    photo('b-x', {
+      deletedAt: T2,
+      mergedInto: 'a-y',
+      blob: new Blob(['full']),
+      needsUpload: 1,
+    }),
+  ])
+  await mergePhotosByHash(db)
+  const gone = await db.photos.get('b-x')
+  expect(gone?.blob).toBeDefined()
+  expect(gone?.needsUpload).toBe(1)
 })

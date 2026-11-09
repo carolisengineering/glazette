@@ -120,11 +120,14 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
       // One transaction, so a failed save doesn't leave new library glazes behind.
       await db.transaction(
         'rw',
-        db.glazes,
-        db.entries,
-        db.glazeApps,
-        db.pieces,
-        db.photos,
+        [
+          db.glazes,
+          db.entries,
+          db.glazeApps,
+          db.pieces,
+          db.photos,
+          db.photoBytes,
+        ],
         async () => {
           const glazes = showGlazes
             ? await resolveGlazes(rows, settings?.defaultCone ?? '6')

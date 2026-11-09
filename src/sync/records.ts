@@ -19,6 +19,7 @@ import {
   withValidColor,
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import { hashesHeld } from '../photos/bytes'
 import { DEVICE_ONLY_FIELDS, quietly, type SYNCED_TABLES } from './track'
 
 type TableName = (typeof SYNCED_TABLES)[number]
@@ -103,15 +104,16 @@ export async function readDirty(db: GlazetteDB): Promise<SyncRecord[]> {
 /** Marks every row to be sent. Change times stay as they are. */
 export function markAllDirty(db: GlazetteDB): Promise<void> {
   return quietly(db, async () => {
+    const held = new Set(await db.photoBytes.toCollection().primaryKeys())
     for (const kind of KINDS) {
       await db
         .table(TABLE_OF[kind])
         .toCollection()
         .modify(
           kind === 'photo'
-            ? (row: Row) => {
+            ? (row: Row & { hash: string }) => {
                 row.dirty = 1
-                if (row.blob) row.needsUpload = 1
+                if (row.blob || held.has(row.hash)) row.needsUpload = 1
               }
             : { dirty: 1 },
         )
@@ -214,9 +216,16 @@ export function applyRecords(
     }
     for (const [kind, group] of byKind(usable)) {
       const rows = await rowsById(db, kind, group)
+      const held =
+        kind === 'photo'
+          ? await hashesHeld(
+              db,
+              group.map((r) => r.data.hash as string),
+            )
+          : new Set<string>()
       const writes = new Map<string, Row>()
       for (const record of group) {
-        const row = winningRow(record, rows.get(record.id))
+        const row = winningRow(record, rows.get(record.id), held)
         if (!row) {
           skip(record)
           continue
@@ -233,10 +242,14 @@ export function applyRecords(
   })
 }
 
-/** The row to write for the record, or undefined when the local row stays. */
+/**
+ * The row to write for the record, or undefined when the local row stays.
+ * `heldHashes` says which of the photo hashes the bytes table holds.
+ */
 function winningRow(
   record: SyncRecord,
   mine: Row | undefined,
+  heldHashes: Set<string>,
 ): Row | undefined {
   if (mine) {
     const local = changedAt(mine)
@@ -259,7 +272,8 @@ function winningRow(
   }
   if (record.kind === 'photo') {
     // Details without bytes here: the bytes are fetched later.
-    if (!row.deletedAt && !row.blob) row.needsDownload = 1
+    const hasBytes = !!row.blob || heldHashes.has(row.hash as string)
+    if (!row.deletedAt && !hasBytes) row.needsDownload = 1
     else delete row.needsDownload
   }
   return row

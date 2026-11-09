@@ -131,6 +131,7 @@ test('addStageEntry with a photo rolls back entry and photo when glazeApps throw
   ).rejects.toThrow()
   expect(await db.entries.count()).toBe(entries)
   expect(await db.photos.count()).toBe(0)
+  expect(await db.photoBytes.count()).toBe(0)
 })
 
 test('addStageEntry for a nonexistent piece rejects and writes nothing', async () => {

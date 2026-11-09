@@ -1,7 +1,8 @@
 import { CHANGED_AT, EPOCH } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
 import type { Photo, StageEntry } from '../db/types'
-import { onLocalChange, quietly } from './track'
+import { readDirty } from './records'
+import { onLocalChange, quietly, SYNCED_TABLES } from './track'
 
 let db: GlazetteDB
 
@@ -206,41 +207,69 @@ const photo = (id: string, extra: Partial<Photo> = {}): Photo => ({
   ...extra,
 })
 
-const withBytes = { blob: new Blob(['a']), thumb: new Blob(['b']) }
-
-test('a new photo with bytes is dirty, stamped and waiting to upload', async () => {
+test('a new photo row is dirty and stamped, and waits to upload only if told', async () => {
   const listener = vi.fn()
   const stop = onLocalChange(db, listener)
-  await db.photos.add(photo('ph1', withBytes))
-  stop()
-  const row = await db.photos.get('ph1')
-  expect(row?.dirty).toBe(1)
-  expect(row?.needsUpload).toBe(1)
-  expect(row?.updatedAt).toMatch(CHANGED_AT)
-  expect(listener).toHaveBeenCalledTimes(1)
-})
-
-test("a photo row without bytes isn't waiting to upload", async () => {
   await db.photos.add(photo('ph1'))
+  await db.photos.add(photo('ph2', { needsUpload: 1 }))
+  stop()
   const row = await db.photos.get('ph1')
   expect(row?.dirty).toBe(1)
   expect(row?.needsUpload).toBeUndefined()
+  expect(row?.updatedAt).toMatch(CHANGED_AT)
+  expect((await db.photos.get('ph2'))?.needsUpload).toBe(1)
+  expect(listener).toHaveBeenCalledTimes(2)
 })
 
-test("adding bytes to a photo marks it waiting to upload, and removing them doesn't", async () => {
-  await quietly(db, () => db.photos.add(photo('ph1')))
+test('a row holding bytes is not marked waiting just for holding them', async () => {
+  await db.photos.add(photo('ph1', { blob: new Blob(['a']) }))
+  expect((await db.photos.get('ph1'))?.needsUpload).toBeUndefined()
+  await quietly(db, () => db.photos.add(photo('ph2')))
+  await db.photos.update('ph2', { blob: new Blob(['a']) })
+  expect((await db.photos.get('ph2'))?.needsUpload).toBeUndefined()
+})
+
+test('a photo starting to wait for upload tells the listeners, without being a change to sync', async () => {
+  const T = '2026-01-01T00:00:00.000Z'
+  await quietly(db, () => db.photos.add(photo('ph1', { updatedAt: T })))
   const listener = vi.fn()
   const stop = onLocalChange(db, listener)
 
-  await db.photos.update('ph1', withBytes)
-  expect((await db.photos.get('ph1'))?.needsUpload).toBe(1)
+  await db.photos.update('ph1', { needsUpload: 1 })
   expect(listener).toHaveBeenCalledTimes(1)
+  const row = await db.photos.get('ph1')
+  expect(row?.dirty).toBeUndefined()
+  expect(row?.updatedAt).toBe(T)
 
-  await quietly(db, () => db.photos.update('ph1', { needsUpload: undefined }))
-  await db.photos.update('ph1', { blob: undefined, thumb: undefined })
+  // It stops waiting, or the write is quiet: nothing to start.
+  await db.photos.update('ph1', { needsUpload: undefined })
+  await quietly(db, () => db.photos.update('ph1', { needsUpload: 1 }))
+  await db.photos.update('ph1', { needsDownload: 1 })
   stop()
-  expect((await db.photos.get('ph1'))?.needsUpload).toBeUndefined()
   expect(listener).toHaveBeenCalledTimes(1)
+})
+
+test('the bytes table never marks anything to sync', async () => {
+  const listener = vi.fn()
+  const stop = onLocalChange(db, listener)
+  const entry = { hash: 'a'.repeat(64), blob: new Blob(['a']) }
+  await db.photoBytes.add(entry)
+  await db.photoBytes.update(entry.hash, { thumb: new Blob(['b']) })
+  await db.photoBytes.put(entry)
+  stop()
+  expect(listener).not.toHaveBeenCalled()
+  const row = await db.photoBytes.get(entry.hash)
+  expect(row).not.toHaveProperty('dirty')
+  expect(row).not.toHaveProperty('updatedAt')
+  expect(SYNCED_TABLES).not.toContain('photoBytes')
+  // Nothing in it is ever read as a record.
+  expect(await readDirty(db)).toEqual([])
+})
+
+test('quietly covers the bytes table', async () => {
+  const entry = { hash: 'a'.repeat(64), blob: new Blob(['a']) }
+  await quietly(db, () => db.photoBytes.add(entry))
+  expect(await db.photoBytes.count()).toBe(1)
 })
 
 test("device-only photo fields don't count as a change", async () => {

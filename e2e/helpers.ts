@@ -59,7 +59,7 @@ export interface StoredPhoto {
   thumbSize: number
 }
 
-/** Reads every stored photo straight from IndexedDB, independent of the app's own code. */
+/** Reads every stored photo and its bytes straight from IndexedDB, independent of the app's own code. */
 export async function readPhotos(page: Page): Promise<StoredPhoto[]> {
   return page.evaluate(
     () =>
@@ -67,18 +67,18 @@ export async function readPhotos(page: Page): Promise<StoredPhoto[]> {
         const open = indexedDB.open('glazette')
         open.onerror = () => reject(open.error)
         open.onsuccess = () => {
-          const all = open.result
-            .transaction('photos')
-            .objectStore('photos')
-            .getAll()
-          all.onerror = () => reject(all.error)
-          all.onsuccess = () => {
+          const tx = open.result.transaction(['photos', 'photoBytes'])
+          const rows = tx.objectStore('photos').getAll()
+          const bytes = tx.objectStore('photoBytes').getAll()
+          tx.onerror = () => reject(tx.error)
+          tx.oncomplete = () => {
             open.result.close()
+            const byHash = new Map(bytes.result.map((b) => [b.hash, b]))
             resolve(
-              all.result.map((p) => ({
+              rows.result.map((p) => ({
                 hash: p.hash,
-                size: p.blob.size,
-                thumbSize: p.thumb.size,
+                size: byHash.get(p.hash).blob.size,
+                thumbSize: byHash.get(p.hash).thumb.size,
               })),
             )
           }

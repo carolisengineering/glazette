@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
+import { moveBytesApart } from '../photos/bytes'
 import { syncOnce } from './engine'
 import { fetchPhotoTransport } from './photoTransport'
 import { onLocalChange } from './track'
@@ -42,9 +43,13 @@ async function loop(): Promise<void> {
   try {
     do {
       again = false
+      if (useAccount.getState().status !== 'signed-in') break
+      useSync.setState({ syncing: true })
+      // First, so the sync's writes to photo rows come after the move.
+      await moveBytesApart(db)
+      // Read after the move, which can take a while.
       const { status, email } = useAccount.getState()
       if (status !== 'signed-in' || !email) break
-      useSync.setState({ syncing: true })
       let outcome = await syncOnce(db, fetchTransport, email)
       // Photo bytes follow the records, in the same run.
       if (outcome === 'done') {

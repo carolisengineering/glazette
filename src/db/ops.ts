@@ -136,6 +136,7 @@ export async function createPiece(input: {
     db.entries,
     db.glazeApps,
     db.photos,
+    db.photoBytes,
     async () => {
       const photoId = input.photo ? await storePhoto(input.photo) : undefined
       const { entries, apps } = buildSteps(
@@ -173,6 +174,7 @@ export async function addStageEntry(input: {
     db.glazeApps,
     db.pieces,
     db.photos,
+    db.photoBytes,
     async () => {
       const piece = await db.pieces.get(input.pieceId)
       if (!piece || piece.deletedAt) throw new Error('Piece not found')

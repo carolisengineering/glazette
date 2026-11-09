@@ -81,60 +81,56 @@ export function trackChanges(db: GlazetteDB): void {
     const table = db.table(name)
     table.hook(
       'creating',
-      (
-        _key,
-        obj: { dirty?: 1; updatedAt?: string; blob?: unknown; needsUpload?: 1 },
-        trans,
-      ) => {
+      (_key, obj: { dirty?: 1; updatedAt?: string }, trans) => {
         if (isQuiet(trans)) return
         obj.dirty = 1
         if (name !== 'pieces' && obj.updatedAt === undefined) {
           obj.updatedAt = new Date().toISOString()
         }
-        if (name === 'photos' && obj.blob instanceof Blob) obj.needsUpload = 1
         notice(db, trans)
       },
     )
     table.hook(
       'updating',
       (
-        modifications: { updatedAt?: unknown; blob?: unknown },
+        modifications: { updatedAt?: unknown; needsUpload?: unknown },
         _key,
         _obj,
         trans,
       ) => {
         if (isQuiet(trans)) return
-        // Bytes given to a photo are waiting to upload, even though `blob`
-        // itself isn't a change to sync. Checked before the device-only
-        // early return below, which would skip it.
-        const gotBytes = name === 'photos' && modifications.blob instanceof Blob
-        if (gotBytes) notice(db, trans)
+        // A photo that starts waiting to upload isn't a change to sync, but
+        // the upload should start soon. Checked before the device-only early
+        // return below, which would skip it.
+        if (modifications.needsUpload === 1) notice(db, trans)
         if (
           Object.keys(modifications).every((k) =>
             DEVICE_ONLY_FIELDS.includes(k),
           )
         ) {
-          return gotBytes ? { needsUpload: 1 } : undefined
+          return undefined
         }
         notice(db, trans)
         const givesTime = modifications.updatedAt !== undefined
-        const marks =
-          name === 'pieces' || givesTime
-            ? { dirty: 1 }
-            : { dirty: 1, updatedAt: new Date().toISOString() }
-        return gotBytes ? { ...marks, needsUpload: 1 } : marks
+        return name === 'pieces' || givesTime
+          ? { dirty: 1 }
+          : { dirty: 1, updatedAt: new Date().toISOString() }
       },
     )
   }
 }
 
 /**
- * Runs `fn` in one read-write transaction over the synced tables and the sync
- * state. Its writes land exactly as written: not stamped, not marked, and not
- * reported to `onLocalChange` listeners.
+ * Runs `fn` in one read-write transaction over the synced tables, the sync
+ * state and the photo bytes. Its writes land exactly as written: not stamped,
+ * not marked, and not reported to `onLocalChange` listeners.
  */
 export function quietly<T>(db: GlazetteDB, fn: () => Promise<T>): Promise<T> {
-  const tables = [...SYNCED_TABLES.map((name) => db.table(name)), db.syncState]
+  const tables = [
+    ...SYNCED_TABLES.map((name) => db.table(name)),
+    db.syncState,
+    db.photoBytes,
+  ]
   // Must be an async function: Dexie keeps the transaction across native
   // awaits only when the scope function itself is async.
   return db.transaction('rw', tables, async () => {

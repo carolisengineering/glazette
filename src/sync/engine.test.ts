@@ -655,14 +655,14 @@ test("photo details sync, and each device's bytes stay where they are", async ()
 test('the same image under two ids becomes one on both devices', async () => {
   const photo = (id: string) => ({
     id,
-    blob: new Blob(['full'], { type: 'image/jpeg' }),
-    thumb: new Blob(['th'], { type: 'image/jpeg' }),
     hash: 'a'.repeat(64),
     width: 1,
     height: 1,
     takenAt: T1,
   })
-  await a.photos.add(photo('ph-b'))
+  const bytes = { hash: 'a'.repeat(64), blob: new Blob(['full']) }
+  await a.photoBytes.add(bytes)
+  await a.photos.add({ ...photo('ph-b'), needsUpload: 1 })
   await a.pieces.add(piece('p1'))
   await a.entries.add({
     id: 'e1',
@@ -670,6 +670,7 @@ test('the same image under two ids becomes one on both devices', async () => {
     stage: 'thrown',
     photoId: 'ph-b',
   })
+  await b.photoBytes.add(bytes)
   await b.photos.add(photo('ph-a'))
   await b.pieces.add(piece('p2'))
   await b.entries.add({
@@ -686,11 +687,14 @@ test('the same image under two ids becomes one on both devices', async () => {
   for (const db of [a, b]) {
     const live = (await db.photos.toArray()).filter((p) => !p.deletedAt)
     expect(live.map((p) => p.id)).toEqual(['ph-a'])
-    expect(live[0].blob).toBeDefined()
+    expect(await db.photoBytes.count()).toBe(1)
     expect(live[0].needsDownload).toBeUndefined()
     expect((await db.entries.get('e1'))?.photoId).toBe('ph-a')
     expect((await db.entries.get('e2'))?.photoId).toBe('ph-a')
     expect((await db.photos.get('ph-b'))?.mergedInto).toBe('ph-a')
+    // A full sync set each device's copy waiting. Whichever row it's on, the
+    // image still gets its upload, once.
+    expect(await db.photos.where('needsUpload').equals(1).count()).toBe(1)
   }
 })
 

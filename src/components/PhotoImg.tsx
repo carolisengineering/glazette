@@ -24,8 +24,17 @@ export function PhotoImg({
     () => (photoId ? db.photos.get(photoId) : undefined),
     [photoId],
   )
+  // Its own query, so a write to the row doesn't read the bytes again: the Blob
+  // and its object URL stay the same, and the image doesn't reload.
+  const hash = photo?.hash
+  const stored = useLiveQuery(
+    () => (hash ? db.photoBytes.get(hash) : undefined),
+    [hash],
+  )
+  // A row not moved yet still holds its own bytes.
+  const bytes = stored ?? photo
   const blob =
-    photo && !photo.deletedAt ? (thumb ? photo.thumb : photo.blob) : undefined
+    photo && !photo.deletedAt ? (thumb ? bytes?.thumb : bytes?.blob) : undefined
   const url = usePhotoUrl(blob)
 
   if (!blob || !url) {

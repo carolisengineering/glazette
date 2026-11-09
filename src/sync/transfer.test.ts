@@ -1,28 +1,21 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { GlazetteDB } from '../db/db'
 import type { Photo } from '../db/types'
+import { moveBytesApart } from '../photos/bytes'
 import { sha256 } from '../photos/hash'
+import { realBlobs } from '../test/realBlobs'
 import { SyncStopped } from './engine'
 import type { PhotoTransport } from './photoTransport'
 import { createTestPhotoServer } from './testPhotoServer'
 import { onLocalChange, quietly } from './track'
 import { transferPhotos } from './transfer'
 
-// fake-indexeddb hands stored Blobs back as plain objects with the bytes lost,
-// which a real browser never does. So a test keeps the real Blobs here and a
-// read hook puts them back on the rows, as a browser would return them.
-const held = new Map<string, { blob: Blob; thumb: Blob }>()
-
-function watch(db: GlazetteDB) {
-  db.photos.hook('reading', (row: Photo) => {
-    const bytes = held.get(row.id)
-    return bytes && row.blob ? { ...row, ...bytes } : row
-  })
-}
+// Hands back real Blobs where fake-indexeddb would lose their bytes.
+let real: ReturnType<typeof realBlobs>
 
 const T1 = '2026-01-01T00:00:00.000Z'
 
-/** A photo row holding real bytes, kept for the read hook. */
+/** A photo row from before the move, its bytes still on it. */
 async function withBytes(
   id: string,
   text: string,
@@ -30,7 +23,6 @@ async function withBytes(
 ): Promise<Photo> {
   const blob = new Blob([text], { type: 'image/jpeg' })
   const thumb = new Blob([`thumb ${text}`], { type: 'image/jpeg' })
-  held.set(id, { blob, thumb })
   return {
     id,
     hash: await sha256(blob),
@@ -61,6 +53,25 @@ async function withoutBytes(
   }
 }
 
+/** The details of a photo whose bytes are in the table, and those bytes. */
+async function stored(
+  id: string,
+  text: string,
+  extra: Partial<Photo> = {},
+): Promise<Photo> {
+  const blob = new Blob([text], { type: 'image/jpeg' })
+  const thumb = new Blob([`thumb ${text}`], { type: 'image/jpeg' })
+  const hash = await sha256(blob)
+  if (!(await db.photoBytes.get(hash))) {
+    await quietly(db, () => db.photoBytes.add({ hash, blob, thumb }))
+  }
+  return {
+    ...(await withoutBytes(id, text)),
+    needsDownload: undefined,
+    ...extra,
+  }
+}
+
 /** Puts rows in exactly as given: not marked dirty, not reported as changes. */
 function seed(db: GlazetteDB, rows: Photo[]) {
   return quietly(db, () => db.photos.bulkPut(rows))
@@ -84,13 +95,13 @@ beforeEach(async () => {
   name = `transfer-${crypto.randomUUID()}`
   db = new GlazetteDB(name)
   await db.open()
-  watch(db)
+  real = realBlobs()
+  real.watch(db)
   server = createTestPhotoServer()
 })
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  held.clear()
   await db.delete()
 })
 
@@ -104,6 +115,49 @@ test('waiting photos upload and stop waiting', async () => {
     expect(server.files().has(`thumb/${photo.hash}`)).toBe(true)
   }
   expect(await db.photos.where('needsUpload').equals(1).count()).toBe(0)
+})
+
+test('bytes in the table upload, full and thumbnail', async () => {
+  const a = await stored('a', 'clay one', { needsUpload: 1 })
+  await seed(db, [a])
+  expect(await transferPhotos(db, server)).toBe('done')
+  const entry = real.inTable.get(a.hash)
+  expect(server.files().get(`full/${a.hash}`)).toBe(entry?.blob)
+  expect(server.files().get(`thumb/${a.hash}`)).toBe(entry?.thumb)
+  expect((await db.photos.get('a'))?.needsUpload).toBeUndefined()
+})
+
+test('rows sharing a hash upload it once, and all stop waiting', async () => {
+  const a = await stored('a', 'clay one', { needsUpload: 1 })
+  const b = await stored('b', 'clay one', { needsUpload: 1 })
+  await seed(db, [a, b])
+  const upload = vi.spyOn(server, 'upload')
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect(upload).toHaveBeenCalledTimes(2)
+  expect(await db.photos.where('needsUpload').equals(1).count()).toBe(0)
+})
+
+test('a row keeps waiting while the only bytes are on a row not moved yet', async () => {
+  const dup = await withBytes('dup', 'clay one', {
+    deletedAt: T1,
+    mergedInto: 'kept',
+  })
+  await seed(db, [
+    await withoutBytes('kept', 'clay one', {
+      needsDownload: undefined,
+      needsUpload: 1,
+    }),
+    dup,
+  ])
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect((await db.photos.get('kept'))?.needsUpload).toBe(1)
+  expect(server.files().size).toBe(0)
+
+  // Once the move succeeds, the row kept uploads the image.
+  await moveBytesApart(db)
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect((await db.photos.get('kept'))?.needsUpload).toBeUndefined()
+  expect(server.files().get(`full/${dup.hash}`)).toBe(dup.blob)
 })
 
 test("a photo the server already has isn't sent again", async () => {
@@ -151,7 +205,7 @@ test('a waiting photo survives closing the app', async () => {
   db.close()
   db = new GlazetteDB(name)
   await db.open()
-  watch(db)
+  real.watch(db)
   expect(await transferPhotos(db, server)).toBe('done')
   expect((await db.photos.get('a'))?.needsUpload).toBeUndefined()
   expect(server.files().size).toBe(2)
@@ -174,14 +228,36 @@ test("a refused upload doesn't hold up the others", async () => {
   expect(error).toHaveBeenCalledTimes(1)
 })
 
-test('a photo is downloaded and verified', async () => {
-  await serverHolds(server, 'clay one')
+test('a photo is downloaded, verified and kept in the table', async () => {
+  const hash = await serverHolds(server, 'clay one')
   await seed(db, [await withoutBytes('a', 'clay one')])
   expect(await transferPhotos(db, server)).toBe('done')
   const row = await db.photos.get('a')
-  expect(row?.blob).toBeDefined()
-  expect(row?.thumb).toBeDefined()
+  expect(row).not.toHaveProperty('blob')
+  expect(row).not.toHaveProperty('thumb')
   expect(row?.needsDownload).toBeUndefined()
+  const entry = real.inTable.get(hash)
+  expect(entry?.blob).toBe(server.files().get(`full/${hash}`))
+  expect(entry?.thumb).toBe(server.files().get(`thumb/${hash}`))
+})
+
+test('a downloaded image clears every row with that hash', async () => {
+  const hash = await serverHolds(server, 'clay one')
+  await seed(db, [
+    await withoutBytes('a', 'clay one'),
+    await withoutBytes('b', 'clay one'),
+    await withoutBytes('c', 'clay one', { deletedAt: T1 }),
+    await withoutBytes('other', 'clay two'),
+  ])
+  const download = vi.spyOn(server, 'download')
+  expect(await transferPhotos(db, server)).toBe('done')
+  // The full image and thumbnail once, plus the look for the other photo.
+  expect(download.mock.calls.filter(([h]) => h === hash)).toHaveLength(2)
+  for (const id of ['a', 'b', 'c']) {
+    expect((await db.photos.get(id))?.needsDownload).toBeUndefined()
+  }
+  expect((await db.photos.get('other'))?.needsDownload).toBe(1)
+  expect(await db.photoBytes.count()).toBe(1)
 })
 
 test('a missing thumbnail falls back to the full image', async () => {
@@ -189,10 +265,10 @@ test('a missing thumbnail falls back to the full image', async () => {
   server.files().delete(`thumb/${hash}`)
   await seed(db, [await withoutBytes('a', 'clay one')])
   expect(await transferPhotos(db, server)).toBe('done')
-  const row = await db.photos.get('a')
-  expect(row?.blob).toBeDefined()
-  expect(row?.thumb).toBeDefined()
-  expect(row?.needsDownload).toBeUndefined()
+  const entry = real.inTable.get(hash)
+  expect(entry?.thumb).toBe(entry?.blob)
+  expect(entry?.blob).toBeDefined()
+  expect((await db.photos.get('a'))?.needsDownload).toBeUndefined()
 })
 
 test('a corrupted download is thrown away', async () => {
@@ -204,9 +280,8 @@ test('a corrupted download is thrown away', async () => {
     download: async () => new Blob(['something else']),
   }
   expect(await transferPhotos(db, corrupting)).toBe('done')
-  const row = await db.photos.get('a')
-  expect(row?.blob).toBeUndefined()
-  expect(row?.needsDownload).toBe(1)
+  expect((await db.photos.get('a'))?.needsDownload).toBe(1)
+  expect(await db.photoBytes.count()).toBe(0)
   expect(error).toHaveBeenCalledTimes(1)
 })
 
@@ -216,22 +291,50 @@ test('a photo not uploaded yet waits quietly', async () => {
   const download = vi.spyOn(server, 'download')
   expect(await transferPhotos(db, server)).toBe('done')
   expect(download).toHaveBeenCalledTimes(1)
-  const row = await db.photos.get('a')
-  expect(row?.blob).toBeUndefined()
-  expect(row?.needsDownload).toBe(1)
+  expect((await db.photos.get('a'))?.needsDownload).toBe(1)
+  expect(await db.photoBytes.count()).toBe(0)
   expect(error).not.toHaveBeenCalled()
 })
 
-test('an image already here under another id is copied, not downloaded', async () => {
-  const here = await withBytes('a', 'clay one')
-  await seed(db, [here, await withoutBytes('b', 'clay one')])
+test("an image already in the table isn't downloaded", async () => {
+  const b = await stored('b', 'clay one', { needsDownload: 1 })
+  const before = real.inTable.get(b.hash)
+  await seed(db, [b])
   const download = vi.spyOn(server, 'download')
   expect(await transferPhotos(db, server)).toBe('done')
   expect(download).not.toHaveBeenCalled()
-  const row = await db.photos.get('b')
-  expect(row?.blob).toBeDefined()
-  expect(row?.thumb).toBeDefined()
-  expect(row?.needsDownload).toBeUndefined()
+  expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
+  expect(real.inTable.get(b.hash)).toBe(before)
+})
+
+test("a download that finds the image arrived meanwhile doesn't overwrite it", async () => {
+  const hash = await serverHolds(server, 'clay one')
+  await seed(db, [await withoutBytes('a', 'clay one')])
+  const first = new Blob(['clay one'], { type: 'image/jpeg' })
+  const arriving: PhotoTransport = {
+    ...server,
+    download: async (h, part) => {
+      if (!(await db.photoBytes.get(h))) {
+        await quietly(db, () => db.photoBytes.add({ hash: h, blob: first }))
+      }
+      return server.download(h, part)
+    },
+  }
+  expect(await transferPhotos(db, arriving)).toBe('done')
+  expect(real.inTable.get(hash)?.blob).toBe(first)
+  expect((await db.photos.get('a'))?.needsDownload).toBeUndefined()
+})
+
+test('a row waiting to download whose twin holds bytes on its row still downloads', async () => {
+  const hash = await serverHolds(server, 'clay one')
+  await seed(db, [
+    await withBytes('here', 'clay one'),
+    await withoutBytes('waiting', 'clay one'),
+  ])
+  expect(await transferPhotos(db, server)).toBe('done')
+  expect((await db.photos.get('waiting'))?.needsDownload).toBeUndefined()
+  expect(real.inTable.has(hash)).toBe(true)
+  expect((await db.photos.get('here'))?.blob).toBeDefined()
 })
 
 test('a photo that already has its bytes just stops waiting for them', async () => {
@@ -249,7 +352,7 @@ test("a deleted photo isn't downloaded", async () => {
   const download = vi.spyOn(server, 'download')
   expect(await transferPhotos(db, server)).toBe('done')
   expect(download).not.toHaveBeenCalled()
-  expect((await db.photos.get('a'))?.blob).toBeUndefined()
+  expect(await db.photoBytes.count()).toBe(0)
 })
 
 test('a stopped transfer returns its reason and keeps what is done', async () => {
@@ -267,7 +370,8 @@ test('a stopped transfer returns its reason and keeps what is done', async () =>
     },
   }
   expect(await transferPhotos(db, signedOut)).toBe('signed-out')
-  expect((await db.photos.get('a'))?.blob).toBeDefined()
+  expect((await db.photos.get('a'))?.needsDownload).toBeUndefined()
+  expect(await db.photoBytes.count()).toBe(1)
   expect((await db.photos.get('b'))?.needsDownload).toBe(1)
 })
 
@@ -297,5 +401,6 @@ test('transfers never mark rows as changed', async () => {
   unsubscribe()
   expect(heard).not.toHaveBeenCalled()
   expect(await db.photos.where('dirty').equals(1).count()).toBe(0)
-  expect((await db.photos.get('b'))?.blob).toBeDefined()
+  expect((await db.photos.get('b'))?.needsDownload).toBeUndefined()
+  expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
 })

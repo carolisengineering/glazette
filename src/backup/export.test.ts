@@ -134,6 +134,70 @@ test("a backup saves while some photos haven't downloaded", async () => {
   }
 })
 
+test('a backup holds bytes from the table, and from a row not moved yet', async () => {
+  await db.photoBytes.add({
+    hash: 'h1',
+    blob: new Blob(['full1'], { type: 'image/jpeg' }),
+    thumb: new Blob(['thumb1'], { type: 'image/jpeg' }),
+  })
+  await db.photos.bulkAdd([
+    { id: 'moved', hash: 'h1', width: 1, height: 1, takenAt: 't' },
+    {
+      id: 'old',
+      blob: new Blob(['full2'], { type: 'image/jpeg' }),
+      thumb: new Blob(['thumb2'], { type: 'image/jpeg' }),
+      hash: 'h2',
+      width: 1,
+      height: 1,
+      takenAt: 't',
+    },
+  ])
+
+  const { files, json } = await unpack(await exportZip())
+
+  expect(Object.keys(files).sort()).toEqual([
+    'glazette.json',
+    'photos/h1.jpg',
+    'photos/h2.jpg',
+    'thumbs/h1.jpg',
+    'thumbs/h2.jpg',
+  ])
+  expect(json.photos.map((p) => p.id).sort()).toEqual(['moved', 'old'])
+  for (const meta of json.photos) {
+    expect(meta).not.toHaveProperty('blob')
+    expect(meta).not.toHaveProperty('thumb')
+  }
+  // Contents aren't checked: fake-indexeddb drops stored Blob bytes.
+})
+
+test('rows sharing a hash export its files once', async () => {
+  await db.photoBytes.add({
+    hash: 'h1',
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
+  })
+  await db.photos.bulkAdd([
+    { id: 'kept', hash: 'h1', width: 1, height: 1, takenAt: 't' },
+    {
+      id: 'gone',
+      hash: 'h1',
+      width: 1,
+      height: 1,
+      takenAt: 't',
+      deletedAt: 'z',
+      mergedInto: 'kept',
+    },
+  ])
+  let reads = 0
+  const counted = (blob: Blob) => {
+    reads++
+    return lenientBytes(blob)
+  }
+  const { json } = await unpack(await exportStrict(new Date(), counted))
+  expect(json.photos).toHaveLength(2)
+  expect(reads).toBe(2)
+})
+
 test('an undated step exports with no date key', async () => {
   await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
   const { json } = await unpack(await exportZip())

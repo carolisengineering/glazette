@@ -216,6 +216,39 @@ describe('photo records', () => {
     expect(row?.needsDownload).toBeUndefined()
   })
 
+  test("a pulled photo whose hash is in the table doesn't wait to download", async () => {
+    await quietly(db, () =>
+      db.photoBytes.add({ hash: HASH, blob: new Blob(['full']) }),
+    )
+    await applyRecords(db, [photoRecord('ph1', T2)])
+    const row = await db.photos.get('ph1')
+    expect(row?.id).toBe('ph1')
+    expect(row?.needsDownload).toBeUndefined()
+  })
+
+  test('a pulled photo replacing a row loses its wait when the hash is in the table', async () => {
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('ph1', { needsDownload: 1 }))
+      await db.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    })
+    await applyRecords(db, [photoRecord('ph1', T2)])
+    expect((await db.photos.get('ph1'))?.needsDownload).toBeUndefined()
+  })
+
+  test("applying photo records reads only the bytes table's keys", async () => {
+    await quietly(db, () =>
+      db.photoBytes.add({ hash: HASH, blob: new Blob(['full']) }),
+    )
+    const reads = [
+      vi.spyOn(db.photoBytes, 'get'),
+      vi.spyOn(db.photoBytes, 'bulkGet'),
+      vi.spyOn(db.photoBytes, 'toArray'),
+    ]
+    await applyRecords(db, [photoRecord('ph1', T2)])
+    await markAllDirty(db)
+    for (const read of reads) expect(read).not.toHaveBeenCalled()
+  })
+
   test('a photo record with a bad hash is skipped', async () => {
     const result = await applyRecords(db, [
       photoRecord('ph1', T2, { hash: 'nope' }),
@@ -238,6 +271,21 @@ describe('photo records', () => {
     const without = await db.photos.get('without')
     expect(without?.dirty).toBe(1)
     expect(without?.needsUpload).toBeUndefined()
+  })
+
+  test('markAllDirty marks a photo waiting to upload when its bytes are in the table', async () => {
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('moved'))
+      await db.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+      await db.photos.add(photoRow('elsewhere', { hash: 'b'.repeat(64) }))
+    })
+    await markAllDirty(db)
+    expect(await db.photos.get('moved')).toMatchObject({
+      dirty: 1,
+      needsUpload: 1,
+      updatedAt: T1,
+    })
+    expect((await db.photos.get('elsewhere'))?.needsUpload).toBeUndefined()
   })
 
   test('a push sends steps before photos', async () => {
