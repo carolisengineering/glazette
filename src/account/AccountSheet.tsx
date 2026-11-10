@@ -150,7 +150,9 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  // Recently deleted needs an account; a sign-out while it's open ends it.
+  // Recently deleted needs an account; a sign-out while it's open ends it, so
+  // signing back in shows the Account view.
+  if (viewing && status !== 'signed-in') setViewing(false)
   const showDeleted = viewing && status === 'signed-in'
   // Swapping views removes the button that had focus; the title takes it.
   const shown = useRef(showDeleted)

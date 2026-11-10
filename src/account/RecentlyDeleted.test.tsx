@@ -300,3 +300,18 @@ test('swapping views moves focus to the title', async () => {
   await user.click(screen.getByRole('button', { name: 'Back' }))
   expect(screen.getByRole('heading', { name: 'Account' })).toHaveFocus()
 })
+
+test('signing out and back in with the sheet open shows the Account view', async () => {
+  const user = userEvent.setup()
+  render(<AccountSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Recently deleted' }))
+  expect(
+    await screen.findByRole('dialog', { name: 'Recently deleted' }),
+  ).toBeVisible()
+  act(() => useAccount.setState({ status: 'signed-out', email: undefined }))
+  act(() =>
+    useAccount.setState({ status: 'signed-in', email: 'carol@example.com' }),
+  )
+  expect(screen.getByRole('dialog', { name: 'Account' })).toBeVisible()
+  expect(screen.getByText('Signed in as carol@example.com')).toBeVisible()
+})
