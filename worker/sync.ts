@@ -3,6 +3,10 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
+  DELETED_LIMIT,
+  type DeletedItem,
+  type DeletedResponse,
+  isExpiringDelete,
   isSyncRecord,
   MAX_BODY_BYTES,
   PULL_LIMIT,
@@ -28,28 +32,35 @@ const badRequest = (c: Ctx) =>
   fail(c, 400, 'BAD_SYNC_REQUEST', 'The sync request is malformed.')
 
 // The stored copies of the pushed records. CROSS JOIN keeps the batch as the outer
-// loop, so it is parsed once. ?2 is the batch as JSON: [{k, i, c, d}].
-const STORED = `SELECT r.kind, r.id, r.changed_at, r.data
+// loop, so it is parsed once. ?2 is the batch as JSON: [{k, i, c, d, h}].
+const STORED = `SELECT r.kind, r.id, r.changed_at, r.data, r.purged_at
   FROM json_each(?2) j
   CROSS JOIN records r ON r.user_id = ?1
     AND r.kind = json_extract(j.value, '$.k') AND r.id = json_extract(j.value, '$.i')`
 
 // One statement for the whole batch. Each record's seq is above every stored seq
 // and follows push order, so pulls see them in the order they were pushed.
-const UPSERT = `INSERT INTO records (user_id, kind, id, changed_at, data, seq)
+// ?3 is the current time: the moment the server hears of a delete. A winning
+// delete keeps the first time it was heard; a winning live copy clears it. A
+// purged record (a stub) is never replaced.
+const UPSERT = `INSERT INTO records (user_id, kind, id, changed_at, data, seq, deleted_heard_at)
   SELECT ?1, json_extract(value, '$.k'), json_extract(value, '$.i'),
     json_extract(value, '$.c'), json_extract(value, '$.d'),
-    (SELECT COALESCE(MAX(seq), 0) FROM records) + key + 1
+    (SELECT COALESCE(MAX(seq), 0) FROM records) + key + 1,
+    CASE WHEN json_extract(value, '$.h') = 1 THEN ?3 END
   FROM json_each(?2) WHERE true
   ON CONFLICT (user_id, kind, id) DO UPDATE SET
-    changed_at = excluded.changed_at, data = excluded.data, seq = excluded.seq
-  WHERE excluded.changed_at > records.changed_at`
+    changed_at = excluded.changed_at, data = excluded.data, seq = excluded.seq,
+    deleted_heard_at = CASE WHEN excluded.deleted_heard_at IS NULL THEN NULL
+      ELSE COALESCE(records.deleted_heard_at, excluded.deleted_heard_at) END
+  WHERE excluded.changed_at > records.changed_at AND records.purged_at IS NULL`
 
 type StoredRow = {
   kind: string
   id: string
   changed_at: string
   data: string
+  purged_at?: string | null
 }
 
 export function syncRoutes() {
@@ -96,20 +107,22 @@ export function syncRoutes() {
           i: r.id,
           c: r.changedAt,
           d: JSON.stringify(r.data),
+          h: isExpiringDelete(r.kind, r.data) ? 1 : 0,
         })),
       )
       // A constant number of statements, however many records. The read runs
       // first, so it sees the copies as they were before this push.
       const [stored] = await db.batch<StoredRow>([
         db.prepare(STORED).bind(userId, batch),
-        db.prepare(UPSERT).bind(userId, batch),
+        db.prepare(UPSERT).bind(userId, batch, new Date().toISOString()),
       ])
       const pushed = new Map(records.map((r) => [`${r.kind}/${r.id}`, r]))
       const rejected: SyncRecord[] = []
       for (const row of stored.results) {
         if (
+          row.purged_at ||
           row.changed_at >=
-          (pushed.get(`${row.kind}/${row.id}`)?.changedAt ?? '')
+            (pushed.get(`${row.kind}/${row.id}`)?.changedAt ?? '')
         ) {
           rejected.push({
             kind: row.kind as SyncRecord['kind'],
@@ -145,6 +158,28 @@ export function syncRoutes() {
       200,
       { 'content-type': 'application/json' },
     )
+  })
+
+  routes.get('/deleted', async (c) => {
+    const { results } = await c.env.DB.prepare(
+      `SELECT kind, id, deleted_heard_at FROM records
+       WHERE user_id = ? AND deleted_heard_at IS NOT NULL
+         AND kind IN ('piece', 'photo')
+         AND json_extract(data, '$.mergedInto') IS NULL
+       ORDER BY deleted_heard_at DESC LIMIT ?`,
+    )
+      .bind(c.get('userId'), DELETED_LIMIT)
+      .all<{
+        kind: DeletedItem['kind']
+        id: string
+        deleted_heard_at: string
+      }>()
+    const items = results.map((r) => ({
+      kind: r.kind,
+      id: r.id,
+      heardAt: r.deleted_heard_at,
+    }))
+    return c.json({ items } satisfies DeletedResponse)
   })
 
   return routes

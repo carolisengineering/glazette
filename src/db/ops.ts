@@ -90,7 +90,7 @@ function glazeRows(
  * Builds the filled steps for `skipped` stages plus the chosen step, and the
  * glaze rows for whichever of them is the Glazed step. Dates are never invented.
  */
-function buildSteps(
+export function buildSteps(
   pieceId: string,
   skipped: Stage[],
   chosen: Omit<StageEntry, 'id' | 'pieceId'>,
@@ -332,7 +332,14 @@ export async function removePhoto(entryId: string): Promise<void> {
     const stillUsed = await db.entries
       .filter((e) => e.photoId === photoId && !e.deletedAt)
       .count()
-    if (stillUsed === 0) await db.photos.update(photoId, { deletedAt: now })
+    if (stillUsed === 0) {
+      await db.photos.update(photoId, {
+        deletedAt: now,
+        lastPieceId: entry.pieceId,
+        lastEntryId: entry.id,
+        lastStage: entry.stage,
+      })
+    }
     await db.pieces.update(entry.pieceId, { updatedAt: now })
   })
 }

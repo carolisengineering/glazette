@@ -2,12 +2,14 @@
 // rules as the Worker (worker/sync.ts).
 
 import {
+  isExpiringDelete,
   isSyncRecord,
   MAX_BODY_BYTES,
   PULL_LIMIT,
   PUSH_LIMIT,
   type PullResponse,
   type PushResponse,
+  type RecordKind,
   type SyncRecord,
 } from '../../shared/syncProtocol'
 import { SyncStopped, type Transport } from './engine'
@@ -15,8 +17,24 @@ import { SyncStopped, type Transport } from './engine'
 /** A copy as it would come over the wire. */
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
-export function createTestServer(): Transport & { records(): SyncRecord[] } {
-  const stored = new Map<string, { record: SyncRecord; seq: number }>()
+export interface TestServer extends Transport {
+  records(): SyncRecord[]
+  /** What the daily job does to an expired record: it becomes a stub. */
+  purge(kind: RecordKind, id: string): void
+  /** When the server first heard of the record's delete, if it's counting. */
+  clockOf(kind: RecordKind, id: string): string | undefined
+}
+
+interface Stored {
+  record: SyncRecord
+  seq: number
+  // When the server first heard of the delete, for a kind that expires.
+  heardAt?: string
+  purged?: true
+}
+
+export function createTestServer(): TestServer {
+  const stored = new Map<string, Stored>()
   let lastSeq = 0
 
   const inSeqOrder = () => [...stored.values()].sort((x, y) => x.seq - y.seq)
@@ -34,14 +52,26 @@ export function createTestServer(): Transport & { records(): SyncRecord[] } {
         throw new SyncStopped('error')
       }
       const rejected: SyncRecord[] = []
+      const now = new Date().toISOString()
       for (const record of copy(records)) {
         const key = `${record.kind}/${record.id}`
         const mine = stored.get(key)
-        // Strictly later wins; on a tie the stored copy stays.
-        if (mine && mine.record.changedAt >= record.changedAt) {
+        // Strictly later wins; on a tie the stored copy stays. A stub is
+        // never replaced.
+        if (
+          mine &&
+          (mine.purged || mine.record.changedAt >= record.changedAt)
+        ) {
           rejected.push(copy(mine.record))
         } else {
-          stored.set(key, { record, seq: ++lastSeq })
+          // A winning delete keeps the first time it was heard; a winning
+          // live copy clears it.
+          const deleting = isExpiringDelete(record.kind, record.data)
+          stored.set(key, {
+            record,
+            seq: ++lastSeq,
+            heardAt: deleting ? (mine?.heardAt ?? now) : undefined,
+          })
         }
       }
       return { rejected }
@@ -60,6 +90,27 @@ export function createTestServer(): Transport & { records(): SyncRecord[] } {
 
     records(): SyncRecord[] {
       return inSeqOrder().map((s) => copy(s.record))
+    },
+
+    purge(kind: RecordKind, id: string): void {
+      const mine = stored.get(`${kind}/${id}`)
+      if (!mine) throw new Error(`No ${kind} ${id} to purge`)
+      // Keeps its change time, and is pulled again.
+      const now = new Date().toISOString()
+      stored.set(`${kind}/${id}`, {
+        record: {
+          kind,
+          id,
+          changedAt: mine.record.changedAt,
+          data: { id, deletedAt: now, purgedAt: now },
+        },
+        seq: ++lastSeq,
+        purged: true,
+      })
+    },
+
+    clockOf(kind: RecordKind, id: string): string | undefined {
+      return stored.get(`${kind}/${id}`)?.heardAt
     },
   }
 }

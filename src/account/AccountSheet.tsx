@@ -7,6 +7,7 @@ import { lastSyncedLabel } from '../sync/label'
 import { useSync } from '../sync/useSync'
 import { countWaiting, usePhotosWaiting } from '../sync/useWaiting'
 import { requestCode, verifyCode } from './api'
+import { RecentlyDeleted } from './RecentlyDeleted'
 import { useAccount } from './useAccount'
 
 const secondary =
@@ -37,6 +38,7 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
   const [warning, setWarning] = useState<string>()
+  const [viewing, setViewing] = useState(false)
   // The confirm dialog handles its own Escape; the sheet stays put meanwhile.
   useModal(titleRef, () => {
     if (!warning) onClose()
@@ -148,6 +150,18 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Recently deleted needs an account; a sign-out while it's open ends it, so
+  // signing back in shows the Account view.
+  if (viewing && status !== 'signed-in') setViewing(false)
+  const showDeleted = viewing && status === 'signed-in'
+  // Swapping views removes the button that had focus; the title takes it.
+  const shown = useRef(showDeleted)
+  useEffect(() => {
+    if (shown.current === showDeleted) return
+    shown.current = showDeleted
+    titleRef.current?.focus()
+  }, [showDeleted])
+
   const message = line && (
     <p role="alert" className="text-[14px] text-ink">
       {LINES[line]}
@@ -175,9 +189,11 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
           tabIndex={-1}
           className="font-serif text-[24px] leading-tight outline-none"
         >
-          Account
+          {showDeleted ? 'Recently deleted' : 'Account'}
         </h2>
-        {status === 'signed-in' ? (
+        {showDeleted ? (
+          <RecentlyDeleted onBack={() => setViewing(false)} />
+        ) : status === 'signed-in' ? (
           <section className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
               <p className="text-[16px]">Signed in as {accountEmail}</p>
@@ -197,6 +213,13 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
                 </p>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setViewing(true)}
+              className={secondary}
+            >
+              Recently deleted
+            </button>
             <button
               type="button"
               onClick={() => void leave()}

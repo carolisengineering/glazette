@@ -1,19 +1,20 @@
-import { db, newId } from '../db/db'
+import { db, newId, UNDELETE_PHOTO } from '../db/db'
 import { hashesHeld, keepBytes } from './bytes'
 import type { ProcessedImage } from './process'
 
 /** Must be called inside an open Dexie transaction that includes `db.photos` and `db.photoBytes`; dedupes by hash and undeletes a soft-deleted match. */
 export async function storePhoto(photo: ProcessedImage): Promise<string> {
   const { blob, thumb, ...details } = photo
-  // A merged duplicate is never reused: its live twin is.
+  // A merged duplicate is never reused: its live twin is. Nor is a purged
+  // photo: the server keeps only its stub.
   const existing = await db.photos
     .where('hash')
     .equals(photo.hash)
-    .filter((p) => !p.mergedInto)
+    .filter((p) => !p.mergedInto && !p.purgedAt)
     .first()
   if (existing) {
     if (existing.deletedAt) {
-      await db.photos.update(existing.id, { deletedAt: undefined })
+      await db.photos.update(existing.id, { ...UNDELETE_PHOTO })
     }
     const hasBytes =
       !!existing.blob || (await hashesHeld(db, [photo.hash])).size > 0

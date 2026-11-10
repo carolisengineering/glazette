@@ -46,6 +46,40 @@ export interface PushResponse {
   rejected: SyncRecord[]
 }
 
+// Kinds that expire 30 days after the server first hears of their delete.
+// Glazes and clays never expire: old layers and pieces still show their names.
+export const EXPIRING_KINDS = ['piece', 'entry', 'glazeApp', 'photo'] as const
+export const RETENTION_DAYS = 30
+// The most items the recently deleted list returns.
+export const DELETED_LIMIT = 500
+
+export interface DeletedItem {
+  kind: 'piece' | 'photo'
+  id: string
+  // ISO time the server first heard of the delete.
+  heardAt: string
+}
+
+export interface DeletedResponse {
+  items: DeletedItem[]
+}
+
+// A stub is what stays of a record after the server purges it.
+export function isStubData(data: Record<string, unknown>): boolean {
+  return typeof data.purgedAt === 'string'
+}
+
+// A delete whose 30 days count: a record of a kind that expires, marked deleted.
+export function isExpiringDelete(
+  kind: string,
+  data: Record<string, unknown>,
+): boolean {
+  return (
+    (EXPIRING_KINDS as readonly string[]).includes(kind) &&
+    typeof data.deletedAt === 'string'
+  )
+}
+
 export interface PullResponse {
   records: SyncRecord[]
   // The last seq returned, or the requested since when none.

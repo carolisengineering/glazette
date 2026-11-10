@@ -1,4 +1,5 @@
 import type {
+  DeletedItem,
   PullResponse,
   PushResponse,
   SyncRecord,
@@ -104,4 +105,20 @@ export const fetchTransport: Transport = {
     if (!isPullResponse(body)) throw new SyncStopped('error')
     return body
   },
+}
+
+/**
+ * What the server holds that was deleted and can still be put back. A word
+ * for a list that can't be had: offline, signed out or an error.
+ */
+export async function fetchDeleted(): Promise<
+  DeletedItem[] | 'offline' | 'signed-out' | 'error'
+> {
+  try {
+    const body = await request('/api/sync/deleted', { method: 'GET' })
+    if (!isObject(body) || !Array.isArray(body.items)) return 'error'
+    return body.items as DeletedItem[]
+  } catch (error) {
+    return error instanceof SyncStopped ? error.reason : 'error'
+  }
 }

@@ -2,6 +2,8 @@ import type { Table } from 'dexie'
 import {
   CHANGED_AT,
   EPOCH,
+  EXPIRING_KINDS,
+  isStubData,
   isSyncRecord,
   type RecordKind,
   type SyncRecord,
@@ -105,14 +107,18 @@ export async function readDirty(db: GlazetteDB): Promise<SyncRecord[]> {
   return records
 }
 
-/** Marks every row to be sent. Change times stay as they are. */
+/**
+ * Marks every row to be sent, and every photo with bytes here to upload.
+ * Change times stay as they are. A purged row is left out: it belongs to the
+ * account it was purged from.
+ */
 export function markAllDirty(db: GlazetteDB): Promise<void> {
   return quietly(db, async () => {
     const held = new Set(await db.photoBytes.toCollection().primaryKeys())
     for (const kind of KINDS) {
       await db
         .table(TABLE_OF[kind])
-        .toCollection()
+        .filter((row: Row) => !row.purgedAt)
         .modify(
           kind === 'photo'
             ? (row: Row & { hash: string }) => {
@@ -189,9 +195,15 @@ export interface ApplyResult {
   skippedKeys: Set<string>
 }
 
+/** What the server keeps of a purged record of a kind that expires. */
+const isStub = (record: SyncRecord) =>
+  (EXPIRING_KINDS as readonly string[]).includes(record.kind) &&
+  isStubData(record.data)
+
 /**
  * Writes the records that are newer than (or tie with a dirty copy of) the
  * local row, skipping any this version can't use. Written rows end clean.
+ * A stub always wins, whatever its change time (see stubbedRow).
  * Each table is read once and written once; records for the same row apply
  * in order, each against the row as the one before left it.
  */
@@ -214,7 +226,10 @@ export function applyRecords(
     }
     const usable: SyncRecord[] = []
     for (const record of records) {
-      if (isSyncRecord(record) && ROW_CHECK[record.kind](record.data)) {
+      if (
+        isSyncRecord(record) &&
+        (isStub(record) || ROW_CHECK[record.kind](record.data))
+      ) {
         usable.push(record)
       } else skip(record)
     }
@@ -224,15 +239,24 @@ export function applyRecords(
         kind === 'photo'
           ? await hashesHeld(
               db,
-              group.map((r) => r.data.hash as string),
+              group.filter((r) => !isStub(r)).map((r) => r.data.hash as string),
             )
           : new Set<string>()
       const writes = new Map<string, Row>()
       for (const record of group) {
-        const row = winningRow(record, rows.get(record.id), held)
-        if (!row) {
-          skip(record)
-          continue
+        const mine = rows.get(record.id)
+        let row: Row | undefined
+        if (isStub(record)) {
+          // With no row here there's nothing to mark: neither applied nor
+          // skipped.
+          if (!mine) continue
+          row = stubbedRow(record, mine)
+        } else {
+          row = winningRow(record, mine, held)
+          if (!row) {
+            skip(record)
+            continue
+          }
         }
         rows.set(record.id, row)
         writes.set(record.id, row)
@@ -244,6 +268,21 @@ export function applyRecords(
     }
     return result
   })
+}
+
+/**
+ * The local row once the server has purged its record: deleted (keeping the
+ * time it was deleted here, if it was) and purged, with its other fields kept
+ * on this device. It's written clean and waits for no transfer. A photo's
+ * bytes stay.
+ */
+function stubbedRow(record: SyncRecord, mine: Row): Row {
+  const purgedAt = record.data.purgedAt as string
+  const row: Row = { ...mine, deletedAt: mine.deletedAt ?? purgedAt, purgedAt }
+  delete row.dirty
+  delete row.needsUpload
+  delete row.needsDownload
+  return row
 }
 
 /**
@@ -330,6 +369,19 @@ export function mergeByName(
 /** The ISO time 1 ms after `time`, a valid change time. */
 export const justAfter = (time: string) =>
   new Date(Date.parse(time) + 1).toISOString()
+
+/**
+ * The time to date a change to a row: now, or just after the row's last
+ * change if the clock that made it is ahead of ours, so the change wins over
+ * the copy it changes.
+ */
+export function changeTime(
+  row: { updatedAt?: string; deletedAt?: string },
+  now: string,
+): string {
+  const after = justAfter(changedAt(row))
+  return after > now ? after : now
+}
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto

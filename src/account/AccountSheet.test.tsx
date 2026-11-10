@@ -468,3 +468,16 @@ describe('photos and changes waiting', () => {
     ).not.toBeInTheDocument()
   })
 })
+
+test('signed in shows Recently deleted', () => {
+  useAccount.setState({ status: 'signed-in', email: 'carol@example.com' })
+  render(<AccountSheet onClose={() => {}} />)
+  expect(screen.getByRole('button', { name: 'Recently deleted' })).toBeVisible()
+})
+
+test("signed out doesn't show Recently deleted", () => {
+  render(<AccountSheet onClose={() => {}} />)
+  expect(
+    screen.queryByRole('button', { name: 'Recently deleted' }),
+  ).not.toBeInTheDocument()
+})

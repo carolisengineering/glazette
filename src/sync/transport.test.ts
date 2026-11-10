@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { SyncRecord } from '../../shared/syncProtocol'
 import { SyncStopped } from './engine'
-import { fetchTransport, SYNC_TIMEOUT_MS, timedFetch } from './transport'
+import {
+  fetchDeleted,
+  fetchTransport,
+  SYNC_TIMEOUT_MS,
+  timedFetch,
+} from './transport'
 
 function stub(status: number, body?: unknown) {
   const fn = vi
@@ -160,4 +165,23 @@ test("a record it can't use is passed on, for the engine to skip", async () => {
   const odd = { kind: 'kiln', id: 'k1' }
   stub(200, { records: [odd, record], cursor: 2, more: true })
   expect((await fetchTransport.pull(0)).records).toEqual([odd, record])
+})
+
+test("fetchDeleted maps the server's answers", async () => {
+  const items = [
+    { kind: 'piece', id: 'p1', heardAt: '2026-01-01T00:00:00.000Z' },
+  ]
+  const fn = stub(200, { items })
+  expect(await fetchDeleted()).toEqual(items)
+  expect(fn.mock.calls[0]?.[0]).toBe('/api/sync/deleted')
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+  expect(await fetchDeleted()).toBe('offline')
+  stub(401, { code: 'NO_SESSION' })
+  expect(await fetchDeleted()).toBe('signed-out')
+  stub(500)
+  expect(await fetchDeleted()).toBe('error')
+  for (const body of ['not json', 'null', {}, { items: 'x' }]) {
+    stub(200, body)
+    expect(await fetchDeleted()).toBe('error')
+  }
 })

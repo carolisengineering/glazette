@@ -132,6 +132,38 @@ test('markAllDirty marks every row without changing its time', async () => {
   expect(await db.pieces.get('p1')).toMatchObject({ dirty: 1, updatedAt: T1 })
 })
 
+test("markAllDirty leaves purged rows out, and a purged photo doesn't wait to upload", async () => {
+  await quietly(db, async () => {
+    await db.pieces.add(piece('stub', { deletedAt: T2, purgedAt: T2 }))
+    await db.entries.add({
+      id: 'e1',
+      pieceId: 'stub',
+      stage: 'thrown',
+      deletedAt: T2,
+      purgedAt: T2,
+    })
+    await db.photos.add({
+      id: 'ph1',
+      hash: 'a'.repeat(64),
+      width: 1,
+      height: 1,
+      takenAt: T1,
+      deletedAt: T2,
+      purgedAt: T2,
+      blob: new Blob(['full']),
+    })
+    await db.pieces.add(piece('live'))
+  })
+  await markAllDirty(db)
+  expect((await db.pieces.get('stub'))?.dirty).toBeUndefined()
+  expect((await db.entries.get('e1'))?.dirty).toBeUndefined()
+  const stub = await db.photos.get('ph1')
+  expect(stub?.dirty).toBeUndefined()
+  expect(stub?.needsUpload).toBeUndefined()
+  expect((await db.pieces.get('live'))?.dirty).toBe(1)
+  expect((await readDirty(db)).map((r) => r.id)).toEqual(['live'])
+})
+
 const HASH = 'a'.repeat(64)
 
 const photoRow = (id: string, extra: Partial<Photo> = {}): Photo => ({
@@ -465,6 +497,109 @@ test('applyRecords fixes a glaze color it cannot show', async () => {
     },
   ])
   expect((await db.glazes.get('g1'))?.color).toMatch(/^#[0-9a-f]{6}$/i)
+})
+
+describe('stubs', () => {
+  const PURGED = '2026-04-01T00:00:00.000Z'
+
+  /** What the server keeps of a purged record: its old change time, and only its id and times. */
+  const stub = (kind: SyncRecord['kind'], id: string): SyncRecord => ({
+    kind,
+    id,
+    changedAt: T1,
+    data: { id, deletedAt: PURGED, purgedAt: PURGED },
+  })
+
+  test('a stub marks the local row deleted and keeps its bytes', async () => {
+    await db.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    const held = await db.photoBytes.get(HASH)
+    await db.photos.add(
+      photoRow('ph1', { dirty: 1, needsUpload: 1, needsDownload: 1 }),
+    )
+    const result = await applyRecords(db, [stub('photo', 'ph1')])
+    expect(result).toEqual({ applied: 1, skipped: 0, skippedKeys: new Set() })
+    expect(await db.photoBytes.get(HASH)).toEqual(held)
+    const row = await db.photos.get('ph1')
+    expect(row).toMatchObject({
+      hash: HASH,
+      deletedAt: PURGED,
+      purgedAt: PURGED,
+    })
+    expect(row?.dirty).toBeUndefined()
+    expect(row?.needsUpload).toBeUndefined()
+    expect(row?.needsDownload).toBeUndefined()
+  })
+
+  test('a stub wins whatever its change time', async () => {
+    await db.pieces.add(piece('p1', { updatedAt: T3 }))
+    expect((await db.pieces.get('p1'))?.dirty).toBe(1)
+    await applyRecords(db, [stub('piece', 'p1')])
+    const row = await db.pieces.get('p1')
+    expect(row).toMatchObject({ deletedAt: PURGED, purgedAt: PURGED })
+    expect(row?.dirty).toBeUndefined()
+  })
+
+  test('a stub keeps the time a row was deleted here', async () => {
+    await db.pieces.add(piece('p1', { deletedAt: T2 }))
+    await applyRecords(db, [stub('piece', 'p1')])
+    expect(await db.pieces.get('p1')).toMatchObject({
+      deletedAt: T2,
+      purgedAt: PURGED,
+    })
+  })
+
+  test('a stub with no local row writes nothing', async () => {
+    const result = await applyRecords(db, [stub('photo', 'ph1')])
+    expect(result).toEqual({ applied: 0, skipped: 0, skippedKeys: new Set() })
+    expect(await db.photos.count()).toBe(0)
+  })
+
+  test("a stub keeps the row's other fields", async () => {
+    await db.pieces.add(piece('p1', { name: 'Bowl', notes: 'blue rim' }))
+    await applyRecords(db, [stub('piece', 'p1')])
+    expect(await db.pieces.get('p1')).toMatchObject({
+      name: 'Bowl',
+      notes: 'blue rim',
+      createdAt: T1,
+      updatedAt: T1,
+    })
+  })
+
+  test('a stubbed record passes the row checks', async () => {
+    await quietly(db, async () => {
+      await db.pieces.add(piece('p1'))
+      await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'thrown' })
+      await db.glazeApps.add({
+        id: 'l1',
+        entryId: 'e1',
+        pieceId: 'p1',
+        glazeId: 'g1',
+        order: 0,
+      })
+      await db.photos.add(photoRow('ph1'))
+    })
+    const result = await applyRecords(db, [
+      stub('piece', 'p1'),
+      stub('entry', 'e1'),
+      stub('glazeApp', 'l1'),
+      stub('photo', 'ph1'),
+    ])
+    expect(result).toEqual({ applied: 4, skipped: 0, skippedKeys: new Set() })
+    expect((await db.entries.get('e1'))?.purgedAt).toBe(PURGED)
+    expect((await db.glazeApps.get('l1'))?.purgedAt).toBe(PURGED)
+  })
+
+  test("a glaze, which never expires, isn't treated as a stub", async () => {
+    const result = await applyRecords(db, [
+      {
+        kind: 'glaze',
+        id: 'g1',
+        changedAt: T1,
+        data: { id: 'g1', deletedAt: PURGED, purgedAt: PURGED },
+      },
+    ])
+    expect(result.skippedKeys).toEqual(new Set(['glaze/g1']))
+  })
 })
 
 test('clearDirty keeps a row that changed after it was read dirty', async () => {

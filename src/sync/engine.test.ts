@@ -7,6 +7,7 @@ import {
   type SyncRecord,
 } from '../../shared/syncProtocol'
 import { GlazetteDB } from '../db/db'
+import { putBackPhoto, putBackPiece } from '../db/putBack'
 import type { Piece } from '../db/types'
 import { SyncStopped, syncOnce, type Transport } from './engine'
 import { createTestServer } from './testServer'
@@ -824,5 +825,268 @@ describe('rows changed before this update keep their changes at first sync', () 
     expect(await a.entries.get('e1')).toMatchObject(edited)
     expect(await b.entries.get('e1')).toMatchObject(edited)
     expect(onServer('entry', 'e1')?.data).toMatchObject(edited)
+  })
+})
+
+describe('recently deleted', () => {
+  const HASH = 'a'.repeat(64)
+  const photoRow = (id: string) => ({
+    id,
+    hash: HASH,
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+
+  /** A holds piece p1 with photo ph1 on step e1, and both devices have synced. */
+  async function sharedPhoto() {
+    await a.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    await a.pieces.add(piece('p1'))
+    await a.photos.add({ ...photoRow('ph1'), needsUpload: 1 })
+    await a.entries.add({
+      id: 'e1',
+      pieceId: 'p1',
+      stage: 'trimmed',
+      photoId: 'ph1',
+    })
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+  }
+
+  test("an old device can't bring back a purged piece", async () => {
+    await a.pieces.add(piece('p1', { name: 'Bowl' }))
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    // B stops syncing. A deletes the piece, and the server purges it.
+    await a.pieces.update('p1', { deletedAt: T2, updatedAt: T2 })
+    await syncOnce(a, server, ME)
+    expect(server.clockOf('piece', 'p1')).toBeDefined()
+    server.purge('piece', 'p1')
+    await b.pieces.update('p1', { name: 'Edited', updatedAt: T3 })
+
+    expect(await syncOnce(b, server, ME)).toBe('done')
+
+    const row = await b.pieces.get('p1')
+    expect(row?.deletedAt).toBeTruthy()
+    expect(row?.purgedAt).toBeTruthy()
+    expect(row?.dirty).toBeUndefined()
+    const stub = onServer('piece', 'p1')
+    expect(stub?.data).toEqual({
+      id: 'p1',
+      deletedAt: stub?.data.purgedAt,
+      purgedAt: expect.any(String),
+    })
+    expect(server.clockOf('piece', 'p1')).toBeUndefined()
+    // Even a later copy pushed straight to the server is refused.
+    const { rejected } = await server.push([
+      {
+        kind: 'piece',
+        id: 'p1',
+        changedAt: '2026-12-01T00:00:00.000Z',
+        data: piece('p1', { updatedAt: '2026-12-01T00:00:00.000Z' }) as never,
+      },
+    ])
+    expect(rejected).toEqual([stub])
+    expect(onServer('piece', 'p1')).toEqual(stub)
+  })
+
+  test("a full sync can't relist a purged record", async () => {
+    await a.pieces.add(piece('p1'))
+    await a.pieces.update('p1', { deletedAt: T2, updatedAt: T2 })
+    await syncOnce(a, server, ME)
+    server.purge('piece', 'p1')
+    const stub = onServer('piece', 'p1')
+    await a.syncState.clear()
+
+    expect(await syncOnce(a, server, ME)).toBe('done')
+
+    expect(onServer('piece', 'p1')).toEqual(stub)
+    expect((await a.pieces.get('p1'))?.purgedAt).toBe(stub?.data.purgedAt)
+    expect(await dirtyCount(a)).toBe(0)
+  })
+
+  test('a stub stops the upload of a photo waiting to go', async () => {
+    // The server holds ph1 deleted; this device has it, waiting to upload.
+    await server.push([
+      {
+        kind: 'photo',
+        id: 'ph1',
+        changedAt: T1,
+        data: { ...photoRow('ph1'), updatedAt: T1, deletedAt: T1 },
+      },
+    ])
+    await a.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    await a.photos.add({ ...photoRow('ph1'), updatedAt: T2, needsUpload: 1 })
+    // The daily job purges it between this device's pull and its push.
+    const purging: Transport = {
+      pull: (since) => server.pull(since),
+      push: (records) => {
+        server.purge('photo', 'ph1')
+        return server.push(records)
+      },
+    }
+
+    expect(await syncOnce(a, purging, ME)).toBe('done')
+
+    const row = await a.photos.get('ph1')
+    expect(row?.needsUpload).toBeUndefined()
+    expect(row?.purgedAt).toBeTruthy()
+    expect(row?.deletedAt).toBeTruthy()
+    expect(row?.dirty).toBeUndefined()
+    expect(await a.photoBytes.get(HASH)).toBeDefined()
+  })
+
+  test("a deleted step's photo is deleted on both devices", async () => {
+    await sharedPhoto()
+    // As the app deletes a step: the photo row isn't touched.
+    await a.entries.update('e1', { deletedAt: new Date().toISOString() })
+
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(b, server, ME)
+
+    const place = { lastPieceId: 'p1', lastEntryId: 'e1', lastStage: 'trimmed' }
+    for (const db of [a, b]) {
+      const row = await db.photos.get('ph1')
+      expect(row?.deletedAt).toBeTruthy()
+      expect(row).toMatchObject(place)
+    }
+    expect((await b.photos.get('ph1'))?.dirty).toBeUndefined()
+    expect(await dirtyCount(b)).toBe(0)
+    expect(onServer('photo', 'ph1')?.data).toMatchObject(place)
+    expect(server.clockOf('photo', 'ph1')).toBeDefined()
+    // A still holds the image.
+    expect(await a.photoBytes.get(HASH)).toBeDefined()
+  })
+
+  test.each([['A, B, A, B'], ['B, A, B, A']])(
+    "a photo in use on one device isn't lost to a delete on the other (%s)",
+    async (order) => {
+      await sharedPhoto()
+      // Offline, A deletes the step and B adds another with the same photo.
+      await a.entries.update('e1', { deletedAt: new Date().toISOString() })
+      await b.entries.add({
+        id: 'e2',
+        pieceId: 'p1',
+        stage: 'bisqued',
+        photoId: 'ph1',
+      })
+
+      for (const device of order.split(', ')) {
+        expect(await syncOnce(device === 'A' ? a : b, server, ME)).toBe('done')
+      }
+
+      for (const db of [a, b]) {
+        expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+        const e2 = await db.entries.get('e2')
+        expect(e2?.photoId).toBe('ph1')
+        expect(e2?.deletedAt).toBeUndefined()
+        expect((await db.entries.get('e1'))?.deletedAt).toBeTruthy()
+      }
+      expect(onServer('photo', 'ph1')?.data.deletedAt).toBeUndefined()
+      expect(server.clockOf('photo', 'ph1')).toBeUndefined()
+      // Nothing is still waiting to go.
+      expect(await dirtyCount(a)).toBe(0)
+      expect(await dirtyCount(b)).toBe(0)
+    },
+  )
+
+  test('a restored photo the server purged comes back as a new photo', async () => {
+    // A deleted ph1 long ago, and the server has purged it.
+    await a.pieces.add(piece('p1'))
+    await a.photos.add({ ...photoRow('ph1'), deletedAt: T2 })
+    await syncOnce(a, server, ME)
+    server.purge('photo', 'ph1')
+    // B has synced since, so it never held ph1.
+    await syncOnce(b, server, ME)
+    expect(await b.photos.get('ph1')).toBeUndefined()
+    // B restores a backup from before the delete: a step showing ph1, with
+    // its image.
+    await b.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    await b.photos.add({ ...photoRow('ph1'), updatedAt: T1, needsUpload: 1 })
+    await b.entries.add({
+      id: 'e1',
+      pieceId: 'p1',
+      stage: 'thrown',
+      photoId: 'ph1',
+      updatedAt: T1,
+    })
+
+    // The push is refused and the stub comes back; the next sync re-homes it.
+    await syncOnce(b, server, ME)
+    expect((await b.photos.get('ph1'))?.purgedAt).toBeTruthy()
+    await syncOnce(b, server, ME)
+
+    const photoId = (await b.entries.get('e1'))?.photoId as string
+    expect(photoId).not.toBe('ph1')
+    const row = await b.photos.get(photoId)
+    expect(row).toMatchObject({ hash: HASH, needsUpload: 1 })
+    expect(row?.deletedAt).toBeUndefined()
+    expect(onServer('photo', photoId)?.data).toMatchObject({ hash: HASH })
+    expect(onServer('photo', photoId)?.data.deletedAt).toBeUndefined()
+    expect(onServer('entry', 'e1')?.data.photoId).toBe(photoId)
+    expect(onServer('photo', 'ph1')?.data.purgedAt).toBeTruthy()
+    expect(await dirtyCount(b)).toBe(0)
+  })
+
+  test('a piece deleted on one device and put back on the other returns on both', async () => {
+    await sharedPhoto()
+    await a.glazeApps.add({
+      id: 'l1',
+      entryId: 'e1',
+      pieceId: 'p1',
+      glazeId: 'g1',
+      order: 0,
+    })
+    await a.pieces.update('p1', { deletedAt: new Date().toISOString() })
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    expect((await b.pieces.get('p1'))?.deletedAt).toBeTruthy()
+
+    await putBackPiece('p1', b)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    for (const db of [a, b]) {
+      expect((await db.pieces.get('p1'))?.deletedAt).toBeUndefined()
+      expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+      expect((await db.entries.get('e1'))?.deletedAt).toBeUndefined()
+      expect((await db.glazeApps.get('l1'))?.deletedAt).toBeUndefined()
+      expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+      expect(await dirtyCount(db)).toBe(0)
+    }
+    expect(onServer('piece', 'p1')?.data.deletedAt).toBeUndefined()
+    expect(server.clockOf('piece', 'p1')).toBeUndefined()
+  })
+
+  test('a photo put back on the other device returns on both', async () => {
+    await sharedPhoto()
+    await a.entries.update('e1', { deletedAt: new Date().toISOString() })
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    expect((await b.photos.get('ph1'))?.deletedAt).toBeTruthy()
+    // The step was deleted, so the photo goes on a new step.
+
+    const back = await putBackPhoto('ph1', b)
+    expect(back?.id).toBe('p1')
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    for (const db of [a, b]) {
+      const row = await db.photos.get('ph1')
+      expect(row?.deletedAt).toBeUndefined()
+      expect(row?.lastPieceId).toBeUndefined()
+      const shown = await db.entries
+        .filter((e) => e.photoId === 'ph1' && !e.deletedAt)
+        .toArray()
+      expect(shown).toHaveLength(1)
+      expect(shown[0]).toMatchObject({ pieceId: 'p1', stage: 'trimmed' })
+      expect(await dirtyCount(db)).toBe(0)
+    }
+    expect(await a.photoBytes.get(HASH)).toBeDefined()
+    expect((await a.photos.get('ph1'))?.needsDownload).toBeUndefined()
   })
 })

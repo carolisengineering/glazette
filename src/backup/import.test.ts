@@ -232,6 +232,30 @@ test('a reused photo that was deleted here comes back for a live incoming step',
   expect(result).toMatchObject({ added: 1, updated: 1 })
 })
 
+test('a reused photo that comes back forgets where it was', async () => {
+  await db.photos.add({
+    ...photoRow('local-ph', H1, '2026-11-03'),
+    lastPieceId: 'p0',
+    lastEntryId: 'e0',
+    lastStage: 'glazed',
+  })
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', H1)],
+      }),
+      [H1],
+    ),
+  )
+
+  const row = await db.photos.get('local-ph')
+  expect(row?.deletedAt).toBeUndefined()
+  expect(row?.lastPieceId).toBeUndefined()
+  expect(row?.lastEntryId).toBeUndefined()
+  expect(row?.lastStage).toBeUndefined()
+})
+
 test('an incoming photo whose id is taken by a different photo gets a new id', async () => {
   await db.photos.add(photoRow('ph1', 'other-hash'))
   const zip = zipOf(
@@ -617,6 +641,31 @@ test("a local merged duplicate isn't matched", async () => {
   )
 
   expect((await db.entries.get('e1'))?.photoId).toBe('live')
+})
+
+test("a local purged photo isn't matched", async () => {
+  await db.photos.add({
+    ...photoRow('ph1', H1, '2026-12-01T09:00:00.000Z'),
+    purgedAt: '2026-12-01T09:00:00.000Z',
+  })
+  const before = await db.photos.get('ph1')
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', H1)],
+      }),
+      [H1],
+    ),
+  )
+
+  expect(await db.photos.get('ph1')).toEqual(before)
+  const photoId = (await db.entries.get('e1'))?.photoId as string
+  expect(photoId).not.toBe('ph1')
+  const added = await db.photos.get(photoId)
+  expect(added).toMatchObject({ hash: H1, needsUpload: 1 })
+  expect(added?.deletedAt).toBeUndefined()
+  expect(added?.purgedAt).toBeUndefined()
 })
 
 test('a bad glaze color becomes the default color', async () => {
