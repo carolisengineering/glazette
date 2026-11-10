@@ -663,3 +663,115 @@ test('the date editor writes only complete dates, not every keystroke', async ()
   await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
   update.mockRestore()
 })
+
+/** firedPiece with a bisque step and photo before the glaze. */
+async function journeyPiece() {
+  const id = await firedPiece()
+  await addStageEntry({
+    pieceId: id,
+    stage: 'bisqued',
+    photo: photo('bisqued'),
+    date: '2026-10-15T12:00:00Z',
+  })
+  return id
+}
+
+/** The step at a stage that has a photo; adding a later step fills in bare ones before it. */
+const stepWithPhoto = (pieceId: string, stage: string) =>
+  db.entries
+    .where('pieceId')
+    .equals(pieceId)
+    .filter((e) => e.stage === stage && e.photoId !== undefined)
+    .first()
+
+const photoOfStage = async (pieceId: string, stage: string) =>
+  (await stepWithPhoto(pieceId, stage))?.photoId
+
+const stepButton = (label: string) =>
+  screen.getByRole('button', { name: new RegExp(`^${label}`) })
+
+test('tapping an earlier step shows its photo and stage at the top, and tapping the latest step goes back', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  const hero = () => screen.getByRole('img', { name: 'Morning Mug' })
+  await waitFor(async () =>
+    expect(hero()).toHaveAttribute(
+      'data-photo-id',
+      await photoOfStage(id, 'fired'),
+    ),
+  )
+  expect(stepButton('Fired')).toHaveAttribute('aria-pressed', 'false')
+
+  await userEvent.click(stepButton('Bisqued'))
+  expect(hero()).toHaveAttribute(
+    'data-photo-id',
+    await photoOfStage(id, 'bisqued'),
+  )
+  expect(screen.getByText(/^Bisqued · /)).toBeVisible()
+  expect(screen.queryByText(/^Fired · /)).not.toBeInTheDocument()
+  expect(stepButton('Bisqued')).toHaveAttribute('aria-pressed', 'true')
+  expect(
+    screen.queryByRole('button', { name: 'Before firing' }),
+  ).not.toBeInTheDocument()
+
+  await userEvent.click(stepButton('Fired'))
+  expect(hero()).toHaveAttribute(
+    'data-photo-id',
+    await photoOfStage(id, 'fired'),
+  )
+  expect(screen.getByText(/^Fired · /)).toBeVisible()
+  expect(stepButton('Bisqued')).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('button', { name: 'Before firing' })).toBeVisible()
+})
+
+test('tapping a step scrolls back up to the photo', async () => {
+  const id = await journeyPiece()
+  const scroll = vi.spyOn(window, 'scrollTo')
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  scroll.mockClear()
+  await userEvent.click(stepButton('Glazed'))
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }))
+})
+
+test('the latest photo comes back when the shown step is deleted', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  await userEvent.click(stepButton('Bisqued'))
+  const bisque = await stepWithPhoto(id, 'bisqued')
+  await act(() => softDelete('entries', bisque?.id ?? ''))
+  await waitFor(async () =>
+    expect(screen.getByRole('img', { name: 'Morning Mug' })).toHaveAttribute(
+      'data-photo-id',
+      await photoOfStage(id, 'fired'),
+    ),
+  )
+  expect(screen.getByText(/^Fired · /)).toBeVisible()
+})
+
+test('only steps with a photo can be tapped to show it', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  const showable = screen
+    .getAllByRole('button', { pressed: false })
+    .map((b) => b.textContent?.match(/^[A-Z][a-z]+/)?.[0])
+  // The photo toggle, then the steps with photos. Thrown, Trimmed and the bare Bisqued step have none.
+  expect(showable).toEqual(['Before', 'Fired', 'Glazed', 'Bisqued'])
+})
+
+test('tapping the latest step shows the latest photo even when the toggle was on before firing', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  await userEvent.click(screen.getByRole('button', { name: 'Before firing' }))
+  await userEvent.click(stepButton('Fired'))
+  expect(screen.getByRole('img', { name: 'Morning Mug' })).toHaveAttribute(
+    'data-photo-id',
+    await photoOfStage(id, 'fired'),
+  )
+  expect(
+    screen.getByRole('button', { name: 'Out of the kiln' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+})

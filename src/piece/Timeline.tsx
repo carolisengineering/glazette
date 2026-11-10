@@ -14,6 +14,10 @@ interface Props {
   onDelete: (entry: StageEntry) => void
   /** Saves a step's date (undefined clears it). Failures are the caller's to report. */
   onSetDate: (entry: StageEntry, date: string | undefined) => Promise<unknown>
+  /** The step whose photo is at the top instead of the latest one, if any. */
+  shownId?: string
+  /** A step with a photo was tapped. */
+  onShow: (entry: StageEntry) => void
 }
 
 function TrashButton({
@@ -97,38 +101,57 @@ function DateEditor({
   )
 }
 
-/** The piece's journey, one row per entry. Steps without a photo are slim rows with an editable date. */
-export function Timeline({ entries, onDelete, onSetDate }: Props) {
+/**
+ * The piece's journey, one row per entry. Tapping a step with a photo shows it
+ * at the top; steps without a photo are slim rows with an editable date.
+ */
+export function Timeline({
+  entries,
+  onDelete,
+  onSetDate,
+  shownId,
+  onShow,
+}: Props) {
   const [editingId, setEditingId] = useState<string>()
   if (entries.length === 0) return null
   return (
-    <ul className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-4 py-2">
+    <ul className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-2 py-2">
       {newestFirst(entries).map((e) =>
         e.photoId ? (
-          <li key={e.id} className="flex items-center gap-3.5 py-2.5">
-            <PhotoImg
-              photoId={e.photoId}
-              thumb
-              alt=""
-              className="size-11 flex-none rounded-xl"
-            />
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[16px] font-semibold">
-                {STAGE_LABEL[e.stage]}
-              </span>
-              {e.note ? (
-                <span className="truncate text-[14px] text-muted">
-                  {e.note}
+          <li
+            key={e.id}
+            className={`flex items-center gap-3 rounded-2xl pr-2 ${e.id === shownId ? 'bg-accent-tint' : ''}`}
+          >
+            <button
+              type="button"
+              aria-pressed={e.id === shownId}
+              onClick={() => onShow(e)}
+              className="flex min-w-0 flex-1 items-center gap-3.5 rounded-2xl py-2.5 pl-2 text-left"
+            >
+              <PhotoImg
+                photoId={e.photoId}
+                thumb
+                alt=""
+                className="size-11 flex-none rounded-xl"
+              />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[16px] font-semibold">
+                  {STAGE_LABEL[e.stage]}
                 </span>
-              ) : null}
-            </div>
-            <span className="flex-none text-[13px] text-muted">
-              {e.date ? shortDate(e.date) : null}
-            </span>
+                {e.note ? (
+                  <span className="truncate text-[14px] text-muted">
+                    {e.note}
+                  </span>
+                ) : null}
+              </span>
+              <span className="flex-none text-[13px] text-muted">
+                {e.date ? shortDate(e.date) : null}
+              </span>
+            </button>
             <TrashButton entry={e} onDelete={onDelete} />
           </li>
         ) : (
-          <li key={e.id} className="flex flex-col py-0.5">
+          <li key={e.id} className="flex flex-col px-2 py-0.5">
             <div className="flex items-center gap-3.5">
               <span
                 aria-hidden="true"
