@@ -4,9 +4,13 @@ import { fromDateInput, shortDate, toDateInput } from '../db/dates'
 import { compareEntries, STAGE_LABEL } from '../db/stage'
 import type { StageEntry } from '../db/types'
 
-/** Ranked like the header's current stage: later stage first, then newest date. */
+/**
+ * Ranked like the header's current stage: later stage first, then newest date.
+ * Ties go the way latestEntry breaks them, later in the list first, so the top
+ * row is always the step the header and the top photo call the latest.
+ */
 function newestFirst(entries: StageEntry[]): StageEntry[] {
-  return [...entries].sort((a, b) => compareEntries(b, a))
+  return [...entries].reverse().sort((a, b) => compareEntries(b, a))
 }
 
 interface Props {
@@ -14,7 +18,7 @@ interface Props {
   onDelete: (entry: StageEntry) => void
   /** Saves a step's date (undefined clears it). Failures are the caller's to report. */
   onSetDate: (entry: StageEntry, date: string | undefined) => Promise<unknown>
-  /** The step whose photo is at the top instead of the latest one, if any. */
+  /** The step whose photo is at the top, marked as the current one. */
   shownId?: string
   /** A step with a photo was tapped. */
   onShow: (entry: StageEntry) => void
@@ -115,27 +119,26 @@ export function Timeline({
   const [editingId, setEditingId] = useState<string>()
   if (entries.length === 0) return null
   return (
-    <ul className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-2 py-2">
+    <ul className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-4 py-2">
       {newestFirst(entries).map((e) =>
         e.photoId ? (
-          <li
-            key={e.id}
-            className={`flex items-center gap-3 rounded-2xl pr-2 ${e.id === shownId ? 'bg-accent-tint' : ''}`}
-          >
+          <li key={e.id} className="flex items-center gap-3.5">
             <button
               type="button"
-              aria-pressed={e.id === shownId}
+              aria-current={e.id === shownId ? 'true' : undefined}
               onClick={() => onShow(e)}
-              className="flex min-w-0 flex-1 items-center gap-3.5 rounded-2xl py-2.5 pl-2 text-left"
+              className="flex min-w-0 flex-1 items-center gap-3.5 rounded-xl py-2.5 text-left"
             >
               <PhotoImg
                 photoId={e.photoId}
                 thumb
                 alt=""
-                className="size-11 flex-none rounded-xl"
+                className={`size-11 flex-none rounded-xl ${e.id === shownId ? 'ring-2 ring-accent ring-offset-2' : ''}`}
               />
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="text-[16px] font-semibold">
+                <span
+                  className={`text-[16px] font-semibold ${e.id === shownId ? 'text-accent' : ''}`}
+                >
                   {STAGE_LABEL[e.stage]}
                 </span>
                 {e.note ? (
@@ -151,7 +154,7 @@ export function Timeline({
             <TrashButton entry={e} onDelete={onDelete} />
           </li>
         ) : (
-          <li key={e.id} className="flex flex-col px-2 py-0.5">
+          <li key={e.id} className="flex flex-col py-0.5">
             <div className="flex items-center gap-3.5">
               <span
                 aria-hidden="true"

@@ -61,27 +61,30 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const compare = afterPhoto && beforePhoto
   // A tapped earlier step takes over the top photo and the stage line until
   // the latest step is tapped, the step goes away, or the piece is left.
-  const [shownId, setShownId] = useState<string>()
+  const [pickedId, setPickedId] = useState<string>()
   const latestWithPhoto = latestEntry(withPhoto)
-  const shown = withPhoto.find(
-    (e) => e.id === shownId && e.id !== latestWithPhoto?.id,
+  const picked = withPhoto.find(
+    (e) => e.id === pickedId && e.id !== latestWithPhoto?.id,
   )
-  const heroPhotoId = shown
-    ? shown.photoId
-    : compare
-      ? (side === 'fired' ? afterPhoto : beforePhoto).photoId
-      : view.latestPhotoId
+  // Forget a tap whose step is gone or is now the latest, so it can't come back.
+  const pickGone = pickedId !== undefined && !picked
+  useEffect(() => {
+    if (pickGone) setPickedId(undefined)
+  }, [pickGone])
+  const heroEntry =
+    picked ??
+    (compare ? (side === 'fired' ? afterPhoto : beforePhoto) : latestWithPhoto)
   const latest = latestEntry(entries)
-  const headerEntry = shown ?? latest
+  const headerEntry = picked ?? latest
   const next = nextStage(stage)
 
   const showStep = (entry: StageEntry) => {
     if (entry.id === latestWithPhoto?.id) {
       // Back to the latest photo, even if the toggle was on before firing.
-      setShownId(undefined)
+      setPickedId(undefined)
       setSide('fired')
     } else {
-      setShownId(entry.id)
+      setPickedId(entry.id)
     }
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)')
     window.scrollTo({ top: 0, behavior: still?.matches ? 'auto' : 'smooth' })
@@ -149,17 +152,20 @@ function PieceBoard({ view }: { view: PieceDetail }) {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col text-ink">
-      <Hero photoId={heroPhotoId} alt={name}>
-        {compare && !shown ? (
+      <Hero
+        photoId={heroEntry?.photoId}
+        alt={picked ? `${name}, ${STAGE_LABEL[picked.stage]}` : name}
+      >
+        {compare && !picked ? (
           <BeforeAfter value={side} onChange={setSide} />
         ) : null}
       </Hero>
 
       <div className="flex flex-col gap-6 px-5 pt-6 pb-12">
         <div className="flex flex-col gap-1">
-          {stage && headerEntry ? (
+          {headerEntry ? (
             <span className="text-[13px] font-semibold tracking-[0.12em] text-accent uppercase">
-              {STAGE_LABEL[shown ? shown.stage : stage]}
+              {STAGE_LABEL[headerEntry.stage]}
               {headerEntry.date ? ` · ${shortDate(headerEntry.date)}` : null}
             </span>
           ) : null}
@@ -207,7 +213,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
               onSetDate={(entry, date) =>
                 attempt(() => setEntryDate(entry.id, date))
               }
-              shownId={shown?.id}
+              shownId={heroEntry?.id}
               onShow={showStep}
             />
           </section>

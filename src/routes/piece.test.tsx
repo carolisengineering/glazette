@@ -676,12 +676,12 @@ async function journeyPiece() {
   return id
 }
 
-/** The step at a stage that has a photo; adding a later step fills in bare ones before it. */
+/** The live step at a stage that has a photo; adding a later step fills in bare ones before it. */
 const stepWithPhoto = (pieceId: string, stage: string) =>
   db.entries
     .where('pieceId')
     .equals(pieceId)
-    .filter((e) => e.stage === stage && e.photoId !== undefined)
+    .filter((e) => e.stage === stage && !!e.photoId && !e.deletedAt)
     .first()
 
 const photoOfStage = async (pieceId: string, stage: string) =>
@@ -690,26 +690,42 @@ const photoOfStage = async (pieceId: string, stage: string) =>
 const stepButton = (label: string) =>
   screen.getByRole('button', { name: new RegExp(`^${label}`) })
 
+const hero = () => screen.getByRole('img', { name: /^Morning Mug/ })
+
+/** The journey's buttons that show a step's photo, top to bottom. */
+const stepButtons = () => {
+  const journey = screen
+    .getByRole('heading', { name: 'Journey' })
+    .closest('section') as HTMLElement
+  return within(journey)
+    .getAllByRole('button')
+    .filter(
+      (b) => !/^(Delete |Add .* date$|\w+ date, )/.test(b.ariaLabel ?? ''),
+    )
+}
+
 test('tapping an earlier step shows its photo and stage at the top, and tapping the latest step goes back', async () => {
   const id = await journeyPiece()
   renderRoute(`/piece/${id}`)
-  const hero = () => screen.getByRole('img', { name: 'Morning Mug' })
   await waitFor(async () =>
     expect(hero()).toHaveAttribute(
       'data-photo-id',
       await photoOfStage(id, 'fired'),
     ),
   )
-  expect(stepButton('Fired')).toHaveAttribute('aria-pressed', 'false')
+  expect(stepButton('Fired')).toHaveAttribute('aria-current', 'true')
+  expect(stepButton('Bisqued')).not.toHaveAttribute('aria-current')
 
   await userEvent.click(stepButton('Bisqued'))
   expect(hero()).toHaveAttribute(
     'data-photo-id',
     await photoOfStage(id, 'bisqued'),
   )
+  expect(hero()).toHaveAccessibleName('Morning Mug, Bisqued')
   expect(screen.getByText(/^Bisqued · /)).toBeVisible()
   expect(screen.queryByText(/^Fired · /)).not.toBeInTheDocument()
-  expect(stepButton('Bisqued')).toHaveAttribute('aria-pressed', 'true')
+  expect(stepButton('Bisqued')).toHaveAttribute('aria-current', 'true')
+  expect(stepButton('Fired')).not.toHaveAttribute('aria-current')
   expect(
     screen.queryByRole('button', { name: 'Before firing' }),
   ).not.toBeInTheDocument()
@@ -719,8 +735,10 @@ test('tapping an earlier step shows its photo and stage at the top, and tapping 
     'data-photo-id',
     await photoOfStage(id, 'fired'),
   )
+  expect(hero()).toHaveAccessibleName('Morning Mug')
   expect(screen.getByText(/^Fired · /)).toBeVisible()
-  expect(stepButton('Bisqued')).toHaveAttribute('aria-pressed', 'false')
+  expect(stepButton('Fired')).toHaveAttribute('aria-current', 'true')
+  expect(stepButton('Bisqued')).not.toHaveAttribute('aria-current')
   expect(screen.getByRole('button', { name: 'Before firing' })).toBeVisible()
 })
 
@@ -742,7 +760,7 @@ test('the latest photo comes back when the shown step is deleted', async () => {
   const bisque = await stepWithPhoto(id, 'bisqued')
   await act(() => softDelete('entries', bisque?.id ?? ''))
   await waitFor(async () =>
-    expect(screen.getByRole('img', { name: 'Morning Mug' })).toHaveAttribute(
+    expect(hero()).toHaveAttribute(
       'data-photo-id',
       await photoOfStage(id, 'fired'),
     ),
@@ -750,15 +768,61 @@ test('the latest photo comes back when the shown step is deleted', async () => {
   expect(screen.getByText(/^Fired · /)).toBeVisible()
 })
 
+test('a tap is forgotten once its step becomes the latest, so a new latest step shows', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  await userEvent.click(stepButton('Glazed'))
+  const fired = await stepWithPhoto(id, 'fired')
+  await act(() => softDelete('entries', fired?.id ?? ''))
+  await screen.findByText(/^Glazed · /)
+  await act(() =>
+    addStageEntry({
+      pieceId: id,
+      stage: 'fired',
+      photo: photo('refired'),
+      date: '2026-11-01T12:00:00Z',
+    }),
+  )
+  await waitFor(async () =>
+    expect(hero()).toHaveAttribute(
+      'data-photo-id',
+      await photoOfStage(id, 'fired'),
+    ),
+  )
+  expect(screen.getByText(/^Fired · /)).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Before firing' })).toBeVisible()
+})
+
 test('only steps with a photo can be tapped to show it', async () => {
   const id = await journeyPiece()
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Morning Mug' })
-  const showable = screen
-    .getAllByRole('button', { pressed: false })
-    .map((b) => b.textContent?.match(/^[A-Z][a-z]+/)?.[0])
-  // The photo toggle, then the steps with photos. Thrown, Trimmed and the bare Bisqued step have none.
-  expect(showable).toEqual(['Before', 'Fired', 'Glazed', 'Bisqued'])
+  // Thrown, Trimmed and the bare Bisqued step have no photo, only date and delete buttons.
+  expect(
+    stepButtons().map((b) => b.textContent?.match(/^[A-Z][a-z]+/)?.[0]),
+  ).toEqual(['Fired', 'Glazed', 'Bisqued'])
+})
+
+test('when two steps tie, the top row is the one whose photo is at the top', async () => {
+  const id = await createPiece({ name: 'Morning Mug' })
+  for (const tag of ['a', 'b', 'c']) {
+    await addStageEntry({
+      pieceId: id,
+      stage: 'bisqued',
+      photo: photo(tag),
+      date: '2026-10-15T12:00:00Z',
+    })
+  }
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Morning Mug' })
+  await waitFor(() => expect(stepButtons()).toHaveLength(3))
+  const [top] = stepButtons()
+  expect(top).toHaveAttribute('aria-current', 'true')
+  expect(hero()).toHaveAttribute(
+    'data-photo-id',
+    top.querySelector('img')?.getAttribute('data-photo-id'),
+  )
 })
 
 test('tapping the latest step shows the latest photo even when the toggle was on before firing', async () => {
@@ -766,8 +830,9 @@ test('tapping the latest step shows the latest photo even when the toggle was on
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Morning Mug' })
   await userEvent.click(screen.getByRole('button', { name: 'Before firing' }))
+  expect(stepButton('Glazed')).toHaveAttribute('aria-current', 'true')
   await userEvent.click(stepButton('Fired'))
-  expect(screen.getByRole('img', { name: 'Morning Mug' })).toHaveAttribute(
+  expect(hero()).toHaveAttribute(
     'data-photo-id',
     await photoOfStage(id, 'fired'),
   )
