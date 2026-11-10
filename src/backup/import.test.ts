@@ -619,6 +619,31 @@ test("a local merged duplicate isn't matched", async () => {
   expect((await db.entries.get('e1'))?.photoId).toBe('live')
 })
 
+test("a local purged photo isn't matched", async () => {
+  await db.photos.add({
+    ...photoRow('ph1', H1, '2026-12-01T09:00:00.000Z'),
+    purgedAt: '2026-12-01T09:00:00.000Z',
+  })
+  const before = await db.photos.get('ph1')
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', H1)],
+      }),
+      [H1],
+    ),
+  )
+
+  expect(await db.photos.get('ph1')).toEqual(before)
+  const photoId = (await db.entries.get('e1'))?.photoId as string
+  expect(photoId).not.toBe('ph1')
+  const added = await db.photos.get(photoId)
+  expect(added).toMatchObject({ hash: H1, needsUpload: 1 })
+  expect(added?.deletedAt).toBeUndefined()
+  expect(added?.purgedAt).toBeUndefined()
+})
+
 test('a bad glaze color becomes the default color', async () => {
   const zip = zipOf(
     backup({

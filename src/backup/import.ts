@@ -347,12 +347,14 @@ async function mergePhotos(
   if (incoming.length === 0) return { idMap, matched, tombstones }
 
   const localByHash = new Map<string, Photo>()
+  // A local merged duplicate is never matched, nor a purged row: the server
+  // keeps only its stub.
   const sameHash = (
     await db.photos
       .where('hash')
       .anyOf(incoming.map((p) => p.hash))
       .toArray()
-  ).filter((p) => !p.mergedInto)
+  ).filter((p) => !p.mergedInto && !p.purgedAt)
   for (const p of sameHash) {
     const seen = localByHash.get(p.hash)
     // Prefer a live row when duplicates exist.

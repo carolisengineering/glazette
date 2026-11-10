@@ -332,7 +332,14 @@ export async function removePhoto(entryId: string): Promise<void> {
     const stillUsed = await db.entries
       .filter((e) => e.photoId === photoId && !e.deletedAt)
       .count()
-    if (stillUsed === 0) await db.photos.update(photoId, { deletedAt: now })
+    if (stillUsed === 0) {
+      await db.photos.update(photoId, {
+        deletedAt: now,
+        lastPieceId: entry.pieceId,
+        lastEntryId: entry.id,
+        lastStage: entry.stage,
+      })
+    }
     await db.pieces.update(entry.pieceId, { updatedAt: now })
   })
 }

@@ -148,3 +148,41 @@ test('storePhoto undeletes a soft-deleted photo with the same hash', async () =>
   expect(await db.photos.count()).toBe(1)
   expect((await db.photos.get(first))?.deletedAt).toBeUndefined()
 })
+
+test("a purged photo isn't reused", async () => {
+  const purged = {
+    id: 'old',
+    hash: 'h1',
+    width: 2000,
+    height: 1500,
+    takenAt: '2026-11-01T10:00:00.000Z',
+    deletedAt: '2026-12-01T10:00:00.000Z',
+    purgedAt: '2026-12-01T10:00:00.000Z',
+  }
+  await db.photos.add(purged)
+  const before = await db.photos.get('old')
+  const id = await store(fake('h1'))
+  expect(id).not.toBe('old')
+  expect(await db.photos.get('old')).toEqual(before)
+  const row = await db.photos.get(id)
+  expect(row?.deletedAt).toBeUndefined()
+  expect(row?.purgedAt).toBeUndefined()
+  expect(row?.needsUpload).toBe(1)
+  expect(await db.photoBytes.get('h1')).toBeDefined()
+})
+
+test('reusing a deleted photo clears where it was', async () => {
+  const first = await store(fake('h1'))
+  await db.photos.update(first, {
+    deletedAt: '2026-11-01T11:00:00.000Z',
+    lastPieceId: 'p1',
+    lastEntryId: 'e1',
+    lastStage: 'glazed',
+  })
+  expect(await store(fake('h1'))).toBe(first)
+  const row = await db.photos.get(first)
+  expect(row?.deletedAt).toBeUndefined()
+  expect(row?.lastPieceId).toBeUndefined()
+  expect(row?.lastEntryId).toBeUndefined()
+  expect(row?.lastStage).toBeUndefined()
+})

@@ -10,6 +10,7 @@ export interface Piece {
   createdAt: string // ISO date
   updatedAt: string
   deletedAt?: string // soft delete (tombstone for v2 sync)
+  purgedAt?: string // removed for good by the server; only a stub is left there
   dirty?: 1 // changed here since the last sync
 }
 // Current stage is derived: the stage of the piece's latest StageEntry.
@@ -22,6 +23,7 @@ export interface StageEntry {
   note?: string // e.g. "Cone 04", "2 dips"
   date?: string // Photo date, a date the user entered, or none
   deletedAt?: string
+  purgedAt?: string // removed for good by the server; only a stub is left there
   updatedAt?: string // stamped on every local change
   dirty?: 1 // changed here since the last sync
 }
@@ -36,6 +38,7 @@ export interface GlazeApplication {
   method?: 'dip' | 'brush' | 'pour' | 'spray'
   note?: string // "top half only", "brushed over the rim"
   deletedAt?: string
+  purgedAt?: string // removed for good by the server; only a stub is left there
   updatedAt?: string // stamped on every local change
   dirty?: 1 // changed here since the last sync
 }
@@ -70,6 +73,11 @@ export interface Photo {
   height: number
   takenAt: string
   deletedAt?: string // soft delete (tombstone for v2 sync)
+  // Where a deleted photo was: the step it was last on. Cleared when it comes back.
+  lastPieceId?: string
+  lastEntryId?: string
+  lastStage?: Stage
+  purgedAt?: string // removed for good by the server; only a stub is left there
   updatedAt?: string // stamped on every local change
   mergedInto?: string // id of the photo this duplicate was merged into
   dirty?: 1 // changed here since the last sync

@@ -222,6 +222,22 @@ test('removePhoto ignores references from deleted entries', async () => {
   ).toBeTruthy()
 })
 
+test('removing a photo from a step remembers where it was', async () => {
+  const pieceId = await createPiece({ photo: photo('h1') })
+  const [entry] = await db.entries.where('pieceId').equals(pieceId).toArray()
+  const photoId = entry.photoId as string
+
+  await removePhoto(entry.id)
+
+  const row = await db.photos.get(photoId)
+  expect(row?.deletedAt).toBeTruthy()
+  expect(row).toMatchObject({
+    lastPieceId: pieceId,
+    lastEntryId: entry.id,
+    lastStage: entry.stage,
+  })
+})
+
 test('upsertClay rejects a blank name', async () => {
   await expect(upsertClay('   ')).rejects.toThrow('Clay name is required')
   expect(await db.clays.count()).toBe(0)

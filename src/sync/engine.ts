@@ -16,6 +16,7 @@ import {
   readDirty,
   recordKey,
 } from './records'
+import { settlePhotos } from './settlePhotos'
 import { quietly } from './track'
 
 export type StopReason = 'offline' | 'signed-out' | 'error'
@@ -42,8 +43,8 @@ export type SyncOutcome = 'done' | StopReason
 /**
  * One sync with the account: pull and apply what changed there, merge
  * same-named glazes and clays on the first sync for this account, merge
- * photos of the same image, then push
- * what changed here. Never throws.
+ * photos of the same image, settle photos against the steps that show them,
+ * then push what changed here. Never throws.
  */
 export async function syncOnce(
   db: GlazetteDB,
@@ -105,6 +106,11 @@ async function run(
   // The same image under two ids becomes one photo, so its changes are in
   // the push below.
   await mergePhotosByHash(db)
+  // With the whole pull in, each photo follows the steps that show it: a
+  // deleted step's photo is deleted, and a photo a live step shows comes back.
+  // Steps push before photos, so a removal pulled here arrives with its step's
+  // change, and this doesn't undo it.
+  await settlePhotos(db)
 
   // 4. Push what changed here. A row edited while its push is in flight keeps
   // its mark for the next sync. The server's copy is applied before the mark
