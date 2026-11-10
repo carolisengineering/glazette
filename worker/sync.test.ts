@@ -1,4 +1,5 @@
 import {
+  type DeletedResponse,
   MAX_DATA_CHARS,
   PULL_LIMIT,
   PUSH_LIMIT,
@@ -303,4 +304,185 @@ test('a full batch that is all rejected returns every server copy', async () => 
   })
   expect(((await res.json()) as PushResponse).rejected).toEqual(stored)
   expect((await pulled()).records).toEqual(stored)
+})
+
+// Recently deleted: the server's clock and list.
+const DAY = 86_400_000
+
+const heardAt = (kind: string, id: string, userId = 'user-1') =>
+  env.DB.prepare(
+    'SELECT deleted_heard_at FROM records WHERE user_id = ? AND kind = ? AND id = ?',
+  )
+    .bind(userId, kind, id)
+    .first<string | null>('deleted_heard_at')
+
+const gone = (
+  id: string,
+  changedAt: string,
+  deletedAt = changedAt,
+  kind: SyncRecord['kind'] = 'piece',
+  extra: Record<string, unknown> = {},
+): SyncRecord => ({
+  kind,
+  id,
+  changedAt,
+  data: { id, deletedAt, ...extra },
+})
+
+function deleted(cookie: string | null = cookie1) {
+  const headers: Record<string, string> = {}
+  if (cookie) headers.cookie = cookie
+  return app.request(`${ORIGIN}/api/sync/deleted`, { headers }, env)
+}
+
+const listed = async (cookie?: string) =>
+  (await (await deleted(cookie)).json()) as DeletedResponse
+
+describe('recently deleted', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('a delete starts the clock when the server hears it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T10:00:00.000Z'))
+    const ninetyDaysAgo = new Date(Date.now() - 90 * DAY).toISOString()
+    await push({ records: [gone('p1', T1, ninetyDaysAgo)] })
+    expect(await heardAt('piece', 'p1')).toBe('2026-11-07T10:00:00.000Z')
+  })
+
+  test("the clock doesn't restart", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T10:00:00.000Z'))
+    await push({ records: [gone('p1', T1)] })
+    vi.setSystemTime(new Date('2026-11-08T10:00:00.000Z'))
+    const res = await push({ records: [gone('p1', T2, T1, 'piece', { v: 2 })] })
+    expect(await res.json()).toEqual({ rejected: [] })
+    expect(await heardAt('piece', 'p1')).toBe('2026-11-07T10:00:00.000Z')
+  })
+
+  test('putting back clears the clock', async () => {
+    await push({ records: [gone('p1', T1)] })
+    expect(await heardAt('piece', 'p1')).not.toBeNull()
+    await push({ records: [rec('p1', T2)] })
+    expect(await heardAt('piece', 'p1')).toBeNull()
+  })
+
+  test('deleting again starts a new clock', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T10:00:00.000Z'))
+    await push({ records: [gone('p1', T1)] })
+    await push({ records: [rec('p1', T2)] })
+    vi.setSystemTime(new Date('2026-11-09T10:00:00.000Z'))
+    await push({ records: [gone('p1', T3)] })
+    expect(await heardAt('piece', 'p1')).toBe('2026-11-09T10:00:00.000Z')
+  })
+
+  test("a tombstone that loses doesn't start the clock", async () => {
+    await push({ records: [rec('p1', T2)] })
+    const res = await push({ records: [gone('p1', T1)] })
+    expect(((await res.json()) as PushResponse).rejected).toEqual([
+      rec('p1', T2),
+    ])
+    expect(await heardAt('piece', 'p1')).toBeNull()
+  })
+
+  test('glazes and clays have no clock', async () => {
+    await push({
+      records: [
+        gone('g1', T1, T1, 'glaze'),
+        gone('c1', T1, T1, 'clay'),
+        gone('e1', T1, T1, 'entry'),
+      ],
+    })
+    expect(await heardAt('glaze', 'g1')).toBeNull()
+    expect(await heardAt('clay', 'c1')).toBeNull()
+    expect(await heardAt('entry', 'e1')).not.toBeNull()
+  })
+
+  test('the list shows deleted pieces and photos, newest first', async () => {
+    await push({
+      records: [
+        gone('p1', T1),
+        gone('ph1', T1, T1, 'photo'),
+        gone('e1', T1, T1, 'entry'),
+        rec('live', T1),
+      ],
+    })
+    await env.DB.prepare(
+      "UPDATE records SET deleted_heard_at = '2026-11-01T00:00:00.000Z' WHERE id = 'p1'",
+    ).run()
+    await env.DB.prepare(
+      "UPDATE records SET deleted_heard_at = '2026-11-02T00:00:00.000Z' WHERE id = 'ph1'",
+    ).run()
+    const res = await deleted()
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      items: [
+        { kind: 'photo', id: 'ph1', heardAt: '2026-11-02T00:00:00.000Z' },
+        { kind: 'piece', id: 'p1', heardAt: '2026-11-01T00:00:00.000Z' },
+      ],
+    })
+  })
+
+  test('the list leaves out merged duplicates', async () => {
+    await push({
+      records: [
+        gone('ph1', T1, T1, 'photo', { mergedInto: 'ph2' }),
+        gone('ph3', T1, T1, 'photo'),
+      ],
+    })
+    expect((await listed()).items.map((i) => i.id)).toEqual(['ph3'])
+  })
+
+  test('the list leaves out stubs', async () => {
+    await push({ records: [gone('p1', T1), gone('p2', T1)] })
+    await env.DB.prepare(
+      `UPDATE records SET data = '{"id":"p1","deletedAt":"${T1}","purgedAt":"${T1}"}',
+        purged_at = '${T1}', deleted_heard_at = NULL WHERE id = 'p1'`,
+    ).run()
+    expect((await listed()).items.map((i) => i.id)).toEqual(['p2'])
+  })
+
+  test('the list needs a session', async () => {
+    for (const cookie of [null, '__Host-session_token=unknown']) {
+      const res = await deleted(cookie)
+      expect(res.status).toBe(401)
+      expect(await res.json()).toMatchObject({ code: 'NO_SESSION' })
+    }
+  })
+
+  test('each user sees only their own list', async () => {
+    await push({ records: [gone('p1', T1)] }, { cookie: cookie1 })
+    await push({ records: [gone('p2', T1)] }, { cookie: cookie2 })
+    expect((await listed(cookie1)).items.map((i) => i.id)).toEqual(['p1'])
+    expect((await listed(cookie2)).items.map((i) => i.id)).toEqual(['p2'])
+  })
+
+  test('a stub refuses a later push', async () => {
+    const stub = {
+      id: 'p1',
+      deletedAt: T1,
+      purgedAt: T1,
+    }
+    await env.DB.prepare(
+      `INSERT INTO records (user_id, kind, id, changed_at, data, seq, purged_at)
+       VALUES ('user-1', 'piece', 'p1', ?, ?, 1, ?)`,
+    )
+      .bind(T1, JSON.stringify(stub), T1)
+      .run()
+    const res = await push({ records: [rec('p1', T3, { name: 'back' })] })
+    expect(await res.json()).toEqual({
+      rejected: [{ kind: 'piece', id: 'p1', changedAt: T1, data: stub }],
+    })
+    const row = await env.DB.prepare(
+      "SELECT changed_at, data, deleted_heard_at FROM records WHERE id = 'p1'",
+    ).first<{ changed_at: string; data: string; deleted_heard_at: null }>()
+    expect(row).toEqual({
+      changed_at: T1,
+      data: JSON.stringify(stub),
+      deleted_heard_at: null,
+    })
+    expect((await listed()).items).toEqual([])
+  })
 })

@@ -258,6 +258,7 @@ const steps = [
       return syncRequest('/pull?since=0')
     },
   ],
+  ['sync deleted list', 200, () => syncRequest('/deleted')],
   [
     'photo put full 1 MB',
     200,
