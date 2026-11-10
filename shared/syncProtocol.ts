@@ -69,6 +69,17 @@ export function isStubData(data: Record<string, unknown>): boolean {
   return typeof data.purgedAt === 'string'
 }
 
+// A delete whose 30 days count: a record of a kind that expires, marked deleted.
+export function isExpiringDelete(
+  kind: string,
+  data: Record<string, unknown>,
+): boolean {
+  return (
+    (EXPIRING_KINDS as readonly string[]).includes(kind) &&
+    typeof data.deletedAt === 'string'
+  )
+}
+
 export interface PullResponse {
   records: SyncRecord[]
   // The last seq returned, or the requested since when none.

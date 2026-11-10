@@ -2,7 +2,7 @@
 // rules as the Worker (worker/sync.ts).
 
 import {
-  EXPIRING_KINDS,
+  isExpiringDelete,
   isSyncRecord,
   MAX_BODY_BYTES,
   PULL_LIMIT,
@@ -66,9 +66,7 @@ export function createTestServer(): TestServer {
         } else {
           // A winning delete keeps the first time it was heard; a winning
           // live copy clears it.
-          const deleting =
-            (EXPIRING_KINDS as readonly string[]).includes(record.kind) &&
-            typeof record.data.deletedAt === 'string'
+          const deleting = isExpiringDelete(record.kind, record.data)
           stored.set(key, {
             record,
             seq: ++lastSeq,

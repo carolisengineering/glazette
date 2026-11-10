@@ -6,7 +6,7 @@ import {
   DELETED_LIMIT,
   type DeletedItem,
   type DeletedResponse,
-  EXPIRING_KINDS,
+  isExpiringDelete,
   isSyncRecord,
   MAX_BODY_BYTES,
   PULL_LIMIT,
@@ -107,11 +107,7 @@ export function syncRoutes() {
           i: r.id,
           c: r.changedAt,
           d: JSON.stringify(r.data),
-          h:
-            (EXPIRING_KINDS as readonly string[]).includes(r.kind) &&
-            typeof r.data.deletedAt === 'string'
-              ? 1
-              : 0,
+          h: isExpiringDelete(r.kind, r.data) ? 1 : 0,
         })),
       )
       // A constant number of statements, however many records. The read runs
