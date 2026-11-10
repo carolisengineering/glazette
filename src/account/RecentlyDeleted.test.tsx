@@ -179,6 +179,42 @@ test('a list fetched again after a sync shows new deletes', async () => {
   expect(fetchDeleted).toHaveBeenCalledTimes(2)
 })
 
+test("while a sync runs, an empty list shows nothing until the sync's refetch lands", async () => {
+  // The server has the other device's delete; this device hasn't pulled it.
+  await db.pieces.add(piece('p1'))
+  vi.mocked(fetchDeleted).mockResolvedValue([item('piece', 'p1')])
+  useSync.setState({ syncing: true })
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await waitFor(() => expect(fetchDeleted).toHaveBeenCalledTimes(1))
+  await act(() => new Promise((r) => setTimeout(r, 50)))
+  expect(screen.queryByText(/Nothing here/)).toBeNull()
+  expect(screen.queryByRole('list')).toBeNull()
+
+  // The pull brings the delete in, and the refetch after the sync shows it.
+  await db.pieces.update('p1', { deletedAt: T })
+  act(() => useSync.setState({ syncing: false }))
+  expect(await screen.findByText('Blue mug')).toBeVisible()
+  expect(fetchDeleted).toHaveBeenCalledTimes(2)
+})
+
+test('a list still empty after the sync shows the empty line', async () => {
+  useSync.setState({ syncing: true })
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await waitFor(() => expect(fetchDeleted).toHaveBeenCalledTimes(1))
+  act(() => useSync.setState({ syncing: false }))
+  expect(await screen.findByText(/Nothing here/)).toBeVisible()
+})
+
+test("each Put back is described by its row's name", async () => {
+  await seedBoth()
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await screen.findByText('Photo from Blue mug')
+  const buttons = screen.getAllByRole('button', { name: 'Put back' })
+  expect(buttons).toHaveLength(2)
+  expect(buttons[0]).toHaveAccessibleDescription('Blue mug')
+  expect(buttons[1]).toHaveAccessibleDescription('Photo from Blue mug')
+})
+
 test('opening the list starts a sync', async () => {
   render(<RecentlyDeleted onBack={() => {}} />)
   await screen.findByText(/Nothing here/)
@@ -228,4 +264,15 @@ test('the Back button returns to the Account sheet', async () => {
   await user.click(screen.getByRole('button', { name: 'Back' }))
   expect(screen.getByRole('dialog', { name: 'Account' })).toBeVisible()
   expect(screen.getByText('Signed in as carol@example.com')).toBeVisible()
+})
+
+test('swapping views moves focus to the title', async () => {
+  const user = userEvent.setup()
+  render(<AccountSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Recently deleted' }))
+  expect(
+    screen.getByRole('heading', { name: 'Recently deleted' }),
+  ).toHaveFocus()
+  await user.click(screen.getByRole('button', { name: 'Back' }))
+  expect(screen.getByRole('heading', { name: 'Account' })).toHaveFocus()
 })

@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { photoFileUrl } from '../../shared/photoProtocol'
 import type { DeletedItem } from '../../shared/syncProtocol'
 import { PhotoImg } from '../components/PhotoImg'
@@ -72,6 +72,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
   const syncing = useSync((s) => s.syncing)
   const wasSyncing = useRef(syncing)
   const latest = useRef(0)
+  const nameIds = useId()
 
   const load = useCallback(async () => {
     const mine = ++latest.current
@@ -148,6 +149,10 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
     }
   }
 
+  // A running sync may bring in a delete the list waits for. Until the
+  // refetch after it lands, an empty list shows nothing rather than "Nothing
+  // here", which could send someone away thinking the piece is gone.
+  const waiting = syncing && !rows?.length
   const now = new Date()
   return (
     <section className="flex flex-col gap-4">
@@ -168,7 +173,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
         </p>
       ) : loaded === 'error' ? (
         <p className="text-[16px]">Couldn&apos;t load this. Try again later.</p>
-      ) : items && rows?.length === 0 ? (
+      ) : waiting ? null : items && rows?.length === 0 ? (
         <p className="text-[16px]">
           Nothing here. Deleted pieces and photos stay for 30 days.
         </p>
@@ -182,6 +187,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
                 : row.piece
                   ? `Photo from ${displayName(row.piece)}`
                   : 'Photo'
+            const nameId = `${nameIds}-${row.kind}-${id}`
             return (
               <li key={`${row.kind}:${id}`} className="flex items-center gap-3">
                 {row.kind === 'piece' ? (
@@ -190,7 +196,9 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
                   <PhotoThumb photo={row.photo} />
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <p className="truncate text-[16px]">{name}</p>
+                  <p id={nameId} className="truncate text-[16px]">
+                    {name}
+                  </p>
                   <p className="text-[14px] text-muted">
                     {daysLeftLabel(row.heardAt, now)}
                   </p>
@@ -198,6 +206,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
                 <button
                   type="button"
                   disabled={!!busyId}
+                  aria-describedby={nameId}
                   onClick={() => void putBack(row)}
                   className={secondary}
                 >

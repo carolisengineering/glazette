@@ -152,6 +152,13 @@ export function AccountSheet({ onClose }: { onClose: () => void }) {
 
   // Recently deleted needs an account; a sign-out while it's open ends it.
   const showDeleted = viewing && status === 'signed-in'
+  // Swapping views removes the button that had focus; the title takes it.
+  const shown = useRef(showDeleted)
+  useEffect(() => {
+    if (shown.current === showDeleted) return
+    shown.current = showDeleted
+    titleRef.current?.focus()
+  }, [showDeleted])
 
   const message = line && (
     <p role="alert" className="text-[14px] text-ink">
