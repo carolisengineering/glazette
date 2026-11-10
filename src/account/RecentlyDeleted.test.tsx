@@ -4,8 +4,10 @@ import type { DeletedItem } from '../../shared/syncProtocol'
 import { db } from '../db/db'
 import * as putBackModule from '../db/putBack'
 import type { Photo, Piece, StageEntry } from '../db/types'
+import { applyRecords } from '../sync/records'
+import { quietly } from '../sync/track'
 import { fetchDeleted } from '../sync/transport'
-import { requestSync, useSync } from '../sync/useSync'
+import { requestSync, syncRecords, useSync } from '../sync/useSync'
 import { AccountSheet } from './AccountSheet'
 import { RecentlyDeleted } from './RecentlyDeleted'
 import { useAccount } from './useAccount'
@@ -17,6 +19,7 @@ vi.mock('../sync/transport', async (orig) => ({
 vi.mock('../sync/useSync', async (orig) => ({
   ...(await orig<typeof import('../sync/useSync')>()),
   requestSync: vi.fn(),
+  syncRecords: vi.fn(),
 }))
 
 const T = '2026-01-02T00:00:00.000Z'
@@ -51,6 +54,7 @@ beforeEach(async () => {
   await db.open()
   vi.mocked(fetchDeleted).mockReset().mockResolvedValue([])
   vi.mocked(requestSync).mockReset()
+  vi.mocked(syncRecords).mockReset().mockResolvedValue('done')
   useSync.setState({ syncing: false, failed: false })
   useAccount.setState({ status: 'signed-in', email: 'carol@example.com' })
 })
@@ -150,6 +154,98 @@ test('Put back is disabled while its write runs', async () => {
   expect(screen.getByRole('button', { name: 'Put back' })).toBeDisabled()
   await act(async () => finish())
   expect(await screen.findByRole('status')).toBeVisible()
+})
+
+// What a record sync pulls once the daily job has removed these for good.
+const pullStubs = (...stubs: ['piece' | 'entry' | 'photo', string][]) =>
+  vi.mocked(syncRecords).mockImplementation(async () => {
+    const purgedAt = new Date().toISOString()
+    await quietly(db, () =>
+      applyRecords(
+        db,
+        stubs.map(([kind, id]) => ({
+          kind,
+          id,
+          changedAt: T,
+          data: { id, deletedAt: purgedAt, purgedAt },
+        })),
+      ),
+    )
+    return 'done'
+  })
+
+test('a piece purged on the server after the list loaded is not put back', async () => {
+  await db.pieces.add(piece('p1', { deletedAt: T }))
+  vi.mocked(fetchDeleted).mockResolvedValue([item('piece', 'p1')])
+  pullStubs(['piece', 'p1'])
+  const write = vi.spyOn(putBackModule, 'putBackPiece')
+  const user = userEvent.setup()
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Put back' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    "Couldn't put that back. Try again.",
+  )
+  expect(write).not.toHaveBeenCalled()
+  expect(await db.pieces.get('p1')).toMatchObject({ deletedAt: T })
+  expect((await db.pieces.get('p1'))?.purgedAt).toBeDefined()
+  await waitFor(() => expect(screen.queryByText('Blue mug')).toBeNull())
+})
+
+test('a photo whose piece was purged on the server goes on a new piece', async () => {
+  await seedBoth()
+  pullStubs(['piece', 'p1'], ['entry', 'e1'])
+  const user = userEvent.setup()
+  render(<RecentlyDeleted onBack={() => {}} />)
+  const row = (await screen.findByText('Photo from Blue mug')).closest('li')
+  await user.click(within(row as HTMLElement).getByRole('button'))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'Put back the photo on Untitled piece.',
+  )
+  expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+  const shownOn = (await db.entries.toArray()).filter(
+    (e) => e.photoId === 'ph1',
+  )
+  expect(shownOn).toHaveLength(1)
+  expect(shownOn[0].pieceId).not.toBe('p1')
+  expect((await db.pieces.get('p1'))?.purgedAt).toBeDefined()
+})
+
+test('offline, Put back says it failed and writes nothing', async () => {
+  await db.pieces.add(piece('p1', { deletedAt: T }))
+  vi.mocked(fetchDeleted).mockResolvedValue([item('piece', 'p1')])
+  vi.mocked(syncRecords).mockResolvedValue('offline')
+  const write = vi.spyOn(putBackModule, 'putBackPiece')
+  const user = userEvent.setup()
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Put back' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    "Couldn't put that back. Try again.",
+  )
+  expect(write).not.toHaveBeenCalled()
+  expect(await db.pieces.get('p1')).toMatchObject({
+    deletedAt: T,
+    updatedAt: T,
+  })
+  expect(screen.getByText('Blue mug')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Put back' })).toBeEnabled()
+})
+
+test('Put back is disabled while the record sync before it runs', async () => {
+  await db.pieces.add(piece('p1', { deletedAt: T }))
+  vi.mocked(fetchDeleted).mockResolvedValue([item('piece', 'p1')])
+  let finish: (o: 'done') => void = () => {}
+  vi.mocked(syncRecords).mockReturnValue(new Promise((r) => (finish = r)))
+  const write = vi.spyOn(putBackModule, 'putBackPiece')
+  const user = userEvent.setup()
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Put back' }))
+  expect(screen.getByRole('button', { name: 'Put back' })).toBeDisabled()
+  expect(write).not.toHaveBeenCalled()
+  await act(async () => finish('done'))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'Put back Blue mug.',
+  )
+  expect(write).toHaveBeenCalledTimes(1)
 })
 
 test('nothing deleted shows the empty line', async () => {

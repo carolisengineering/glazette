@@ -11,7 +11,7 @@ import type { Photo, Piece } from '../db/types'
 import { bytesOf } from '../photos/bytes'
 import { type DeletedRow, daysLeftLabel, deletedRows } from '../sync/deleted'
 import { fetchDeleted } from '../sync/transport'
-import { requestSync, useSync } from '../sync/useSync'
+import { requestSync, syncRecords, useSync } from '../sync/useSync'
 import { useAccount } from './useAccount'
 
 const secondary =
@@ -137,7 +137,21 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
     const id = row.kind === 'piece' ? row.piece.id : row.photo.id
     setBusyId(id)
     setSaid(undefined)
+    const failed = () =>
+      setSaid({ ok: false, text: "Couldn't put that back. Try again." })
     try {
+      // The list may have loaded before the daily job removed this for good,
+      // and a put back on top of that would quietly undo itself at the next
+      // sync. So this device pulls the server's latest records first.
+      const synced = await syncRecords()
+      if (synced === 'signed-out') void useAccount.getState().refresh()
+      const current =
+        row.kind === 'piece' ? await db.pieces.get(id) : await db.photos.get(id)
+      // A purged row leaves the list by itself.
+      if (synced !== 'done' || !current || current.purgedAt) {
+        failed()
+        return
+      }
       if (row.kind === 'piece') {
         await putBackPiece(row.piece.id)
         setSaid({ ok: true, text: `Put back ${displayName(row.piece)}.` })
@@ -152,7 +166,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
       }
     } catch (error) {
       console.error(error)
-      setSaid({ ok: false, text: "Couldn't put that back. Try again." })
+      failed()
     } finally {
       setBusyId(undefined)
     }
