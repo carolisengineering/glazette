@@ -595,7 +595,7 @@ test('a run stops at the limit and the next run finishes', async () => {
   expect(await isStub('piece', ids[PURGE_LIMIT])).toBe(true)
 })
 
-test('if the database write fails, the next run finishes', async () => {
+test('if the database write fails, the bytes and records stay and the next run finishes', async () => {
   const hash = await upload(1)
   await push([piece('p1', T1), photoRecord('ph1', hash, T1)])
   await age('piece', 'p1', 30)
@@ -624,6 +624,7 @@ test('if the database write fails, the next run finishes', async () => {
       ['photo', 'ph1'],
     ]),
   ).toEqual(before)
+  await expectBytes(hash)
 
   expect(await runCleanup(flakyEnv, NOW)).toEqual({
     purged: 2,
@@ -632,6 +633,31 @@ test('if the database write fails, the next run finishes', async () => {
   expect(await isStub('piece', 'p1')).toBe(true)
   expect(await isStub('photo', 'ph1')).toBe(true)
   await expectNoBytes(hash)
+})
+
+test('if R2 fails after the database write, the records stay stubbed', async () => {
+  const hash = await upload(1)
+  await push([piece('p1', T1), photoRecord('ph1', hash, T1)])
+  await age('piece', 'p1', 30)
+  await age('photo', 'ph1', 30)
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const failingEnv = {
+    ...env,
+    PHOTOS: {
+      delete: () => Promise.reject(new Error('R2 is down')),
+    } as unknown as R2Bucket,
+  }
+
+  await expect(runCleanup(failingEnv, NOW)).rejects.toThrow('R2 is down')
+  expect(error).toHaveBeenCalled()
+  expect(await isStub('piece', 'p1')).toBe(true)
+  expect(await isStub('photo', 'ph1')).toBe(true)
+  // The file records are gone with the stubs; the bytes are left orphaned.
+  expect(await filesOf(hash)).toEqual([])
+  expect(await inR2(hash)).toEqual(['full', 'thumb'])
+
+  // Nothing is left for the next run to do.
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
 })
 
 test("one user's failure doesn't stop the next user's purge", async () => {

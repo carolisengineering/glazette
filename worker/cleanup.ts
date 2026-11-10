@@ -204,16 +204,12 @@ async function cleanUser(
     }
   }
 
-  // 5. Write. R2 first: if the batch then fails, the records stay expired and
-  // the next run deletes the keys again, which is harmless.
+  // 5. Write. The database first: if the batch fails, nothing has changed and
+  // the next run starts over. R2 after: if a delete then fails, the records
+  // are already stubs and the bytes are left behind for good, which loses
+  // nothing a record still needs. The run still counts it as this user's
+  // failure.
   const hashes = [...freed]
-  const keys = hashes.flatMap((h) => [
-    `u/${userId}/full/${h}`,
-    `u/${userId}/thumb/${h}`,
-  ])
-  for (let i = 0; i < keys.length; i += R2_DELETE_MAX_KEYS) {
-    await env.PHOTOS.delete(keys.slice(i, i + R2_DELETE_MAX_KEYS))
-  }
   const batch = JSON.stringify(
     [...purge.values()].map((r) => ({ k: r.kind, i: r.id, c: r.changed_at })),
   )
@@ -224,6 +220,13 @@ async function cleanUser(
     statements.push(db.prepare(FREE_FILES).bind(userId, JSON.stringify(hashes)))
   }
   const results = await db.batch(statements)
+  const keys = hashes.flatMap((h) => [
+    `u/${userId}/full/${h}`,
+    `u/${userId}/thumb/${h}`,
+  ])
+  for (let i = 0; i < keys.length; i += R2_DELETE_MAX_KEYS) {
+    await env.PHOTOS.delete(keys.slice(i, i + R2_DELETE_MAX_KEYS))
+  }
   return {
     purged: purge.size,
     filesDeleted: results[1]?.meta.changes ?? 0,
