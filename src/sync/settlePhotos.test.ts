@@ -255,3 +255,78 @@ test('settling twice changes nothing the second time', async () => {
   expect(listener).not.toHaveBeenCalled()
   expect(await db.photos.toArray()).toEqual(after)
 })
+
+describe('a purged photo a live step still shows', () => {
+  const PURGED = '2026-04-01T00:00:00.000Z'
+  const stub = (id: string, extra: Partial<Photo> = {}) =>
+    photo(id, { deletedAt: PURGED, purgedAt: PURGED, ...extra })
+
+  test('is re-homed when this device holds its bytes', async () => {
+    await heldBytes()
+    await seed(
+      [stub('ph1')],
+      [step('e1', 'ph1'), step('e2', 'ph1', { deletedAt: T2 })],
+    )
+    const before = await db.photos.get('ph1')
+    await settlePhotos(db)
+
+    const photoId = (await db.entries.get('e1'))?.photoId as string
+    expect(photoId).not.toBe('ph1')
+    const row = await db.photos.get(photoId)
+    expect(row).toMatchObject({
+      hash: HASH,
+      width: 1,
+      height: 1,
+      takenAt: T1,
+      needsUpload: 1,
+      dirty: 1,
+    })
+    expect(row?.deletedAt).toBeUndefined()
+    expect(row?.purgedAt).toBeUndefined()
+    expect((await db.entries.get('e1'))?.dirty).toBe(1)
+    // A deleted step and the stub itself stay as they were.
+    expect((await db.entries.get('e2'))?.photoId).toBe('ph1')
+    expect(await db.photos.get('ph1')).toEqual(before)
+    expect(await db.photoBytes.count()).toBe(1)
+  })
+
+  test('is re-homed with bytes still on its row, which go to the table', async () => {
+    await seed([stub('ph1', { blob: new Blob(['full']) })], [step('e1', 'ph1')])
+    await settlePhotos(db)
+    const photoId = (await db.entries.get('e1'))?.photoId as string
+    expect(photoId).not.toBe('ph1')
+    expect((await db.photos.get(photoId))?.needsUpload).toBe(1)
+    expect(await db.photoBytes.get(HASH)).toBeDefined()
+    // The stub keeps its own.
+    expect((await db.photos.get('ph1'))?.blob).toBeDefined()
+  })
+
+  test('is left alone without its bytes', async () => {
+    await seed([stub('ph1')], [step('e1', 'ph1')])
+    const photos = await db.photos.toArray()
+    const steps = await db.entries.toArray()
+    const listener = vi.fn()
+    const stop = onLocalChange(db, listener)
+    await settlePhotos(db)
+    stop()
+    expect(listener).not.toHaveBeenCalled()
+    expect(await db.photos.toArray()).toEqual(photos)
+    expect(await db.entries.toArray()).toEqual(steps)
+  })
+
+  test('settling again after a re-home changes nothing', async () => {
+    await heldBytes()
+    await seed([stub('ph1')], [step('e1', 'ph1')])
+    await settlePhotos(db)
+    const photos = await db.photos.toArray()
+    const steps = await db.entries.toArray()
+    const listener = vi.fn()
+    const stop = onLocalChange(db, listener)
+    await settlePhotos(db)
+    stop()
+    expect(listener).not.toHaveBeenCalled()
+    expect(await db.photos.toArray()).toEqual(photos)
+    expect(await db.entries.toArray()).toEqual(steps)
+    expect(await db.photos.count()).toBe(2)
+  })
+})

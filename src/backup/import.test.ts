@@ -232,6 +232,30 @@ test('a reused photo that was deleted here comes back for a live incoming step',
   expect(result).toMatchObject({ added: 1, updated: 1 })
 })
 
+test('a reused photo that comes back forgets where it was', async () => {
+  await db.photos.add({
+    ...photoRow('local-ph', H1, '2026-11-03'),
+    lastPieceId: 'p0',
+    lastEntryId: 'e0',
+    lastStage: 'glazed',
+  })
+  await importZip(
+    zipOf(
+      backup({
+        entries: [{ id: 'e1', pieceId: 'p1', stage: 'thrown', photoId: 'ph1' }],
+        photos: [photoMeta('ph1', H1)],
+      }),
+      [H1],
+    ),
+  )
+
+  const row = await db.photos.get('local-ph')
+  expect(row?.deletedAt).toBeUndefined()
+  expect(row?.lastPieceId).toBeUndefined()
+  expect(row?.lastEntryId).toBeUndefined()
+  expect(row?.lastStage).toBeUndefined()
+})
+
 test('an incoming photo whose id is taken by a different photo gets a new id', async () => {
   await db.photos.add(photoRow('ph1', 'other-hash'))
   const zip = zipOf(

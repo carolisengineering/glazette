@@ -459,7 +459,12 @@ async function reviveReusedPhotos(
   await db.photos.bulkUpdate(
     deleted.map((p) => ({
       key: (p as Photo).id,
-      changes: { deletedAt: undefined },
+      changes: {
+        deletedAt: undefined,
+        lastPieceId: undefined,
+        lastEntryId: undefined,
+        lastStage: undefined,
+      },
     })),
   )
   count.updated += deleted.length

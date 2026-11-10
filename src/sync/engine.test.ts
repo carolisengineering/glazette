@@ -984,6 +984,47 @@ describe('recently deleted', () => {
       }
       expect(onServer('photo', 'ph1')?.data.deletedAt).toBeUndefined()
       expect(server.clockOf('photo', 'ph1')).toBeUndefined()
+      // Nothing is still waiting to go.
+      expect(await dirtyCount(a)).toBe(0)
+      expect(await dirtyCount(b)).toBe(0)
     },
   )
+
+  test('a restored photo the server purged comes back as a new photo', async () => {
+    // A deleted ph1 long ago, and the server has purged it.
+    await a.pieces.add(piece('p1'))
+    await a.photos.add({ ...photoRow('ph1'), deletedAt: T2 })
+    await syncOnce(a, server, ME)
+    server.purge('photo', 'ph1')
+    // B has synced since, so it never held ph1.
+    await syncOnce(b, server, ME)
+    expect(await b.photos.get('ph1')).toBeUndefined()
+    // B restores a backup from before the delete: a step showing ph1, with
+    // its image.
+    await b.photoBytes.add({ hash: HASH, blob: new Blob(['full']) })
+    await b.photos.add({ ...photoRow('ph1'), updatedAt: T1, needsUpload: 1 })
+    await b.entries.add({
+      id: 'e1',
+      pieceId: 'p1',
+      stage: 'thrown',
+      photoId: 'ph1',
+      updatedAt: T1,
+    })
+
+    // The push is refused and the stub comes back; the next sync re-homes it.
+    await syncOnce(b, server, ME)
+    expect((await b.photos.get('ph1'))?.purgedAt).toBeTruthy()
+    await syncOnce(b, server, ME)
+
+    const photoId = (await b.entries.get('e1'))?.photoId as string
+    expect(photoId).not.toBe('ph1')
+    const row = await b.photos.get(photoId)
+    expect(row).toMatchObject({ hash: HASH, needsUpload: 1 })
+    expect(row?.deletedAt).toBeUndefined()
+    expect(onServer('photo', photoId)?.data).toMatchObject({ hash: HASH })
+    expect(onServer('photo', photoId)?.data.deletedAt).toBeUndefined()
+    expect(onServer('entry', 'e1')?.data.photoId).toBe(photoId)
+    expect(onServer('photo', 'ph1')?.data.purgedAt).toBeTruthy()
+    expect(await dirtyCount(b)).toBe(0)
+  })
 })
