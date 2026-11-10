@@ -17,6 +17,9 @@ if (!bundlePath || !migrationsDir) {
 const ORIGIN = 'https://glazette.offhours.workers.dev'
 const EMAIL = 'a@b.co'
 const DAY_MS = 24 * 60 * 60 * 1000
+// The same limits as shared/syncProtocol.ts and worker/cleanup.ts.
+const DELETED_LIMIT = 500
+const PURGE_LIMIT = 100
 
 const cpuMs = () => {
   const u = process.cpuUsage()
@@ -97,6 +100,8 @@ const PHOTOS = {
     if (!objects.has(key)) return null
     return { body: new Blob([new Uint8Array(1024)]).stream() }
   },
+  // Does nothing, so only the Worker's own work is timed.
+  async delete() {},
 }
 
 const env = {
@@ -175,6 +180,17 @@ const makeRecords = (n) =>
             }
     return { kind, id, changedAt: T, data }
   })
+// Untimed: stores a record of the user straight into the database, its seq above every other.
+const seed = (userId, kind, id, data, heardAt = null) =>
+  sqlite
+    .prepare(
+      `INSERT INTO records (user_id, kind, id, changed_at, data, seq, deleted_heard_at)
+       VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM records), ?)`,
+    )
+    .run(userId, kind, id, T, JSON.stringify(data), heardAt)
+const userIdOf = () => sqlite.prepare('SELECT id FROM users').get().id
+const hex = (prefix, i) => `${prefix}${String(i).padStart(63, '0')}`
+
 // The shared push limit is 100 records; a full pull page is 200.
 const all = makeRecords(200)
 const records = all.slice(0, 100)
@@ -258,7 +274,35 @@ const steps = [
       return syncRequest('/pull?since=0')
     },
   ],
-  ['sync deleted list', 200, () => syncRequest('/deleted')],
+  [
+    'sync deleted list',
+    200,
+    () => {
+      // Untimed: a full list, half pieces and half photos, deleted just now.
+      const userId = userIdOf()
+      const now = new Date(Date.now()).toISOString()
+      for (let i = 0; i < DELETED_LIMIT; i++) {
+        const id = `listed-${i}`
+        seed(
+          userId,
+          i % 2 ? 'photo' : 'piece',
+          id,
+          i % 2
+            ? {
+                id,
+                hash: hex('c', i),
+                width: 1600,
+                height: 1200,
+                takenAt: T,
+                deletedAt: now,
+              }
+            : { id, name: `Bowl ${i}`, note: 'n'.repeat(300), deletedAt: now },
+          now,
+        )
+      }
+      return syncRequest('/deleted')
+    },
+  ],
   [
     'photo put full 1 MB',
     200,
@@ -350,6 +394,10 @@ for (const [label, expected, make] of steps) {
     if (JSON.parse(text).missing.length !== missingHashes.length)
       fail(`${label}: expected all 200 hashes missing: ${text.slice(0, 200)}`)
   }
+  if (label === 'sync deleted list') {
+    if (JSON.parse(text).items.length !== DELETED_LIMIT)
+      fail(`${label}: expected ${DELETED_LIMIT} items: ${text.slice(0, 200)}`)
+  }
   if (label === 'photo get full' && text.length !== 1024)
     fail(`${label}: expected the stand-in's 1024 bytes, got ${text.length}`)
   if (label === 'sync pull 200') {
@@ -371,6 +419,70 @@ if (after.status !== 200 || JSON.parse(afterText) !== null) {
   fail(
     `get-session after sign-out should answer null, got ${after.status} ${afterText}`,
   )
+}
+
+// The daily cleanup at its limit. Untimed: PURGE_LIMIT expired records, 40% pieces
+// that each have a live step showing a photo only it shows, and 20% photo
+// tombstones, all with their bytes stored.
+{
+  const userId = userIdOf()
+  const old = new Date(Date.now() - 31 * DAY_MS).toISOString()
+  const files = sqlite.prepare(
+    `INSERT INTO photo_files (user_id, hash, part, size) VALUES (?, ?, 'full', 1000000), (?, ?, 'thumb', 40000)`,
+  )
+  const photo = (id, hash, deletedAt) => {
+    seed(
+      userId,
+      'photo',
+      id,
+      { id, hash, width: 1600, height: 1200, takenAt: T, deletedAt },
+      deletedAt ? old : null,
+    )
+    files.run(userId, hash, userId, hash)
+  }
+  const pieces = (PURGE_LIMIT * 2) / 5
+  for (let i = 0; i < pieces; i++) {
+    const id = `gone-piece-${i}`
+    seed(
+      userId,
+      'piece',
+      id,
+      { id, name: `Bowl ${i}`, note: 'n'.repeat(300), deletedAt: T },
+      old,
+    )
+    seed(userId, 'entry', `gone-step-${i}`, {
+      id: `gone-step-${i}`,
+      pieceId: id,
+      stage: 'glazed',
+      photoId: `gone-shown-${i}`,
+      note: 'Dipped twice, wiped the foot.',
+    })
+    photo(`gone-shown-${i}`, hex('d', i))
+  }
+  for (let i = 0; i < PURGE_LIMIT / 5; i++) {
+    photo(`gone-photo-${i}`, hex('e', i), T)
+  }
+
+  let pending
+  t = cpuMs()
+  mod.default.scheduled({}, env, {
+    waitUntil(p) {
+      pending = p
+    },
+  })
+  const done = await pending
+  console.log('daily cleanup', (cpuMs() - t).toFixed(1), 'ms')
+
+  const stubs = sqlite
+    .prepare('SELECT COUNT(*) AS n FROM records WHERE purged_at IS NOT NULL')
+    .get().n
+  const expected = pieces * 3 + PURGE_LIMIT / 5
+  if (stubs !== expected || done.purged !== expected)
+    fail(`daily cleanup: expected ${expected} stubs, got ${stubs}`)
+  if (done.filesDeleted !== (pieces + PURGE_LIMIT / 5) * 2)
+    fail(
+      `daily cleanup: expected every freed file gone: ${JSON.stringify(done)}`,
+    )
 }
 
 if (failed) process.exit(1)
