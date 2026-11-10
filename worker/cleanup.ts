@@ -13,14 +13,25 @@ export const R2_DELETE_MAX_KEYS = 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 const KINDS = `(${EXPIRING_KINDS.map((k) => `'${k}'`).join(', ')})`
 
-const USERS = `SELECT DISTINCT user_id FROM records
-  WHERE deleted_heard_at IS NOT NULL AND deleted_heard_at <= ?1 LIMIT ?2`
+// An expired photo tombstone that a live step still shows stays, and stays
+// expired, so the queries leave it out: otherwise it would come back first on
+// every run and fill the limits. It still goes with an expired piece whose live
+// step shows it (see cleanUser). `r` is the expired row.
+const KEPT_PHOTO = `(r.kind = 'photo' AND EXISTS (SELECT 1 FROM records s
+    WHERE s.user_id = r.user_id AND s.kind = 'entry' AND s.purged_at IS NULL
+      AND json_extract(s.data, '$.deletedAt') IS NULL
+      AND json_extract(s.data, '$.photoId') = r.id))`
+
+const USERS = `SELECT DISTINCT user_id FROM records r
+  WHERE deleted_heard_at IS NOT NULL AND deleted_heard_at <= ?1
+    AND NOT ${KEPT_PHOTO}
+  LIMIT ?2`
 
 // ?1 user, ?2 cutoff, ?3 limit.
 const EXPIRED = `SELECT kind, id, changed_at, json_extract(data, '$.hash') AS hash
-  FROM records
+  FROM records r
   WHERE user_id = ?1 AND deleted_heard_at IS NOT NULL AND deleted_heard_at <= ?2
-    AND kind IN ${KINDS}
+    AND kind IN ${KINDS} AND NOT ${KEPT_PHOTO}
   ORDER BY deleted_heard_at LIMIT ?3`
 
 // The steps and layers of the expired pieces (?2), and the layers of the

@@ -5,7 +5,12 @@ import {
   type SyncRecord,
 } from '../shared/syncProtocol'
 import { createApp } from './app'
-import { PURGE_LIMIT, R2_DELETE_MAX_KEYS, runCleanup } from './cleanup'
+import {
+  MAX_USERS_PER_RUN,
+  PURGE_LIMIT,
+  R2_DELETE_MAX_KEYS,
+  runCleanup,
+} from './cleanup'
 import type { Env } from './env'
 import { createSession } from './sessions'
 import { makeTestEnv } from './test/harness'
@@ -518,6 +523,74 @@ test("a deleted photo that a live step still shows isn't purged", async () => {
   // Still expired: unchanged, its clock and all.
   expect(await row('photo', 'ph1')).toEqual(photo)
   await expectBytes(hash)
+})
+
+// Deleted photos that live steps still show, all expired long ago.
+async function addSurvivors(
+  count: number,
+  cookie = cookie1,
+  userId = 'user-1',
+) {
+  const ids = Array.from({ length: count }, (_, i) => `sv${i}`)
+  await push([piece('live')], cookie)
+  for (let i = 0; i < ids.length; i += PUSH_LIMIT / 2) {
+    await push(
+      ids
+        .slice(i, i + PUSH_LIMIT / 2)
+        .flatMap((id) => [
+          step(`s-${id}`, 'live', id),
+          photoRecord(id, `hash-${id}`, T1),
+        ]),
+      cookie,
+    )
+  }
+  await env.DB.prepare(
+    "UPDATE records SET deleted_heard_at = ? WHERE user_id = ? AND kind = 'photo'",
+  )
+    .bind(iso(NOW - 60 * DAY), userId)
+    .run()
+  return ids
+}
+
+test("deleted photos that live steps still show don't hold up other expired records", async () => {
+  const survivors = await addSurvivors(PURGE_LIMIT)
+  await push([piece('p1', T1)])
+  await age('piece', 'p1', 31)
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 1, filesDeleted: 0 })
+  expect(await isStub('piece', 'p1')).toBe(true)
+  for (const id of survivors) expect(await isStub('photo', id)).toBe(false)
+})
+
+test('an expired deleted photo that only an expired piece shows still goes with it', async () => {
+  const hash = await upload(1)
+  await push([
+    piece('p1', T1),
+    step('s1', 'p1', 'ph1'),
+    photoRecord('ph1', hash, T1),
+  ])
+  await age('piece', 'p1', 31)
+  await age('photo', 'ph1', 30)
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 3, filesDeleted: 2 })
+  expect(await isStub('photo', 'ph1')).toBe(true)
+  await expectNoBytes(hash)
+})
+
+test("a user with only kept photos doesn't take another user's place in a run", async () => {
+  const keepers = ['user-1', 'user-3', 'user-4', 'user-5', 'user-6']
+  expect(keepers).toHaveLength(MAX_USERS_PER_RUN)
+  for (const userId of keepers) {
+    const cookie =
+      userId === 'user-1'
+        ? cookie1
+        : await addUser(userId, `${userId}@example.com`)
+    await addSurvivors(1, cookie, userId)
+  }
+  // Sorts after every keeper.
+  const cookie = await addUser('user-9', 'nine@example.com')
+  await push([piece('p1', T1)], cookie)
+  await age('piece', 'p1', 31, 'user-9')
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 1, filesDeleted: 0 })
+  expect(await isStub('piece', 'p1', 'user-9')).toBe(true)
 })
 
 test('glazes and clays are never purged', async () => {
