@@ -421,9 +421,10 @@ if (after.status !== 200 || JSON.parse(afterText) !== null) {
   )
 }
 
-// The daily cleanup at its limit. Untimed: PURGE_LIMIT expired records, 40% pieces
-// that each have a live step showing a photo only it shows, and 20% photo
-// tombstones, all with their bytes stored.
+// The daily cleanup. Untimed: expired pieces (40% of PURGE_LIMIT), each with a live
+// step showing a photo only it shows, and expired photo tombstones (20%), all with
+// their bytes stored. The pieces, their steps and the tombstones add up to
+// PURGE_LIMIT records; the photos the steps show become stubs too.
 {
   const userId = userIdOf()
   const old = new Date(Date.now() - 31 * DAY_MS).toISOString()

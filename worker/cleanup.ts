@@ -7,6 +7,8 @@ import type { Env } from './env'
 // Expired records per user per run. What's left over waits for the next run.
 export const PURGE_LIMIT = 100
 export const MAX_USERS_PER_RUN = 5
+// The most keys R2 takes in one delete call.
+export const R2_DELETE_MAX_KEYS = 1000
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const KINDS = `(${EXPIRING_KINDS.map((k) => `'${k}'`).join(', ')})`
@@ -87,27 +89,36 @@ export async function runCleanup(
   env: Env,
   now: number,
 ): Promise<{ purged: number; filesDeleted: number }> {
+  const cutoff = new Date(now - RETENTION_DAYS * DAY_MS).toISOString()
+  let users: { user_id: string }[]
   try {
-    const cutoff = new Date(now - RETENTION_DAYS * DAY_MS).toISOString()
-    const { results: users } = await env.DB.prepare(USERS)
+    ;({ results: users } = await env.DB.prepare(USERS)
       .bind(cutoff, MAX_USERS_PER_RUN)
-      .all<{ user_id: string }>()
-    let purged = 0
-    let filesDeleted = 0
-    // One user at a time, every read and write scoped to that user.
-    for (const { user_id } of users) {
-      const done = await cleanUser(env, user_id, cutoff, now)
-      purged += done.purged
-      filesDeleted += done.filesDeleted
-    }
-    console.log(
-      `Cleanup: ${purged} records purged, ${filesDeleted} photo files deleted, ${users.length} users`,
-    )
-    return { purged, filesDeleted }
+      .all<{ user_id: string }>())
   } catch (error) {
     console.error('Cleanup failed:', error)
     throw error
   }
+  let purged = 0
+  let filesDeleted = 0
+  const failures: unknown[] = []
+  // One user at a time, every read and write scoped to that user. One user's
+  // failure doesn't hold up the others; the run still fails at the end.
+  for (const { user_id } of users) {
+    try {
+      const done = await cleanUser(env, user_id, cutoff, now)
+      purged += done.purged
+      filesDeleted += done.filesDeleted
+    } catch (error) {
+      console.error(`Cleanup failed for user ${user_id}:`, error)
+      failures.push(error)
+    }
+  }
+  console.log(
+    `Cleanup: ${purged} records purged, ${filesDeleted} photo files deleted, ${users.length} users, ${failures.length} failed`,
+  )
+  if (failures.length > 0) throw failures[0]
+  return { purged, filesDeleted }
 }
 
 async function cleanUser(
@@ -196,13 +207,12 @@ async function cleanUser(
   // 5. Write. R2 first: if the batch then fails, the records stay expired and
   // the next run deletes the keys again, which is harmless.
   const hashes = [...freed]
-  if (hashes.length > 0) {
-    await env.PHOTOS.delete(
-      hashes.flatMap((h) => [
-        `u/${userId}/full/${h}`,
-        `u/${userId}/thumb/${h}`,
-      ]),
-    )
+  const keys = hashes.flatMap((h) => [
+    `u/${userId}/full/${h}`,
+    `u/${userId}/thumb/${h}`,
+  ])
+  for (let i = 0; i < keys.length; i += R2_DELETE_MAX_KEYS) {
+    await env.PHOTOS.delete(keys.slice(i, i + R2_DELETE_MAX_KEYS))
   }
   const batch = JSON.stringify(
     [...purge.values()].map((r) => ({ k: r.kind, i: r.id, c: r.changed_at })),

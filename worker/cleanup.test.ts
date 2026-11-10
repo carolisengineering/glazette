@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto'
-import type { PullResponse, SyncRecord } from '../shared/syncProtocol'
+import {
+  PUSH_LIMIT,
+  type PullResponse,
+  type SyncRecord,
+} from '../shared/syncProtocol'
 import { createApp } from './app'
-import { PURGE_LIMIT, runCleanup } from './cleanup'
+import { PURGE_LIMIT, R2_DELETE_MAX_KEYS, runCleanup } from './cleanup'
 import type { Env } from './env'
 import { createSession } from './sessions'
 import { makeTestEnv } from './test/harness'
@@ -628,6 +632,92 @@ test('if the database write fails, the next run finishes', async () => {
   expect(await isStub('piece', 'p1')).toBe(true)
   expect(await isStub('photo', 'ph1')).toBe(true)
   await expectNoBytes(hash)
+})
+
+test("one user's failure doesn't stop the next user's purge", async () => {
+  await push([piece('p1', T1)])
+  await push([piece('p1', T1)], cookie2)
+  await age('piece', 'p1', 30)
+  await age('piece', 'p1', 30, 'user-2')
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const db = env.DB
+  let failures = 1
+  const flakyEnv = {
+    ...env,
+    DB: {
+      prepare: (query: string) => db.prepare(query),
+      batch: (statements: D1PreparedStatement[]) => {
+        if (failures-- > 0) return Promise.reject(new Error('D1 is down'))
+        return db.batch(statements)
+      },
+    } as unknown as D1Database,
+  }
+
+  // Whichever user goes first fails; the other is still purged, and the run
+  // still reports the failure.
+  await expect(runCleanup(flakyEnv, NOW)).rejects.toThrow('D1 is down')
+  expect(error).toHaveBeenCalledTimes(1)
+  const stubbed = [
+    await isStub('piece', 'p1', 'user-1'),
+    await isStub('piece', 'p1', 'user-2'),
+  ]
+  expect(stubbed.sort()).toEqual([false, true])
+
+  expect(await runCleanup(flakyEnv, NOW)).toEqual({
+    purged: 1,
+    filesDeleted: 0,
+  })
+  expect(await isStub('piece', 'p1', 'user-1')).toBe(true)
+  expect(await isStub('piece', 'p1', 'user-2')).toBe(true)
+})
+
+test('R2 is asked to delete at most its limit of keys at a time', async () => {
+  // One expired piece whose live steps show more photos than one R2 call can
+  // delete: two keys each.
+  const count = R2_DELETE_MAX_KEYS / 2 + 1
+  const hashes = Array.from({ length: count }, (_, i) =>
+    i.toString(16).padStart(64, '0'),
+  )
+  const records: SyncRecord[] = [piece('p1', T1)]
+  for (const [i, hash] of hashes.entries()) {
+    records.push(step(`s${i}`, 'p1', `ph${i}`), photoRecord(`ph${i}`, hash))
+  }
+  for (let i = 0; i < records.length; i += PUSH_LIMIT) {
+    await push(records.slice(i, i + PUSH_LIMIT))
+  }
+  // Untimed bytes straight into the stores: the photo route would take a
+  // thousand requests.
+  const keys = hashes.flatMap((h) => [
+    `u/user-1/full/${h}`,
+    `u/user-1/thumb/${h}`,
+  ])
+  for (let i = 0; i < keys.length; i += 100) {
+    await Promise.all(keys.slice(i, i + 100).map((k) => bucket.put(k, 'x')))
+  }
+  await env.DB.prepare(
+    `INSERT INTO photo_files (user_id, hash, part, size)
+     SELECT 'user-1', h.value, p.value, 1 FROM json_each(?1) h, json_each('["full","thumb"]') p`,
+  )
+    .bind(JSON.stringify(hashes))
+    .run()
+  await age('piece', 'p1', 30)
+  const remove = vi.spyOn(env.PHOTOS, 'delete')
+
+  expect(await runCleanup(env, NOW)).toEqual({
+    purged: 1 + 2 * count,
+    filesDeleted: 2 * count,
+  })
+  expect(remove.mock.calls.length).toBeGreaterThan(1)
+  for (const [batch] of remove.mock.calls) {
+    expect((batch as string[]).length).toBeLessThanOrEqual(R2_DELETE_MAX_KEYS)
+  }
+  expect(
+    remove.mock.calls.flatMap(([batch]) => batch as string[]).sort(),
+  ).toEqual([...keys].sort())
+  expect((await bucket.list({ prefix: 'u/user-1/' })).objects).toEqual([])
+  expect(
+    await env.DB.prepare('SELECT COUNT(*) AS n FROM photo_files').first('n'),
+  ).toBe(0)
 })
 
 test('nothing expired does nothing', async () => {
