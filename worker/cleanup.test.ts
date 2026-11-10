@@ -819,6 +819,174 @@ test('R2 is asked to delete at most its limit of keys at a time', async () => {
   ).toBe(0)
 })
 
+// --- Changes that land while the job runs -----------------------------------
+
+const T2 = '2026-11-08T10:00:00.000Z'
+// A put back: the record live again, changed after the delete.
+const live = (r: SyncRecord): SyncRecord => ({
+  ...r,
+  changedAt: T2,
+  data: { ...r.data, deletedAt: undefined },
+})
+
+// The job's env, with another request landing just before its database write
+// (after all its reads) or just after it.
+function midRun(hooks: {
+  before?: () => Promise<unknown>
+  after?: () => Promise<unknown>
+}): Env {
+  const db = env.DB
+  return {
+    ...env,
+    DB: {
+      prepare: (query: string) => db.prepare(query),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await hooks.before?.()
+        const results = await db.batch(statements)
+        await hooks.after?.()
+        return results
+      },
+    } as unknown as D1Database,
+  }
+}
+
+test('a piece put back during the job keeps its steps, layers and photos', async () => {
+  const hash = await upload(1)
+  await push([
+    piece('p1', T1),
+    step('s1', 'p1', 'ph1'),
+    step('s2', 'p1', undefined, T1),
+    layer('l1', 'p1', 's1'),
+    photoRecord('ph1', hash),
+  ])
+  await age('piece', 'p1', 30)
+  const job = midRun({ before: () => push([live(piece('p1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(JSON.parse((await row('piece', 'p1')).data)).toEqual(
+    JSON.parse(JSON.stringify(live(piece('p1')).data)),
+  )
+  for (const [kind, id] of [
+    ['piece', 'p1'],
+    ['entry', 's1'],
+    ['entry', 's2'],
+    ['glazeApp', 'l1'],
+    ['photo', 'ph1'],
+  ]) {
+    expect(await isStub(kind, id)).toBe(false)
+  }
+  await expectBytes(hash)
+})
+
+test('a step put back during the job keeps its layers', async () => {
+  await push([
+    piece('p1'),
+    step('s1', 'p1', undefined, T1),
+    layer('l1', 'p1', 's1'),
+  ])
+  await age('entry', 's1', 30)
+  const job = midRun({ before: () => push([live(step('s1', 'p1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await isStub('entry', 's1')).toBe(false)
+  expect(await isStub('glazeApp', 'l1')).toBe(false)
+})
+
+test('a photo put back during the job keeps its bytes', async () => {
+  const hash = await upload(1)
+  await push([photoRecord('ph1', hash, T1)])
+  await age('photo', 'ph1', 30)
+  const job = midRun({ before: () => push([live(photoRecord('ph1', hash))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await isStub('photo', 'ph1')).toBe(false)
+  await expectBytes(hash)
+})
+
+test('a put back during the job leaves the rest of the run alone, and the counts say so', async () => {
+  await push([
+    piece('p1', T1),
+    step('s1', 'p1'),
+    piece('p2', T1),
+    step('s2', 'p2'),
+  ])
+  await age('piece', 'p1', 30)
+  await age('piece', 'p2', 31)
+  const job = midRun({ before: () => push([live(piece('p1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 2, filesDeleted: 0 })
+  expect(await isStub('piece', 'p1')).toBe(false)
+  expect(await isStub('entry', 's1')).toBe(false)
+  expect(await isStub('piece', 'p2')).toBe(true)
+  expect(await isStub('entry', 's2')).toBe(true)
+})
+
+test('a photo shown on two expired pieces stays when one is put back during the job', async () => {
+  const hash = await upload(1)
+  await push([
+    piece('p1', T1),
+    step('s1', 'p1', 'ph1'),
+    piece('p2', T1),
+    step('s2', 'p2', 'ph1'),
+    photoRecord('ph1', hash),
+  ])
+  await age('piece', 'p1', 30)
+  await age('piece', 'p2', 30)
+  const job = midRun({ before: () => push([live(piece('p1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 2, filesDeleted: 0 })
+  expect(await isStub('piece', 'p2')).toBe(true)
+  expect(await isStub('entry', 's2')).toBe(true)
+  expect(await isStub('entry', 's1')).toBe(false)
+  expect(await isStub('photo', 'ph1')).toBe(false)
+  await expectBytes(hash)
+})
+
+test('an expired photo that a step put back during the job shows stays', async () => {
+  const hash = await upload(1)
+  // The step comes back in one push and its photo in the next: the job runs
+  // in between.
+  await push([
+    piece('p1'),
+    step('s1', 'p1', 'ph1', T1),
+    photoRecord('ph1', hash, T1),
+  ])
+  await age('photo', 'ph1', 30)
+  await age('entry', 's1', 5)
+  const job = midRun({ before: () => push([live(step('s1', 'p1', 'ph1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await isStub('photo', 'ph1')).toBe(false)
+  await expectBytes(hash)
+})
+
+test('a same-hash photo pushed during the job keeps the bytes', async () => {
+  const hash = await upload(1)
+  await push([photoRecord('ph1', hash, T1)])
+  await age('photo', 'ph1', 30)
+  const job = midRun({ before: () => push([photoRecord('ph2', hash)]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 1, filesDeleted: 0 })
+  expect(await isStub('photo', 'ph1')).toBe(true)
+  expect(await isStub('photo', 'ph2')).toBe(false)
+  await expectBytes(hash)
+})
+
+test('a same-hash upload that lands after the database write keeps its bytes', async () => {
+  const hash = await upload(1)
+  await push([photoRecord('ph1', hash, T1)])
+  await age('photo', 'ph1', 30)
+  const job = midRun({ after: () => upload(1) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 1, filesDeleted: 2 })
+  expect(await isStub('photo', 'ph1')).toBe(true)
+  await expectBytes(hash)
+})
+
+test('a same-hash photo pushed after the database write keeps the bytes in R2', async () => {
+  const hash = await upload(1)
+  await push([photoRecord('ph1', hash, T1)])
+  await age('photo', 'ph1', 30)
+  const job = midRun({ after: () => push([photoRecord('ph2', hash)]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 1, filesDeleted: 2 })
+  // The file rows went with the batch, so the device uploads again; the bytes
+  // it would replace are still there.
+  expect(await filesOf(hash)).toEqual([])
+  expect(await inR2(hash)).toEqual(['full', 'thumb'])
+})
+
 test('nothing expired does nothing', async () => {
   const hash = await upload(1)
   await push([piece('p1', T1), piece('p2'), photoRecord('ph1', hash, T1)])
