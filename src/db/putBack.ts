@@ -1,4 +1,5 @@
 import { hashesHeld } from '../photos/bytes'
+import { changeTime } from '../sync/records'
 import { db as appDb, type GlazetteDB, newId } from './db'
 import { buildSteps } from './ops'
 import { currentStage, STAGES, stagesBetween } from './stage'
@@ -14,8 +15,16 @@ const tablesOf = (db: GlazetteDB) => [
   db.photoBytes,
 ]
 
-/** Photos with their place cleared, waiting to download when this device lacks their bytes. */
-async function bringBack(db: GlazetteDB, photos: Photo[]): Promise<void> {
+/**
+ * Photos with their place cleared, waiting to download when this device lacks
+ * their bytes. Every put-back write is dated past the row's last change, so it
+ * wins over the delete even when this device's clock is behind.
+ */
+async function bringBack(
+  db: GlazetteDB,
+  photos: Photo[],
+  now: string,
+): Promise<void> {
   if (photos.length === 0) return
   const held = await hashesHeld(
     db,
@@ -29,13 +38,18 @@ async function bringBack(db: GlazetteDB, photos: Photo[]): Promise<void> {
         lastPieceId: undefined,
         lastEntryId: undefined,
         lastStage: undefined,
+        updatedAt: changeTime(p, now),
         ...(p.blob || held.has(p.hash) ? {} : { needsDownload: 1 as const }),
       },
     })),
   )
 }
 
-async function putBackPieceRows(db: GlazetteDB, id: string): Promise<void> {
+async function putBackPieceRows(
+  db: GlazetteDB,
+  id: string,
+  now: string,
+): Promise<void> {
   const piece = await db.pieces.get(id)
   if (!piece?.deletedAt || piece.purgedAt) return
   const steps = await db.entries.where('pieceId').equals(id).toArray()
@@ -47,8 +61,11 @@ async function putBackPieceRows(db: GlazetteDB, id: string): Promise<void> {
   const photos = (await db.photos.bulkGet(photoIds)).filter(
     (p): p is Photo => !!p && !!p.deletedAt && !p.purgedAt,
   )
-  await db.pieces.update(id, { deletedAt: undefined, updatedAt: nowIso() })
-  await bringBack(db, photos)
+  await db.pieces.update(id, {
+    deletedAt: undefined,
+    updatedAt: changeTime(piece, now),
+  })
+  await bringBack(db, photos, now)
 }
 
 /**
@@ -61,7 +78,9 @@ export function putBackPiece(
   id: string,
   db: GlazetteDB = appDb,
 ): Promise<void> {
-  return db.transaction('rw', tablesOf(db), () => putBackPieceRows(db, id))
+  return db.transaction('rw', tablesOf(db), () =>
+    putBackPieceRows(db, id, nowIso()),
+  )
 }
 
 /**
@@ -88,7 +107,7 @@ export function putBackPhoto(
       ? await db.pieces.get(photo.lastPieceId)
       : undefined
 
-    await bringBack(db, [photo])
+    await bringBack(db, [photo], now)
 
     if (!home || home.purgedAt) {
       const pieceId = newId()
@@ -107,12 +126,17 @@ export function putBackPhoto(
       return db.pieces.get(pieceId)
     }
 
-    if (home.deletedAt) await putBackPieceRows(db, home.id)
+    // One time for the piece, so restoring it and adding the photo agree.
+    const pieceTime = changeTime(home, now)
+    if (home.deletedAt) await putBackPieceRows(db, home.id, now)
     const step = photo.lastEntryId
       ? await db.entries.get(photo.lastEntryId)
       : undefined
     if (step && !step.deletedAt && !step.photoId && step.pieceId === home.id) {
-      await db.entries.update(step.id, { photoId: id })
+      await db.entries.update(step.id, {
+        photoId: id,
+        updatedAt: changeTime(step, now),
+      })
     } else {
       const existing = await db.entries
         .where('pieceId')
@@ -126,7 +150,7 @@ export function putBackPhoto(
       )
       await db.entries.bulkAdd(entries)
     }
-    await db.pieces.update(home.id, { updatedAt: now })
+    await db.pieces.update(home.id, { updatedAt: pieceTime })
     return db.pieces.get(home.id)
   })
 }

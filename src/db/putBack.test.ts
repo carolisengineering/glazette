@@ -243,3 +243,34 @@ test('putting back is a change that syncs', async () => {
     expect((row?.updatedAt as string) > T2).toBe(true)
   }
 })
+
+describe('on a device whose clock is behind the one that deleted', () => {
+  const FUTURE = '2099-01-01T00:00:00.000Z'
+  const AFTER = '2099-01-01T00:00:00.001Z'
+
+  test('a put-back piece and its photos are dated past the delete', async () => {
+    await holdBytes()
+    await seed({
+      pieces: [piece('p1', { deletedAt: FUTURE })],
+      entries: [step('e1', 'p1', { photoId: 'ph1' })],
+      photos: [photo('ph1', { deletedAt: FUTURE })],
+    })
+    await putBackPiece('p1')
+    expect((await db.pieces.get('p1'))?.updatedAt).toBe(AFTER)
+    expect((await db.photos.get('ph1'))?.updatedAt).toBe(AFTER)
+  })
+
+  test('a put-back photo, its step and its piece are dated past their last change', async () => {
+    await holdBytes()
+    await seed({
+      pieces: [piece('p1', { deletedAt: FUTURE })],
+      entries: [step('e1', 'p1', { stage: 'glazed', updatedAt: FUTURE })],
+      photos: [photo('ph1', { deletedAt: FUTURE, ...place })],
+    })
+    await putBackPhoto('ph1')
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+    expect((await db.pieces.get('p1'))?.updatedAt).toBe(AFTER)
+    expect((await db.entries.get('e1'))?.updatedAt).toBe(AFTER)
+    expect((await db.photos.get('ph1'))?.updatedAt).toBe(AFTER)
+  })
+})

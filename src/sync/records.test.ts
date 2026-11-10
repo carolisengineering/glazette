@@ -132,6 +132,38 @@ test('markAllDirty marks every row without changing its time', async () => {
   expect(await db.pieces.get('p1')).toMatchObject({ dirty: 1, updatedAt: T1 })
 })
 
+test("markAllDirty leaves purged rows out, and a purged photo doesn't wait to upload", async () => {
+  await quietly(db, async () => {
+    await db.pieces.add(piece('stub', { deletedAt: T2, purgedAt: T2 }))
+    await db.entries.add({
+      id: 'e1',
+      pieceId: 'stub',
+      stage: 'thrown',
+      deletedAt: T2,
+      purgedAt: T2,
+    })
+    await db.photos.add({
+      id: 'ph1',
+      hash: 'a'.repeat(64),
+      width: 1,
+      height: 1,
+      takenAt: T1,
+      deletedAt: T2,
+      purgedAt: T2,
+      blob: new Blob(['full']),
+    })
+    await db.pieces.add(piece('live'))
+  })
+  await markAllDirty(db)
+  expect((await db.pieces.get('stub'))?.dirty).toBeUndefined()
+  expect((await db.entries.get('e1'))?.dirty).toBeUndefined()
+  const stub = await db.photos.get('ph1')
+  expect(stub?.dirty).toBeUndefined()
+  expect(stub?.needsUpload).toBeUndefined()
+  expect((await db.pieces.get('live'))?.dirty).toBe(1)
+  expect((await readDirty(db)).map((r) => r.id)).toEqual(['live'])
+})
+
 const HASH = 'a'.repeat(64)
 
 const photoRow = (id: string, extra: Partial<Photo> = {}): Photo => ({

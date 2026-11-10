@@ -107,14 +107,18 @@ export async function readDirty(db: GlazetteDB): Promise<SyncRecord[]> {
   return records
 }
 
-/** Marks every row to be sent. Change times stay as they are. */
+/**
+ * Marks every row to be sent, and every photo with bytes here to upload.
+ * Change times stay as they are. A purged row is left out: it belongs to the
+ * account it was purged from.
+ */
 export function markAllDirty(db: GlazetteDB): Promise<void> {
   return quietly(db, async () => {
     const held = new Set(await db.photoBytes.toCollection().primaryKeys())
     for (const kind of KINDS) {
       await db
         .table(TABLE_OF[kind])
-        .toCollection()
+        .filter((row: Row) => !row.purgedAt)
         .modify(
           kind === 'photo'
             ? (row: Row & { hash: string }) => {
@@ -365,6 +369,19 @@ export function mergeByName(
 /** The ISO time 1 ms after `time`, a valid change time. */
 export const justAfter = (time: string) =>
   new Date(Date.parse(time) + 1).toISOString()
+
+/**
+ * The time to date a change to a row: now, or just after the row's last
+ * change if the clock that made it is ahead of ours, so the change wins over
+ * the copy it changes.
+ */
+export function changeTime(
+  row: { updatedAt?: string; deletedAt?: string },
+  now: string,
+): string {
+  const after = justAfter(changedAt(row))
+  return after > now ? after : now
+}
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto

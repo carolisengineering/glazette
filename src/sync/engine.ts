@@ -108,7 +108,8 @@ async function run(
   await mergePhotosByHash(db)
   // With the whole pull in, each photo follows the steps that show it: a
   // deleted step's photo is deleted, and a photo a live step shows comes back.
-  // Steps push before photos, so a removal pulled here arrives with its step's
+  // A purged photo a live step still shows comes back as a new photo, when
+  // this device holds its bytes. Steps push before photos, so a removal pulled here arrives with its step's
   // change, and this doesn't undo it.
   await settlePhotos(db)
 

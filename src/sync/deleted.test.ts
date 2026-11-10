@@ -91,3 +91,17 @@ test('a photo row carries its piece', () => {
     rows[1] && 'piece' in rows[1] ? rows[1].piece : undefined,
   ).toBeUndefined()
 })
+
+test("a photo whose piece was purged doesn't name it", () => {
+  const pieces = map([
+    piece('stub', { name: 'Blue mug', deletedAt: T, purgedAt: T }),
+  ])
+  const photos = map([photo('ph', { deletedAt: T, lastPieceId: 'stub' })])
+  const [row] = deletedRows(
+    [{ kind: 'photo', id: 'ph', heardAt: HEARD }],
+    pieces,
+    photos,
+  )
+  expect(row).toMatchObject({ kind: 'photo', photo: { id: 'ph' } })
+  expect(row && 'piece' in row ? row.piece : undefined).toBeUndefined()
+})

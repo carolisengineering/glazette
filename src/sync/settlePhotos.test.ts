@@ -330,3 +330,102 @@ describe('a purged photo a live step still shows', () => {
     expect(await db.photos.count()).toBe(2)
   })
 })
+
+describe('steps that are purged, or on a purged piece', () => {
+  const PURGED = '2026-04-01T00:00:00.000Z'
+  const purgePiece = (id: string) =>
+    quietly(db, () =>
+      db.pieces.put({
+        id,
+        name: 'Blue mug',
+        createdAt: T1,
+        updatedAt: T1,
+        deletedAt: T2,
+        purgedAt: PURGED,
+      }),
+    )
+
+  test("a purged step isn't a deleted photo's place, even when it's later", async () => {
+    await seed(
+      [photo('ph1')],
+      [
+        step('e1', 'ph1', { stage: 'thrown', date: T1, deletedAt: T2 }),
+        step('e2', 'ph1', {
+          pieceId: 'p2',
+          stage: 'fired',
+          date: T3,
+          deletedAt: T2,
+          purgedAt: PURGED,
+        }),
+      ],
+    )
+    await settlePhotos(db)
+    expect(await db.photos.get('ph1')).toMatchObject({
+      lastPieceId: 'p1',
+      lastEntryId: 'e1',
+      lastStage: 'thrown',
+    })
+  })
+
+  test("a deleted step of a purged piece isn't a deleted photo's place", async () => {
+    await purgePiece('p2')
+    await seed(
+      [photo('ph1', { deletedAt: T2 })],
+      [
+        step('e1', 'ph1', { stage: 'thrown', date: T1, deletedAt: T2 }),
+        step('e2', 'ph1', {
+          pieceId: 'p2',
+          stage: 'fired',
+          date: T3,
+          deletedAt: T2,
+        }),
+      ],
+    )
+    await settlePhotos(db)
+    expect(await db.photos.get('ph1')).toMatchObject({
+      lastPieceId: 'p1',
+      lastEntryId: 'e1',
+      lastStage: 'thrown',
+    })
+  })
+
+  test('a live step on a purged piece counts as deleted, and is the place', async () => {
+    await purgePiece('p2')
+    await seed(
+      [photo('ph1')],
+      [step('e1', 'ph1', { pieceId: 'p2', stage: 'glazed' })],
+    )
+    await settlePhotos(db)
+    const row = await db.photos.get('ph1')
+    expect(row?.deletedAt).toBeTruthy()
+    expect(row).toMatchObject({
+      lastPieceId: 'p2',
+      lastEntryId: 'e1',
+      lastStage: 'glazed',
+      dirty: 1,
+    })
+  })
+
+  test("a live step on a purged piece doesn't bring a deleted photo back", async () => {
+    await purgePiece('p2')
+    const gone = photo('ph1', {
+      deletedAt: T2,
+      lastPieceId: 'p1',
+      lastEntryId: 'e9',
+      lastStage: 'thrown',
+    })
+    await seed([gone], [step('e1', 'ph1', { pieceId: 'p2' })])
+    await settlePhotos(db)
+    expect(await db.photos.get('ph1')).toEqual(gone)
+  })
+
+  test("a purged photo isn't re-homed onto a live step of a purged piece", async () => {
+    await heldBytes()
+    await purgePiece('p2')
+    const stub = photo('ph1', { deletedAt: PURGED, purgedAt: PURGED })
+    await seed([stub], [step('e1', 'ph1', { pieceId: 'p2' })])
+    await settlePhotos(db)
+    expect(await db.photos.count()).toBe(1)
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  })
+})

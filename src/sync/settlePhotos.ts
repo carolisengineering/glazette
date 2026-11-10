@@ -2,28 +2,29 @@ import { type GlazetteDB, newId } from '../db/db'
 import { compareEntries } from '../db/stage'
 import type { Photo, StageEntry } from '../db/types'
 import { hashesHeld, keepBytes } from '../photos/bytes'
-import { changedAt, justAfter } from './records'
+import { changeTime } from './records'
 
-/** Where a deleted photo was: the latest of the deleted steps that show it. */
-function placeOf(steps: StageEntry[]): Partial<Photo> {
-  let latest = steps[0]
+/**
+ * Where a deleted photo was: the latest of the deleted steps that show it that
+ * can still be a place. A purged step, or a deleted step of a purged piece,
+ * can't. Nothing when none can.
+ */
+function placeOf(
+  steps: StageEntry[],
+  purgedPieces: Set<string>,
+): Partial<Photo> {
+  let latest: StageEntry | undefined
   for (const step of steps) {
-    if (compareEntries(step, latest) >= 0) latest = step
+    if (step.purgedAt || (step.deletedAt && purgedPieces.has(step.pieceId)))
+      continue
+    if (!latest || compareEntries(step, latest) >= 0) latest = step
   }
+  if (!latest) return {}
   return {
     lastPieceId: latest.pieceId,
     lastEntryId: latest.id,
     lastStage: latest.stage,
   }
-}
-
-/** Now, or just after the row's last change if its clock is ahead of ours. */
-function changeTime(
-  row: { updatedAt?: string; deletedAt?: string },
-  now: string,
-): string {
-  const after = justAfter(changedAt(row))
-  return after > now ? after : now
 }
 
 /** Adds an item to the list kept under a key. */
@@ -36,9 +37,10 @@ function addTo<T>(map: Map<string, T[]>, key: string, item: T): void {
 /**
  * Brings each photo in line with the steps that show it, once a pull has
  * brought in every step. A deleted photo that a live step shows comes back
- * (a live step on a deleted piece counts). A live photo that only deleted steps
- * show is deleted, and remembers the step it was on. A deleted photo without
- * that place gets it from a deleted step. A photo no step shows is left alone:
+ * (a live step on a deleted piece counts, but one on a purged piece counts as
+ * deleted). A live photo that only deleted steps show is deleted, and
+ * remembers the step it was on. A deleted photo without that place gets it
+ * from a deleted step. A photo no step shows is left alone:
  * only an actual delete deletes a photo. Merged duplicates are left alone.
  *
  * A purged photo (a stub) stays as it is. But if a live step still shows it,
@@ -54,17 +56,21 @@ function addTo<T>(map: Map<string, T[]>, key: string, item: T): void {
 export function settlePhotos(db: GlazetteDB): Promise<void> {
   return db.transaction(
     'rw',
-    [db.photos, db.entries, db.photoBytes],
+    [db.photos, db.entries, db.photoBytes, db.pieces],
     async () => {
       const rows = await db.photos.filter((p) => !p.mergedInto).toArray()
       const photos = rows.filter((p) => !p.purgedAt)
+      const purgedPieces = new Set(
+        await db.pieces.filter((p) => !!p.purgedAt).primaryKeys(),
+      )
       const live = new Map<string, StageEntry[]>()
       const deleted = new Map<string, StageEntry[]>()
       const steps = await db.entries
         .filter((e) => e.photoId !== undefined)
         .toArray()
       for (const step of steps) {
-        addTo(step.deletedAt ? deleted : live, step.photoId as string, step)
+        const gone = step.deletedAt || purgedPieces.has(step.pieceId)
+        addTo(gone ? deleted : live, step.photoId as string, step)
       }
 
       const now = new Date().toISOString()
@@ -92,19 +98,20 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
       for (const photo of photos) {
         const shownBy = deleted.get(photo.id)
         if (live.has(photo.id) || !shownBy) continue
+        const place = placeOf(shownBy, purgedPieces)
         if (!photo.deletedAt) {
           changes.push({
             key: photo.id,
             changes: {
               deletedAt: now,
-              ...placeOf(shownBy),
+              ...place,
               updatedAt: changeTime(photo, now),
             },
           })
-        } else if (photo.lastPieceId === undefined) {
+        } else if (photo.lastPieceId === undefined && place.lastPieceId) {
           changes.push({
             key: photo.id,
-            changes: { ...placeOf(shownBy), updatedAt: changeTime(photo, now) },
+            changes: { ...place, updatedAt: changeTime(photo, now) },
           })
         }
       }
