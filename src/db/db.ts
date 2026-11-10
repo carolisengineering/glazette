@@ -68,3 +68,11 @@ export class GlazetteDB extends Dexie {
 export const db = new GlazetteDB()
 
 export const newId = (): string => crypto.randomUUID()
+
+/** What undeleting a photo changes: it's live again and forgets where it was. */
+export const UNDELETE_PHOTO: Readonly<Partial<Photo>> = Object.freeze({
+  deletedAt: undefined,
+  lastPieceId: undefined,
+  lastEntryId: undefined,
+  lastStage: undefined,
+})

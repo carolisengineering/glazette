@@ -1,5 +1,5 @@
 import type { ProcessedImage } from '../photos/process'
-import { db } from './db'
+import { db, UNDELETE_PHOTO } from './db'
 import {
   addGlazesToPiece,
   addStageEntry,
@@ -236,6 +236,24 @@ test('removing a photo from a step remembers where it was', async () => {
     lastEntryId: entry.id,
     lastStage: entry.stage,
   })
+})
+
+test('undeleting a photo clears everything removing it set', async () => {
+  const pieceId = await createPiece({ photo: photo('h1') })
+  const [entry] = await db.entries.where('pieceId').equals(pieceId).toArray()
+  const photoId = entry.photoId as string
+  // Sync marks move on with every write; the rest must come back as it was.
+  const { updatedAt, dirty, ...before } = (await db.photos.get(photoId)) ?? {}
+
+  await removePhoto(entry.id)
+  await db.photos.update(photoId, { ...UNDELETE_PHOTO })
+
+  const {
+    updatedAt: _u,
+    dirty: _d,
+    ...after
+  } = (await db.photos.get(photoId)) ?? {}
+  expect(after).toEqual(before)
 })
 
 test('upsertClay rejects a blank name', async () => {

@@ -1,6 +1,6 @@
 import { hashesHeld } from '../photos/bytes'
 import { changeTime } from '../sync/records'
-import { db as appDb, type GlazetteDB, newId } from './db'
+import { db as appDb, type GlazetteDB, newId, UNDELETE_PHOTO } from './db'
 import { buildSteps } from './ops'
 import { currentStage, STAGES, stagesBetween } from './stage'
 import type { Photo, Piece, Stage } from './types'
@@ -34,10 +34,7 @@ async function bringBack(
     photos.map((p) => ({
       key: p.id,
       changes: {
-        deletedAt: undefined,
-        lastPieceId: undefined,
-        lastEntryId: undefined,
-        lastStage: undefined,
+        ...UNDELETE_PHOTO,
         updatedAt: changeTime(p, now),
         ...(p.blob || held.has(p.hash) ? {} : { needsDownload: 1 as const }),
       },

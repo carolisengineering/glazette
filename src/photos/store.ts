@@ -1,4 +1,4 @@
-import { db, newId } from '../db/db'
+import { db, newId, UNDELETE_PHOTO } from '../db/db'
 import { hashesHeld, keepBytes } from './bytes'
 import type { ProcessedImage } from './process'
 
@@ -14,12 +14,7 @@ export async function storePhoto(photo: ProcessedImage): Promise<string> {
     .first()
   if (existing) {
     if (existing.deletedAt) {
-      await db.photos.update(existing.id, {
-        deletedAt: undefined,
-        lastPieceId: undefined,
-        lastEntryId: undefined,
-        lastStage: undefined,
-      })
+      await db.photos.update(existing.id, { ...UNDELETE_PHOTO })
     }
     const hasBytes =
       !!existing.blob || (await hashesHeld(db, [photo.hash])).size > 0

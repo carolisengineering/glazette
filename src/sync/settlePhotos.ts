@@ -1,4 +1,4 @@
-import { type GlazetteDB, newId } from '../db/db'
+import { type GlazetteDB, newId, UNDELETE_PHOTO } from '../db/db'
 import { compareEntries } from '../db/stage'
 import type { Photo, StageEntry } from '../db/types'
 import { hashesHeld, keepBytes } from '../photos/bytes'
@@ -86,10 +86,7 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
         changes.push({
           key: photo.id,
           changes: {
-            deletedAt: undefined,
-            lastPieceId: undefined,
-            lastEntryId: undefined,
-            lastStage: undefined,
+            ...UNDELETE_PHOTO,
             updatedAt: changeTime(photo, now),
             ...(hasBytes ? {} : { needsDownload: 1 as const }),
           },

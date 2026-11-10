@@ -2,7 +2,7 @@ import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
 import { PHOTO_HASH } from '../../shared/photoProtocol'
 import { EPOCH } from '../../shared/syncProtocol'
-import { db, newId } from '../db/db'
+import { db, newId, UNDELETE_PHOTO } from '../db/db'
 import {
   isClayRow,
   isEntryRow,
@@ -460,10 +460,7 @@ async function reviveReusedPhotos(
     deleted.map((p) => ({
       key: (p as Photo).id,
       changes: {
-        deletedAt: undefined,
-        lastPieceId: undefined,
-        lastEntryId: undefined,
-        lastStage: undefined,
+        ...UNDELETE_PHOTO,
       },
     })),
   )
