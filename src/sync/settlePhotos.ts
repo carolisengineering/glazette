@@ -114,6 +114,7 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
       }
       if (changes.length > 0) await db.photos.bulkUpdate(changes)
 
+      const repointed: { key: string; changes: Partial<StageEntry> }[] = []
       for (const stub of stranded) {
         if (!stub.blob && !held.has(stub.hash)) continue
         // Bytes still on an old row go to the table, where the new row finds
@@ -135,12 +136,13 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
           needsUpload: 1,
         })
         for (const step of live.get(stub.id) as StageEntry[]) {
-          await db.entries.update(step.id, {
-            photoId: id,
-            updatedAt: changeTime(step, now),
+          repointed.push({
+            key: step.id,
+            changes: { photoId: id, updatedAt: changeTime(step, now) },
           })
         }
       }
+      if (repointed.length > 0) await db.entries.bulkUpdate(repointed)
     },
   )
 }
