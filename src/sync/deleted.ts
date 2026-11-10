@@ -4,13 +4,13 @@ import type { Photo, Piece } from '../db/types'
 const DAY_MS = 86_400_000
 
 /**
- * How long a deleted item has left, in whole days counted from when the server
- * heard of the delete. Zero days left, or an item past its 30 days that's
- * waiting for the daily job, reads as less than a day.
+ * How long a deleted item has left, counted from when the server heard of the
+ * delete and rounded up to whole days. An item past its 30 days that's waiting
+ * for the daily job reads as less than a day.
  */
 export function daysLeftLabel(heardAt: string, now: Date): string {
   const left = Date.parse(heardAt) + RETENTION_DAYS * DAY_MS - now.getTime()
-  const days = Math.floor(left / DAY_MS)
+  const days = Math.ceil(left / DAY_MS)
   if (!(days > 0)) return 'Less than a day left'
   return days === 1 ? '1 day left' : `${days} days left`
 }

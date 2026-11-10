@@ -20,8 +20,9 @@ vi.mock('../sync/useSync', async (orig) => ({
 }))
 
 const T = '2026-01-02T00:00:00.000Z'
-// Heard of the delete a day before the tests' "now", so 29 days are left.
-const HEARD = new Date(Date.now() - 24 * 3_600_000 + 60_000).toISOString()
+// Heard of the delete a little over a day before the tests' "now", so 29 days
+// are left, rounded up.
+const HEARD = new Date(Date.now() - 24 * 3_600_000 - 60_000).toISOString()
 const HASH = 'b'.repeat(64)
 
 const piece = (id: string, extra: Partial<Piece> = {}): Piece => ({

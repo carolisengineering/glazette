@@ -6,13 +6,13 @@ const after = (ms: number) => new Date(Date.parse(HEARD) + ms)
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 
-test('days left counts from when the server heard', () => {
+test('days left counts from when the server heard, rounded up', () => {
+  expect(daysLeftLabel(HEARD, after(0))).toBe('30 days left')
   expect(daysLeftLabel(HEARD, after(DAY))).toBe('29 days left')
-  expect(daysLeftLabel(HEARD, after(27 * DAY + 12 * HOUR))).toBe('2 days left')
+  expect(daysLeftLabel(HEARD, after(27 * DAY + 12 * HOUR))).toBe('3 days left')
   expect(daysLeftLabel(HEARD, after(29 * DAY))).toBe('1 day left')
-  expect(daysLeftLabel(HEARD, after(29 * DAY + HOUR))).toBe(
-    'Less than a day left',
-  )
+  expect(daysLeftLabel(HEARD, after(29 * DAY + 23 * HOUR))).toBe('1 day left')
+  expect(daysLeftLabel(HEARD, after(30 * DAY))).toBe('Less than a day left')
   expect(daysLeftLabel(HEARD, after(31 * DAY))).toBe('Less than a day left')
 })
 
