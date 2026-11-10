@@ -10,6 +10,7 @@ import {
   requestSync,
   startSync,
   stopSync,
+  syncRecords,
   useSync,
   WAIT_RETRY_MAX_MS,
   WAIT_RETRY_START_MS,
@@ -395,4 +396,75 @@ test('signing out during the move stops the run before it syncs', async () => {
   await flush()
   expect(syncOnce).not.toHaveBeenCalled()
   expect(useSync.getState().syncing).toBe(false)
+})
+
+// --- A record sync a caller waits on -----------------------------------------
+
+type Outcome = engine.SyncOutcome
+
+test('signed out, a record sync does nothing', async () => {
+  expect(await syncRecords()).toBe('signed-out')
+  expect(syncOnce).not.toHaveBeenCalled()
+})
+
+test('a record sync runs one and ends with it, without the photo transfer', async () => {
+  setAccount('carol@example.com')
+  syncOnce.mockResolvedValueOnce('offline')
+  expect(await syncRecords()).toBe('offline')
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  expect(syncOnce).toHaveBeenCalledWith(
+    db,
+    expect.anything(),
+    'carol@example.com',
+  )
+  expect(transferPhotos).not.toHaveBeenCalled()
+})
+
+test("a record sync asked for during a run's record part waits for that one", async () => {
+  setAccount('carol@example.com')
+  let finish: (o: Outcome) => void = () => {}
+  syncOnce.mockImplementationOnce(() => new Promise((r) => (finish = r)))
+  requestSync()
+  await flush()
+  let outcome: Outcome | undefined
+  void syncRecords().then((o) => (outcome = o))
+  await flush()
+  expect(outcome).toBeUndefined()
+  finish('error')
+  await flush()
+  expect(outcome).toBe('error')
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+})
+
+test("a record sync asked for while a run's photos transfer doesn't wait for them", async () => {
+  setAccount('carol@example.com')
+  let finish: (o: Outcome) => void = () => {}
+  transferPhotos.mockImplementationOnce(() => new Promise((r) => (finish = r)))
+  requestSync()
+  await flush()
+  expect(transferPhotos).toHaveBeenCalledTimes(1)
+  let outcome: Outcome | undefined
+  void syncRecords().then((o) => (outcome = o))
+  await flush()
+  expect(outcome).toBe('done')
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  expect(useSync.getState().syncing).toBe(true)
+  finish('done')
+  await flush()
+})
+
+test("a run's record part waits for a record sync already running", async () => {
+  setAccount('carol@example.com')
+  let finish: (o: Outcome) => void = () => {}
+  syncOnce.mockImplementationOnce(() => new Promise((r) => (finish = r)))
+  const asked = syncRecords()
+  await flush()
+  requestSync()
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(1)
+  finish('done')
+  expect(await asked).toBe('done')
+  await flush()
+  expect(syncOnce).toHaveBeenCalledTimes(2)
+  expect(transferPhotos).toHaveBeenCalledTimes(1)
 })

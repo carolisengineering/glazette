@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import { moveBytesApart } from '../photos/bytes'
-import { syncOnce } from './engine'
+import { type SyncOutcome, syncOnce } from './engine'
 import { fetchPhotoTransport } from './photoTransport'
 import { onLocalChange } from './track'
 import { transferPhotos } from './transfer'
@@ -62,6 +62,26 @@ async function scheduleWaitCheck() {
 let running = false
 let again = false
 
+// The record part of a sync, one at a time: the loop's, or one a caller asked
+// for with syncRecords, which may run while the loop's photos transfer.
+let records: Promise<SyncOutcome | undefined> | undefined
+
+/** Undefined when the account isn't signed in by then, so nothing synced. */
+function runRecords(move: boolean): Promise<SyncOutcome | undefined> {
+  const run: Promise<SyncOutcome | undefined> = (async () => {
+    // First, so the sync's writes to photo rows come after the move.
+    if (move) await moveBytesApart(db)
+    // Read after the move, which can take a while.
+    const { status, email } = useAccount.getState()
+    if (status !== 'signed-in' || !email) return undefined
+    return syncOnce(db, fetchTransport, email)
+  })().finally(() => {
+    if (records === run) records = undefined
+  })
+  records = run
+  return run
+}
+
 /**
  * Syncs in the background, if signed in. One sync runs at a time; requests
  * made during a run lead to exactly one more run after it.
@@ -79,18 +99,26 @@ export function requestSync(): void {
   void loop()
 }
 
+/**
+ * Brings this device's records up to date with the account now: waits for the
+ * record part of a sync that's already running, or runs one, even while photos
+ * transfer. Resolves with how it ended. Photo transfers aren't waited for.
+ */
+export async function syncRecords(): Promise<SyncOutcome> {
+  if (useAccount.getState().status !== 'signed-in') return 'signed-out'
+  return (await (records ?? runRecords(false))) ?? 'signed-out'
+}
+
 async function loop(): Promise<void> {
   try {
     do {
       again = false
       if (useAccount.getState().status !== 'signed-in') break
       useSync.setState({ syncing: true })
-      // First, so the sync's writes to photo rows come after the move.
-      await moveBytesApart(db)
-      // Read after the move, which can take a while.
-      const { status, email } = useAccount.getState()
-      if (status !== 'signed-in' || !email) break
-      let outcome = await syncOnce(db, fetchTransport, email)
+      // A record sync someone asked for may be running; this run's comes after.
+      while (records) await records.catch(() => undefined)
+      let outcome = await runRecords(true)
+      if (outcome === undefined) break
       // Photo bytes follow the records, in the same run.
       if (outcome === 'done') {
         outcome = await transferPhotos(db, fetchPhotoTransport)
