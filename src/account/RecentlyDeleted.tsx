@@ -69,12 +69,19 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
   const [loaded, setLoaded] = useState<Loaded>()
   const [said, setSaid] = useState<{ ok: boolean; text: string }>()
   const [busyId, setBusyId] = useState<string>()
+  // Set once a list fetched after a record sync finished has landed.
+  const [afterSync, setAfterSync] = useState(false)
   const syncing = useSync((s) => s.syncing)
-  const wasSyncing = useRef(syncing)
+  // Moves on when a record sync finishes, before its photo transfers do.
+  const lastSyncedAt = useLiveQuery(
+    async () => (await db.syncState.get('state'))?.lastSyncedAt ?? '',
+    [],
+  )
+  const seenSyncedAt = useRef<string>(undefined)
   const latest = useRef(0)
   const nameIds = useId()
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (synced = false) => {
     const mine = ++latest.current
     const result = await fetchDeleted()
     if (mine !== latest.current) return
@@ -83,6 +90,7 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
       return
     }
     setLoaded(result)
+    if (synced) setAfterSync(true)
   }, [])
 
   useEffect(() => {
@@ -95,10 +103,11 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
   }, [load])
 
   useEffect(() => {
-    const was = wasSyncing.current
-    wasSyncing.current = syncing
-    if (was && !syncing) void load()
-  }, [syncing, load])
+    if (lastSyncedAt === undefined) return
+    const was = seenSyncedAt.current
+    seenSyncedAt.current = lastSyncedAt
+    if (was !== undefined && was !== lastSyncedAt) void load(true)
+  }, [lastSyncedAt, load])
 
   const items = Array.isArray(loaded) ? loaded : undefined
   const rows = useLiveQuery(async () => {
@@ -150,9 +159,10 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
   }
 
   // A running sync may bring in a delete the list waits for. Until the
-  // refetch after it lands, an empty list shows nothing rather than "Nothing
-  // here", which could send someone away thinking the piece is gone.
-  const waiting = syncing && !rows?.length
+  // refetch after its record sync lands, an empty list shows nothing rather
+  // than "Nothing here", which could send someone away thinking the piece is
+  // gone. Photo transfers, which can take minutes, aren't waited for.
+  const waiting = syncing && !afterSync && !rows?.length
   const now = new Date()
   return (
     <section className="flex flex-col gap-4">

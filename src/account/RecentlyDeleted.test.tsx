@@ -56,6 +56,19 @@ beforeEach(async () => {
 
 afterEach(() => vi.restoreAllMocks())
 
+// What the record sync writes when it finishes; photo transfers come after.
+let syncedAt = Date.parse(T)
+const finishRecordSync = () =>
+  act(async () => {
+    syncedAt += 60_000
+    await db.syncState.put({
+      id: 'state',
+      account: 'carol@example.com',
+      cursor: 1,
+      lastSyncedAt: new Date(syncedAt).toISOString(),
+    })
+  })
+
 async function seedBoth() {
   await db.pieces.bulkAdd([piece('p1', { deletedAt: T })])
   await db.entries.bulkAdd([
@@ -174,7 +187,7 @@ test('a list fetched again after a sync shows new deletes', async () => {
   vi.mocked(fetchDeleted).mockResolvedValue([item('piece', 'p1')])
   act(() => useSync.setState({ syncing: true }))
   expect(fetchDeleted).toHaveBeenCalledTimes(1)
-  act(() => useSync.setState({ syncing: false }))
+  await finishRecordSync()
   expect(await screen.findByText('Blue mug')).toBeVisible()
   expect(fetchDeleted).toHaveBeenCalledTimes(2)
 })
@@ -190,14 +203,25 @@ test("while a sync runs, an empty list shows nothing until the sync's refetch la
   expect(screen.queryByText(/Nothing here/)).toBeNull()
   expect(screen.queryByRole('list')).toBeNull()
 
-  // The pull brings the delete in, and the refetch after the sync shows it.
+  // The pull brings the delete in, and the refetch after the record sync
+  // shows it, while photos still transfer.
   await db.pieces.update('p1', { deletedAt: T })
-  act(() => useSync.setState({ syncing: false }))
+  await finishRecordSync()
   expect(await screen.findByText('Blue mug')).toBeVisible()
   expect(fetchDeleted).toHaveBeenCalledTimes(2)
 })
 
-test('a list still empty after the sync shows the empty line', async () => {
+test('a list still empty after the record sync shows the empty line while photos transfer', async () => {
+  useSync.setState({ syncing: true })
+  render(<RecentlyDeleted onBack={() => {}} />)
+  await waitFor(() => expect(fetchDeleted).toHaveBeenCalledTimes(1))
+  await finishRecordSync()
+  expect(await screen.findByText(/Nothing here/)).toBeVisible()
+  expect(fetchDeleted).toHaveBeenCalledTimes(2)
+  expect(useSync.getState().syncing).toBe(true)
+})
+
+test('a sync that ends without finishing shows the empty line', async () => {
   useSync.setState({ syncing: true })
   render(<RecentlyDeleted onBack={() => {}} />)
   await waitFor(() => expect(fetchDeleted).toHaveBeenCalledTimes(1))
