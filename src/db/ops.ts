@@ -90,7 +90,7 @@ function glazeRows(
  * Builds the filled steps for `skipped` stages plus the chosen step, and the
  * glaze rows for whichever of them is the Glazed step. Dates are never invented.
  */
-function buildSteps(
+export function buildSteps(
   pieceId: string,
   skipped: Stage[],
   chosen: Omit<StageEntry, 'id' | 'pieceId'>,
