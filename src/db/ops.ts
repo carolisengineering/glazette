@@ -1,6 +1,8 @@
+import Dexie, { type Transaction } from 'dexie'
 import type { ProcessedImage } from '../photos/process'
 import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
+import { elapsed, track } from '../telemetry/telemetry'
 import { db, newId } from './db'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
 import { currentStage, latestEntry, STAGES, stagesBetween } from './stage'
@@ -108,6 +110,25 @@ function optionalDate(value: string | undefined): string | undefined {
   return value === undefined ? undefined : toIsoDate(value)
 }
 
+/**
+ * Reports a save once its data is committed. Called inside a caller's
+ * transaction, the op's own nested transaction resolves before the real commit,
+ * so this waits for the outer one, and an aborted outer one reports nothing.
+ * Capture `outer` (Dexie.currentTransaction) before the op awaits anything.
+ */
+function reportSave(
+  outer: Transaction | undefined,
+  glazeLayers: number,
+  event?: () => void,
+): void {
+  const report = () => {
+    if (glazeLayers > 0) track('glazes_added', { layers: glazeLayers })
+    event?.()
+  }
+  if (outer) outer.on('complete', report)
+  else report()
+}
+
 export async function createPiece(input: {
   photo?: ProcessedImage
   name?: string
@@ -118,6 +139,8 @@ export async function createPiece(input: {
   note?: string
   glazes?: GlazeInput
 }): Promise<string> {
+  const start = performance.now()
+  const outer = Dexie.currentTransaction
   const now = nowIso()
   const stage = input.stage ?? 'thrown'
   const stepDate = optionalDate(input.date ?? input.photo?.takenAt)
@@ -130,6 +153,7 @@ export async function createPiece(input: {
     createdAt,
     updatedAt: now,
   }
+  let layers = 0
   await db.transaction(
     'rw',
     db.pieces,
@@ -153,7 +177,15 @@ export async function createPiece(input: {
       await db.pieces.add(piece)
       await db.entries.bulkAdd(entries)
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
+      layers = apps.length
     },
+  )
+  reportSave(outer, layers, () =>
+    track('piece_logged', {
+      has_photo: !!input.photo,
+      stage,
+      ms: elapsed(start),
+    }),
   )
   return piece.id
 }
@@ -166,9 +198,12 @@ export async function addStageEntry(input: {
   date?: string
   glazes?: GlazeInput
 }): Promise<string> {
+  const start = performance.now()
+  const outer = Dexie.currentTransaction
   const now = nowIso()
   const date = optionalDate(input.date ?? input.photo?.takenAt)
-  return db.transaction(
+  let layers = 0
+  const chosenId = await db.transaction(
     'rw',
     db.entries,
     db.glazeApps,
@@ -197,9 +232,18 @@ export async function addStageEntry(input: {
       await db.entries.bulkAdd(entries)
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
       await db.pieces.update(input.pieceId, { updatedAt: now })
+      layers = apps.length
       return chosenId
     },
   )
+  reportSave(outer, layers, () =>
+    track('stage_added', {
+      stage: input.stage,
+      has_photo: !!input.photo,
+      ms: elapsed(start),
+    }),
+  )
+  return chosenId
 }
 
 /**
@@ -266,17 +310,30 @@ export async function addGlazesToPiece(
   glazes: GlazeInput,
 ): Promise<void> {
   if (glazes.length === 0) return
-  await db.transaction('rw', db.entries, db.glazeApps, db.pieces, async () => {
-    const entries = await db.entries.where('pieceId').equals(pieceId).toArray()
-    const glazed = latestEntry(entries, 'glazed')
-    if (!glazed) return
-    const existing = (
-      await db.glazeApps.where('entryId').equals(glazed.id).toArray()
-    ).filter((a) => !a.deletedAt)
-    const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
-    await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
-    await db.pieces.update(pieceId, { updatedAt: nowIso() })
-  })
+  // Captured before any await, so a caller's transaction is still current.
+  const outer = Dexie.currentTransaction
+  const added = await db.transaction(
+    'rw',
+    db.entries,
+    db.glazeApps,
+    db.pieces,
+    async () => {
+      const entries = await db.entries
+        .where('pieceId')
+        .equals(pieceId)
+        .toArray()
+      const glazed = latestEntry(entries, 'glazed')
+      if (!glazed) return false
+      const existing = (
+        await db.glazeApps.where('entryId').equals(glazed.id).toArray()
+      ).filter((a) => !a.deletedAt)
+      const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
+      await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
+      await db.pieces.update(pieceId, { updatedAt: nowIso() })
+      return true
+    },
+  )
+  if (added) reportSave(outer, glazes.length)
 }
 
 /** Sets a step's date, or clears it (removes the field) when `date` is undefined. */

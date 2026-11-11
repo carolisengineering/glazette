@@ -8,9 +8,15 @@ import {
 import { CaptureScreen } from './routes/capture'
 import { GlazesScreen } from './routes/glazes'
 import { PieceScreen } from './routes/piece'
-import { ShelfScreen } from './routes/shelf'
+import { ShelfScreen, skipStartup } from './routes/shelf'
 
-const rootRoute = createRootRoute({ component: Outlet })
+const rootRoute = createRootRoute({
+  component: Outlet,
+  // Startup only counts when the shelf is the first screen of the page load.
+  beforeLoad: ({ location }) => {
+    if (location.pathname !== '/') skipStartup()
+  },
+})
 
 const shelfRoute = createRoute({
   getParentRoute: () => rootRoute,

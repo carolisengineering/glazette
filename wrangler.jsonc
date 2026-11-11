@@ -19,7 +19,8 @@
   "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "glazette-photos" }],
   "triggers": { "crons": ["17 8 * * *"] },
   "vars": {
-    "APP_ORIGIN": "https://glazette.offhours.workers.dev"
+    "APP_ORIGIN": "https://glazette.offhours.workers.dev",
+    "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "observability": {
     "enabled": true

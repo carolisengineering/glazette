@@ -12,6 +12,10 @@ import { EditSheet } from '../piece/EditSheet'
 import { FactCards } from '../piece/FactCards'
 import { Hero } from '../piece/Hero'
 import { Timeline } from '../piece/Timeline'
+import { elapsed, track } from '../telemetry/telemetry'
+
+// Opens slower than this aren't sent: the photo was waiting on the network.
+const OPEN_REPORT_LIMIT_MS = 10_000
 
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
@@ -26,6 +30,8 @@ type Pending =
 export function PieceScreen() {
   const { id } = useParams({ from: '/piece/$id' })
   const view = usePiece(id)
+  // Taken on mount, so the time covers loading the piece and its photo.
+  const [openedAt] = useState(() => performance.now())
 
   if (view === undefined) return null
   if (view === null) {
@@ -41,10 +47,16 @@ export function PieceScreen() {
       </main>
     )
   }
-  return <PieceBoard key={view.piece.id} view={view} />
+  return <PieceBoard key={view.piece.id} view={view} openedAt={openedAt} />
 }
 
-function PieceBoard({ view }: { view: PieceDetail }) {
+function PieceBoard({
+  view,
+  openedAt,
+}: {
+  view: PieceDetail
+  openedAt: number
+}) {
   const { piece, entries, stage } = view
   const navigate = useNavigate()
   const name = displayName(piece)
@@ -74,6 +86,21 @@ function PieceBoard({ view }: { view: PieceDetail }) {
   const heroEntry =
     picked ??
     (compare ? (side === 'fired' ? afterPhoto : beforePhoto) : latestWithPhoto)
+  // Once per visit: when the hero photo shows, or right away if there is none.
+  const openedReported = useRef(false)
+  const reportOpened = (hasPhoto: boolean) => {
+    if (openedReported.current) return
+    openedReported.current = true
+    // A photo still downloading isn't a measure of how fast the app is.
+    const ms = elapsed(openedAt)
+    if (ms > OPEN_REPORT_LIMIT_MS) return
+    track('piece_opened', { ms, has_photo: hasPhoto })
+  }
+  const heroHasPhoto = !!heroEntry?.photoId
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reportOpened only touches a ref and constants
+  useEffect(() => {
+    if (!heroHasPhoto) reportOpened(false)
+  }, [heroHasPhoto])
   const latest = latestEntry(entries)
   const headerEntry = picked ?? latest
   const next = nextStage(stage)
@@ -111,6 +138,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     if (text === savedNotes.current) return
     if (await attempt(() => updatePiece(piece.id, { notes: text }))) {
       savedNotes.current = text
+      track('piece_edited', { part: 'notes' })
     }
   }
 
@@ -124,6 +152,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
       void updatePiece(pieceId, { notes: text }).then(
         () => {
           savedNotes.current = text
+          track('piece_edited', { part: 'notes' })
         },
         () => {},
       )
@@ -142,9 +171,12 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     const target = pending
     setPending(undefined)
     if (target?.kind === 'entry') {
-      await attempt(() => softDelete('entries', target.entry.id))
+      if (await attempt(() => softDelete('entries', target.entry.id))) {
+        track('step_deleted', {})
+      }
     } else if (target?.kind === 'piece') {
       if (await attempt(() => softDelete('pieces', piece.id))) {
+        track('piece_deleted', {})
         await navigate({ to: '/', replace: true })
       }
     }
@@ -154,6 +186,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col text-ink">
       <Hero
         photoId={heroEntry?.photoId}
+        onShown={() => reportOpened(true)}
         alt={picked ? `${name}, ${STAGE_LABEL[picked.stage]}` : name}
       >
         {compare && !picked ? (
@@ -236,7 +269,12 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => attempt(() => markLost(piece.id, !piece.lost))}
+            onClick={async () => {
+              const lost = !piece.lost
+              if (await attempt(() => markLost(piece.id, lost))) {
+                track('piece_lost', { lost })
+              }
+            }}
             className={secondary}
           >
             {piece.lost ? 'Mark as found' : 'Mark as lost'}

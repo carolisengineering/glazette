@@ -3,6 +3,7 @@ import { GlazetteDB } from '../db/db'
 import type { Photo } from '../db/types'
 import { moveBytesApart } from '../photos/bytes'
 import { sha256 } from '../photos/hash'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { realBlobs } from '../test/realBlobs'
 import { SyncStopped } from './engine'
 import type { PhotoTransport } from './photoTransport'
@@ -102,6 +103,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  setSinkForTests(undefined)
   await db.delete()
 })
 
@@ -245,6 +247,52 @@ test("one photo that throws doesn't stop the other uploads", async () => {
   expect((await db.photos.get('b'))?.needsUpload).toBeUndefined()
   expect(server.files().has(`full/${b.hash}`)).toBe(true)
   expect(error).toHaveBeenCalledTimes(1)
+})
+
+test('errors from a photo reach telemetry, a signed-out stop does not', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const captured: unknown[] = []
+  setSinkForTests({
+    capture: () => {},
+    identify: () => {},
+    reset: () => {},
+    captureException: (e) => captured.push(e),
+  })
+  const a = await withBytes('a', 'clay one', { needsUpload: 1 })
+  await seed(db, [a])
+  const boom = new Error('boom')
+  const breaking: PhotoTransport = {
+    ...server,
+    upload: async () => {
+      throw boom
+    },
+  }
+  expect(await transferPhotos(db, breaking)).toBe('error')
+  expect(captured).toEqual([boom])
+
+  captured.length = 0
+  const upload = vi.fn(async () => {
+    throw new SyncStopped('signed-out')
+  })
+  expect(await transferPhotos(db, { ...server, upload })).toBe('signed-out')
+  expect(captured).toEqual([])
+})
+
+test('an unexpected error that ends the whole transfer reaches telemetry', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const captured: unknown[] = []
+  setSinkForTests({
+    capture: () => {},
+    identify: () => {},
+    reset: () => {},
+    captureException: (e) => captured.push(e),
+  })
+  const boom = new Error('db down')
+  vi.spyOn(db.photos, 'where').mockImplementation(() => {
+    throw boom
+  })
+  expect(await transferPhotos(db, server)).toBe('error')
+  expect(captured).toEqual([boom])
 })
 
 test('a signed-out upload still stops everything at once', async () => {

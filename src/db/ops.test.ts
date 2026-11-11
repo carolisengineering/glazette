@@ -1,4 +1,5 @@
 import type { ProcessedImage } from '../photos/process'
+import { setSinkForTests, type TelemetrySink } from '../telemetry/telemetry'
 import { db, UNDELETE_PHOTO } from './db'
 import {
   addGlazesToPiece,
@@ -24,7 +25,20 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  setSinkForTests(undefined)
 })
+
+function captureEvents() {
+  const events: Array<[string, Record<string, unknown>]> = []
+  const sink: TelemetrySink = {
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  }
+  setSinkForTests(sink)
+  return events
+}
 
 const settings: Settings = {
   id: 'app',
@@ -522,4 +536,141 @@ test('updatePiece on a soft-deleted piece leaves it untouched', async () => {
 test('updatePiece on a missing piece resolves and creates nothing', async () => {
   await updatePiece('nope', { notes: 'x' })
   expect(await db.pieces.get('nope')).toBeUndefined()
+})
+
+test('createPiece reports piece_logged', async () => {
+  const events = captureEvents()
+  await createPiece({ photo: photo('t1') })
+  expect(events).toHaveLength(1)
+  expect(events[0][0]).toBe('piece_logged')
+  expect(events[0][1]).toMatchObject({ has_photo: true, stage: 'thrown' })
+  expect(typeof events[0][1].ms).toBe('number')
+})
+
+test('addStageEntry reports stage_added', async () => {
+  const id = await createPiece({})
+  const events = captureEvents()
+  await addStageEntry({ pieceId: id, stage: 'trimmed' })
+  expect(events).toHaveLength(1)
+  expect(events[0][0]).toBe('stage_added')
+  expect(events[0][1]).toMatchObject({ stage: 'trimmed', has_photo: false })
+  expect(typeof events[0][1].ms).toBe('number')
+})
+
+test('addGlazesToPiece reports glazes_added only when it adds', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const noGlazed = await createPiece({})
+  const glazed = await createPiece({ stage: 'glazed' })
+  const events = captureEvents()
+  await addGlazesToPiece(glazed, [])
+  await addGlazesToPiece(noGlazed, [{ glazeId: 'g1' }])
+  expect(events).toEqual([])
+  await addGlazesToPiece(glazed, [{ glazeId: 'g1' }, { glazeId: 'g1' }])
+  expect(events).toEqual([['glazes_added', { layers: 2 }]])
+})
+
+test('createPiece reports glazes_added when it writes glaze rows', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const events = captureEvents()
+  await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+  expect(events.map(([n]) => n)).toEqual(['glazes_added', 'piece_logged'])
+  expect(events[0][1]).toEqual({ layers: 1 })
+})
+
+test('addStageEntry reports glazes_added when it writes glaze rows', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({})
+  const events = captureEvents()
+  await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    glazes: [{ glazeId: 'g1' }, { glazeId: 'g1' }],
+  })
+  expect(events.map(([n]) => n)).toEqual(['glazes_added', 'stage_added'])
+  expect(events[0][1]).toEqual({ layers: 2 })
+})
+
+test('nested in an outer transaction, ops report only after it commits', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({})
+  const events = captureEvents()
+  await db.transaction(
+    'rw',
+    db.pieces,
+    db.entries,
+    db.glazeApps,
+    db.photos,
+    db.photoBytes,
+    async () => {
+      await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+      await addStageEntry({ pieceId: id, stage: 'trimmed' })
+      expect(events).toEqual([])
+    },
+  )
+  expect(events.map(([n]) => n).sort()).toEqual([
+    'glazes_added',
+    'piece_logged',
+    'stage_added',
+  ])
+})
+
+test('nested in an outer transaction that aborts, ops report nothing', async () => {
+  const id = await createPiece({})
+  const events = captureEvents()
+  await expect(
+    db.transaction(
+      'rw',
+      db.pieces,
+      db.entries,
+      db.glazeApps,
+      db.photos,
+      db.photoBytes,
+      async () => {
+        await addStageEntry({ pieceId: id, stage: 'trimmed' })
+        throw new Error('abort')
+      },
+    ),
+  ).rejects.toThrow('abort')
+  expect(events).toEqual([])
+})
+
+test('addGlazesToPiece nested in an outer transaction reports only after commit, and not on abort', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+  const tables = [db.pieces, db.entries, db.glazeApps] as const
+  const events = captureEvents()
+  await db.transaction('rw', ...tables, async () => {
+    await addGlazesToPiece(id, [{ glazeId: 'g1' }])
+    expect(events).toEqual([])
+  })
+  expect(events).toEqual([['glazes_added', { layers: 1 }]])
+
+  events.length = 0
+  await expect(
+    db.transaction('rw', ...tables, async () => {
+      await addGlazesToPiece(id, [{ glazeId: 'g1' }])
+      throw new Error('abort')
+    }),
+  ).rejects.toThrow('abort')
+  expect(events).toEqual([])
+})
+
+test("a throwing sink doesn't break createPiece", async () => {
+  setSinkForTests({
+    capture: () => {
+      throw new Error('sink down')
+    },
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  const id = await createPiece({ name: 'Mug' })
+  expect(await db.pieces.get(id)).toBeDefined()
+})
+
+test('a failed createPiece reports nothing', async () => {
+  const events = captureEvents()
+  vi.spyOn(db.entries, 'bulkAdd').mockRejectedValue(new Error('boom'))
+  await expect(createPiece({})).rejects.toThrow()
+  expect(events).toEqual([])
 })

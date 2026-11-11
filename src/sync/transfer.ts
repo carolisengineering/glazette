@@ -2,6 +2,7 @@ import { MISSING_LIMIT, PHOTO_HASH } from '../../shared/photoProtocol'
 import type { GlazetteDB } from '../db/db'
 import { bytesOf, keepBytes } from '../photos/bytes'
 import { sha256 } from '../photos/hash'
+import { captureError } from '../telemetry/telemetry'
 import { type SyncOutcome, SyncStopped } from './engine'
 import type { PhotoTransport } from './photoTransport'
 import { quietly } from './track'
@@ -31,6 +32,7 @@ export async function transferPhotos(
   } catch (error) {
     if (error instanceof SyncStopped) return error.reason
     console.error(error)
+    captureError(error)
     return 'error'
   }
 }
@@ -112,6 +114,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
       stopsAll(error)
       ok = false
       console.error(error)
+      captureError(error)
     }
   }
   await stopWaitingToUpload(db, noBytes)
@@ -126,6 +129,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
       stopsAll(error)
       ok = false
       console.error(error)
+      captureError(error)
       continue
     }
     // The server already has these.
@@ -171,6 +175,7 @@ async function upload(db: GlazetteDB, transport: PhotoTransport) {
         stopsAll(error)
         ok = false
         console.error(error)
+        captureError(error)
       }
     }
   }
@@ -193,6 +198,7 @@ async function download(db: GlazetteDB, transport: PhotoTransport) {
       stopsAll(error)
       ok = false
       console.error(error)
+      captureError(error)
     }
   }
   return ok

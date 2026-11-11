@@ -5,15 +5,22 @@ import { PhotoImg } from '../components/PhotoImg'
 interface Props {
   photoId?: string
   alt: string
+  /** Called when the photo has loaded. */
+  onShown?: () => void
   /** Overlay at the bottom of the photo, such as the before/after toggle. */
   children?: ReactNode
 }
 
 /** The big photo at the top of the piece, with the way back to the shelf. */
-export function Hero({ photoId, alt, children }: Props) {
+export function Hero({ photoId, alt, onShown, children }: Props) {
   return (
     <div className="relative h-[400px] flex-none">
-      <PhotoImg photoId={photoId} alt={alt} className="size-full" />
+      <PhotoImg
+        photoId={photoId}
+        alt={alt}
+        className="size-full"
+        onShown={onShown}
+      />
       <Link
         to="/"
         aria-label="Back to shelf"

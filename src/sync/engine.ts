@@ -7,6 +7,7 @@ import {
   type SyncRecord,
 } from '../../shared/syncProtocol'
 import type { GlazetteDB } from '../db/db'
+import { captureError } from '../telemetry/telemetry'
 import { mergePhotosByHash } from './photoMerge'
 import {
   applyRecords,
@@ -57,6 +58,7 @@ export async function syncOnce(
   } catch (error) {
     if (error instanceof SyncStopped) return error.reason
     console.error(error)
+    captureError(error)
     return 'error'
   }
 }

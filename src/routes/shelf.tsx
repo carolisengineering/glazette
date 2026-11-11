@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AccountButton } from '../account/AccountButton'
 import { AccountSheet } from '../account/AccountSheet'
 import { BackupSheet } from '../backup/BackupSheet'
@@ -13,9 +13,29 @@ import {
   type ShelfChip,
   usePiecesQuery,
 } from '../db/queries'
+import { track } from '../telemetry/telemetry'
+
+// Startup is measured once per page load, not each time the shelf shows again.
+let startupReported = false
+
+/** Called when the page loads on another screen, since its time isn't the shelf's. */
+export function skipStartup(): void {
+  startupReported = true
+}
+
+/** For tests only: lets the next shelf report startup again. */
+export function resetStartupForTests(): void {
+  startupReported = false
+}
 
 export function ShelfScreen() {
   const loaded = usePiecesQuery()
+  const loadedCount = loaded?.length
+  useEffect(() => {
+    if (loadedCount === undefined || startupReported) return
+    startupReported = true
+    track('startup', { ms: Math.round(performance.now()), pieces: loadedCount })
+  }, [loadedCount])
   const views = loaded ?? []
   const [chip, setChip] = useState<ShelfChip>('all')
   const [backupOpen, setBackupOpen] = useState(false)
@@ -40,7 +60,10 @@ export function ShelfScreen() {
           <button
             type="button"
             aria-label="Backup"
-            onClick={() => setBackupOpen(true)}
+            onClick={() => {
+              track('screen_viewed', { screen: 'backup' })
+              setBackupOpen(true)
+            }}
             className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
           >
             <svg
@@ -59,7 +82,12 @@ export function ShelfScreen() {
               <path d="m9 15.5 3-3 3 3" />
             </svg>
           </button>
-          <AccountButton onClick={() => setAccountOpen(true)} />
+          <AccountButton
+            onClick={() => {
+              track('screen_viewed', { screen: 'account' })
+              setAccountOpen(true)
+            }}
+          />
         </div>
       </header>
       <KilnBanner count={ready} />

@@ -13,6 +13,7 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
 import type { Piece } from '../db/types'
+import { track } from '../telemetry/telemetry'
 
 interface Props {
   piece: Piece
@@ -46,6 +47,7 @@ export function EditSheet({ piece, onClose }: Props) {
         form: form ?? (piece.form === 'other' ? 'other' : undefined),
         clayId: await clay.resolve(),
       })
+      track('piece_edited', { part: 'details' })
       onClose()
     } catch {
       showToast(SAVE_ERROR)

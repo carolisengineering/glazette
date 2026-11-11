@@ -9,6 +9,7 @@ import {
 import { GlazetteDB } from '../db/db'
 import { putBackPhoto, putBackPiece } from '../db/putBack'
 import type { Piece } from '../db/types'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { SyncStopped, syncOnce, type Transport } from './engine'
 import { createTestServer } from './testServer'
 import { SYNCED_TABLES } from './track'
@@ -34,6 +35,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  setSinkForTests(undefined)
   await a.delete()
   await b.delete()
 })
@@ -479,6 +481,36 @@ describe('stopping early keeps what is safe', () => {
 
     expect(await syncOnce(a, broken, ME)).toBe('error')
     expect(log).toHaveBeenCalled()
+  })
+
+  test('an unexpected error reaches telemetry, a stop does not', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const captured: unknown[] = []
+    setSinkForTests({
+      capture: () => {},
+      identify: () => {},
+      reset: () => {},
+      captureException: (e) => captured.push(e),
+    })
+    const boom = new Error('boom')
+    const broken: Transport = {
+      pull: async () => {
+        throw boom
+      },
+      push: (r) => server.push(r),
+    }
+    expect(await syncOnce(a, broken, ME)).toBe('error')
+    expect(captured).toEqual([boom])
+
+    captured.length = 0
+    const offline: Transport = {
+      pull: async () => {
+        throw new SyncStopped('offline')
+      },
+      push: (r) => server.push(r),
+    }
+    expect(await syncOnce(a, offline, ME)).toBe('offline')
+    expect(captured).toEqual([])
   })
 
   test("a server that says there's more without moving on is an error", async () => {

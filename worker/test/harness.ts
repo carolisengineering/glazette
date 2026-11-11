@@ -36,6 +36,7 @@ export async function makeTestEnv(): Promise<{
     ...proxy.env,
     BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret-0123',
     APP_ORIGIN: 'http://localhost',
+    POSTHOG_HOST: 'https://us.i.posthog.com',
   }
   return { env, dispose: () => proxy.dispose() }
 }

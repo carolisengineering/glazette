@@ -224,4 +224,20 @@ describe('useAccount', () => {
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.waitFor(() => expect(api.fetchSession).toHaveBeenCalledTimes(2))
   })
+
+  test('signedIn and signOut report', async () => {
+    const { useAccount } = await load()
+    const t = await import('../telemetry/telemetry')
+    const events: string[] = []
+    t.setSinkForTests({
+      capture: (n) => events.push(n),
+      identify: () => {},
+      reset: () => {},
+      captureException: () => {},
+    })
+    useAccount.getState().signedIn('me@example.com')
+    await useAccount.getState().signOut()
+    t.setSinkForTests(undefined)
+    expect(events).toEqual(['signed_in', 'signed_out'])
+  })
 })
