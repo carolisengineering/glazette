@@ -119,7 +119,10 @@ export function Timeline({
   const [editingId, setEditingId] = useState<string>()
   if (entries.length === 0) return null
   return (
-    <ul className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-4 py-2">
+    <ul
+      aria-label="Journey"
+      className="m-0 flex list-none flex-col rounded-[20px] bg-surface px-4 py-2"
+    >
       {newestFirst(entries).map((e) =>
         e.photoId ? (
           <li key={e.id} className="flex items-center gap-3.5">
