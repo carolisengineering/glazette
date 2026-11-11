@@ -119,11 +119,11 @@ function optionalDate(value: string | undefined): string | undefined {
 function reportSave(
   outer: Transaction | undefined,
   glazeLayers: number,
-  event: () => void,
+  event?: () => void,
 ): void {
   const report = () => {
     if (glazeLayers > 0) track('glazes_added', { layers: glazeLayers })
-    event()
+    event?.()
   }
   if (outer) outer.on('complete', report)
   else report()
@@ -310,6 +310,8 @@ export async function addGlazesToPiece(
   glazes: GlazeInput,
 ): Promise<void> {
   if (glazes.length === 0) return
+  // Captured before any await, so a caller's transaction is still current.
+  const outer = Dexie.currentTransaction
   const added = await db.transaction(
     'rw',
     db.entries,
@@ -331,7 +333,7 @@ export async function addGlazesToPiece(
       return true
     },
   )
-  if (added) track('glazes_added', { layers: glazes.length })
+  if (added) reportSave(outer, glazes.length)
 }
 
 /** Sets a step's date, or clears it (removes the field) when `date` is undefined. */

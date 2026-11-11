@@ -634,6 +634,27 @@ test('nested in an outer transaction that aborts, ops report nothing', async () 
   expect(events).toEqual([])
 })
 
+test('addGlazesToPiece nested in an outer transaction reports only after commit, and not on abort', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+  const tables = [db.pieces, db.entries, db.glazeApps] as const
+  const events = captureEvents()
+  await db.transaction('rw', ...tables, async () => {
+    await addGlazesToPiece(id, [{ glazeId: 'g1' }])
+    expect(events).toEqual([])
+  })
+  expect(events).toEqual([['glazes_added', { layers: 1 }]])
+
+  events.length = 0
+  await expect(
+    db.transaction('rw', ...tables, async () => {
+      await addGlazesToPiece(id, [{ glazeId: 'g1' }])
+      throw new Error('abort')
+    }),
+  ).rejects.toThrow('abort')
+  expect(events).toEqual([])
+})
+
 test("a throwing sink doesn't break createPiece", async () => {
   setSinkForTests({
     capture: () => {
