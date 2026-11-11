@@ -89,6 +89,8 @@ async function loadPostHog(): Promise<TelemetrySink> {
   const { default: posthog } = await import('posthog-js')
   posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? '', {
     api_host: '/api/t',
+    // The default cookie would cover the whole workers.dev subdomain and ride on every /api call.
+    persistence: 'localStorage',
     autocapture: false,
     capture_pageview: false,
     capture_pageleave: false,
@@ -113,7 +115,8 @@ async function loadPostHog(): Promise<TelemetrySink> {
         name,
         name === 'telemetry_started' ? { ...props, $set_once: props } : props,
       ),
-    identify: (email) => posthog.identify(email),
+    // The email is also a property so the guide's "leave yourself out" filter can match it.
+    identify: (email) => posthog.identify(email, { email }),
     reset: () => {
       posthog.reset()
       disableGeoip()
