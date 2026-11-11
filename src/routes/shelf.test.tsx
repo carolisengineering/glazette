@@ -348,3 +348,26 @@ test('reports startup once', async () => {
     setSinkForTests(undefined)
   }
 })
+
+test('reports no startup when the page first loaded on another screen', async () => {
+  const events: Array<[string, Record<string, unknown>]> = []
+  setSinkForTests({
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  resetStartupForTests()
+  try {
+    const id = await createPiece({ name: 'A' })
+    const router = renderRoute(`/piece/${id}`)
+    await screen.findByText('A')
+    await router.navigate({ to: '/' })
+    await screen.findByRole('link', { name: 'New piece' })
+    // Let the shelf's startup effect run before checking.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(events.filter(([n]) => n === 'startup')).toHaveLength(0)
+  } finally {
+    setSinkForTests(undefined)
+  }
+})

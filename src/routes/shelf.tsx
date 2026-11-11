@@ -18,6 +18,11 @@ import { track } from '../telemetry/telemetry'
 // Startup is measured once per page load, not each time the shelf shows again.
 let startupReported = false
 
+/** Called when the page loads on another screen, since its time isn't the shelf's. */
+export function skipStartup(): void {
+  startupReported = true
+}
+
 /** For tests only: lets the next shelf report startup again. */
 export function resetStartupForTests(): void {
   startupReported = false
