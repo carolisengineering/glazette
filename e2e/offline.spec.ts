@@ -7,6 +7,12 @@ test('app shell loads after going offline and reloading', async ({
   page,
   context,
 }) => {
+  // Telemetry must stay silent in e2e builds.
+  const telemetryRequests: string[] = []
+  page.on('request', (req) => {
+    if (req.url().includes('/api/t/')) telemetryRequests.push(req.url())
+  })
+
   await page.goto('/')
   await page.evaluate(() => navigator.serviceWorker.ready)
   // The first load may not be controlled yet; reload once so it is.
@@ -16,4 +22,5 @@ test('app shell loads after going offline and reloading', async ({
   await context.setOffline(true)
   await page.reload()
   await expect(page.getByRole('heading', { name: 'My Shelf' })).toBeVisible()
+  expect(telemetryRequests).toEqual([])
 })
