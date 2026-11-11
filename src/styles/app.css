@@ -14,3 +14,14 @@
   --font-sans: Inter, system-ui, sans-serif;
   --radius-card: 22px;
 }
+
+/* Safari's built-in focus ring ignores rounded corners and draws only the
+   top and bottom edges, so every field draws its own solid outline. */
+@layer base {
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 0;
+  }
+}

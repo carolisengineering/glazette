@@ -166,7 +166,7 @@ test('clay card shows "Speckled buff (retired)" when the clay is deleted', async
   expect(await screen.findByText('Speckled buff (retired)')).toBeVisible()
 })
 
-test('shows caption, glaze names joined with plus, and cone from the glaze', async () => {
+test('shows caption, each glaze on its own line, and cone from the glaze', async () => {
   const id = await firedPiece()
   const speckle = await addGlaze('Speckle')
   const entry = await db.entries
@@ -182,7 +182,12 @@ test('shows caption, glaze names joined with plus, and cone from the glaze', asy
     order: 1,
   })
   renderRoute(`/piece/${id}`)
-  expect(await screen.findByText('Oatmeal + Speckle')).toBeVisible()
+  expect(await screen.findByText('Speckle')).toBeVisible()
+  expect(
+    within(screen.getByRole('list', { name: 'Glazes' }))
+      .getAllByRole('listitem')
+      .map((l) => l.textContent),
+  ).toEqual(['Oatmeal', 'Speckle'])
   expect(screen.getByText('Cone 6')).toBeVisible()
   expect(screen.getByText('Fired · Oct 25')).toBeVisible()
 })
@@ -199,7 +204,9 @@ test('timeline lists entries newest first', async () => {
   const id = await firedPiece()
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Morning Mug' })
-  const rows = within(screen.getByRole('list')).getAllByRole('listitem')
+  const rows = within(
+    screen.getByRole('list', { name: 'Journey' }),
+  ).getAllByRole('listitem')
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Fired.*Cone 6 oxidation.*Oct 25/),
     expect.stringMatching(/^Glazed.*Oct 21/),
@@ -516,7 +523,9 @@ test('the timeline ranks by stage first, like the header: a same-day later Bisqu
   })
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Mug' })
-  const rows = within(screen.getByRole('list')).getAllByRole('listitem')
+  const rows = within(
+    screen.getByRole('list', { name: 'Journey' }),
+  ).getAllByRole('listitem')
   expect(rows.map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Glazed/),
     expect.stringMatching(/^Bisqued/),

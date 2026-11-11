@@ -77,7 +77,7 @@ export function EditSheet({ piece, onClose }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Name it later"
-            className="h-[52px] rounded-2xl border border-border bg-surface px-4 font-serif text-[22px] text-ink outline-accent placeholder:text-[#6b7580]"
+            className="h-[52px] rounded-2xl border border-border bg-surface px-4 font-serif text-[22px] text-ink placeholder:text-[#6b7580]"
           />
         </div>
         <FormChips form={form} onChange={setForm} />

@@ -149,7 +149,9 @@ test.each([
     const apps = [app('full', 'a', 'g1')]
     const pieceViews = buildPieceViews([piece('a')], entries, apps, glazes, [])
     expect(pieceViews[0].glazeNames).toEqual(['Celadon'])
-    expect(pieceViews[0].glazeColor).toBe('#abc')
+    expect(pieceViews[0].glazeLayers).toEqual([
+      { name: 'Celadon', color: '#abc' },
+    ])
     const result = buildGlazeViews(pieceViews, apps, glazes)
     expect(result[0].pieceIds).toEqual(['a'])
   },

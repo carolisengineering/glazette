@@ -18,7 +18,7 @@ interface Props {
 }
 
 const input =
-  'h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent placeholder:text-[#6b7580]'
+  'h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink placeholder:text-[#6b7580]'
 
 /** Add or edit a glaze. Editing also offers Delete. */
 export function GlazeSheet({ glaze, liveGlazes, defaultCone, onClose }: Props) {
@@ -147,7 +147,7 @@ export function GlazeSheet({ glaze, liveGlazes, defaultCone, onClose }: Props) {
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
             placeholder="Tips for next time"
-            className="rounded-2xl border border-border bg-surface px-4 py-3 text-[16px] text-ink outline-accent placeholder:text-[#6b7580]"
+            className="rounded-2xl border border-border bg-surface px-4 py-3 text-[16px] text-ink placeholder:text-[#6b7580]"
           />
         </div>
         <div className="flex gap-3">

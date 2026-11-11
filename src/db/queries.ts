@@ -26,8 +26,8 @@ export interface PieceView {
   clayName?: string
   /** Glaze names of the latest live Glazed entry, in layering order. */
   glazeNames: string[]
-  /** Color of the first glaze layer, if any. */
-  glazeColor?: string
+  /** The same layers with their swatch colors, for showing each one on its own. */
+  glazeLayers: { name: string; color: string }[]
 }
 
 const FIRED_FADE_DAYS = 14
@@ -83,7 +83,10 @@ export function buildPieceViews(
       latestPhotoId: latestEntry(own.filter((e) => e.photoId))?.photoId,
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeNames,
-      glazeColor: layers[0]?.color,
+      glazeLayers: layers.map((g, i) => ({
+        name: glazeNames[i],
+        color: g.color,
+      })),
     }
   })
 }

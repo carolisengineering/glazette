@@ -271,7 +271,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
               type="date"
               value={dateValue}
               onChange={(e) => setDateValue(e.target.value)}
-              className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent"
+              className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink"
             />
           </div>
         )}
@@ -286,7 +286,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
             value={noteValue}
             onChange={(e) => setNote(e.target.value)}
             placeholder={NOTE_PLACEHOLDER[stage]}
-            className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent placeholder:text-[#6b7580]"
+            className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink placeholder:text-[#6b7580]"
           />
         </div>
 

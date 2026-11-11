@@ -121,7 +121,7 @@ export function PickPieceSheet({
             placeholder="Search pieces"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-12 w-full rounded-2xl border border-border bg-surface pr-4 pl-11 text-[16px] text-ink outline-accent placeholder:text-[#6b7580]"
+            className="h-12 w-full rounded-2xl border border-border bg-surface pr-4 pl-11 text-[16px] text-ink placeholder:text-[#6b7580]"
           />
         </div>
 
