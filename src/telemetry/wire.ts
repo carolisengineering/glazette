@@ -1,13 +1,14 @@
 import { useAccount } from '../account/useAccount'
 import { db as appDb } from '../db/db'
 import { router as appRouter } from '../router'
-import type { Screen } from './events'
+import type { Screen, VITAL_METRICS } from './events'
 import {
   captureError,
   identify,
   initTelemetry,
   resetIdentity,
   track,
+  whenIdle,
 } from './telemetry'
 
 type AppRouter = typeof appRouter
@@ -57,8 +58,7 @@ async function trackVitals(): Promise<void> {
   try {
     const v = await import('web-vitals')
     const report =
-      (metric: 'LCP' | 'INP' | 'CLS' | 'FCP' | 'TTFB') =>
-      (m: { value: number }) =>
+      (metric: (typeof VITAL_METRICS)[number]) => (m: { value: number }) =>
         track('web_vital', { metric, value: m.value })
     v.onLCP(report('LCP'))
     v.onINP(report('INP'))
@@ -91,9 +91,13 @@ export function startTelemetry(
   syncIdentity()
   const unsubscribeAccount = useAccount.subscribe(syncIdentity)
 
-  trackOpen(false)
+  // A launch that starts hidden counts as opened when first shown, so it is not counted twice.
+  let firstOpenSent = document.visibilityState !== 'hidden'
+  if (firstOpenSent) trackOpen(false)
   const onVisibility = () => {
-    if (document.visibilityState === 'visible') trackOpen(true)
+    if (document.visibilityState !== 'visible') return
+    trackOpen(firstOpenSent)
+    firstOpenSent = true
   }
   document.addEventListener('visibilitychange', onVisibility)
 
@@ -110,7 +114,8 @@ export function startTelemetry(
   window.addEventListener('unhandledrejection', onRejection)
 
   void trackVitals()
-  void seedExistingUsers(db)
+  // Reads every piece, so it waits until the shelf has loaded.
+  whenIdle(() => void seedExistingUsers(db))
 
   stop = () => {
     unsubscribeAccount()

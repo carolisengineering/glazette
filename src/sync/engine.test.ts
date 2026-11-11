@@ -9,7 +9,7 @@ import {
 import { GlazetteDB } from '../db/db'
 import { putBackPhoto, putBackPiece } from '../db/putBack'
 import type { Piece } from '../db/types'
-import { setSinkForTests, type TelemetrySink } from '../telemetry/telemetry'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { SyncStopped, syncOnce, type Transport } from './engine'
 import { createTestServer } from './testServer'
 import { SYNCED_TABLES } from './track'

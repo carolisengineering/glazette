@@ -1,4 +1,5 @@
 import type { Stage } from '../db/types'
+import type { SyncOutcome } from '../sync/engine'
 
 // Every value sent is a number, a boolean, a YYYY-MM-DD date, or one of these
 // fixed strings. The lists are exported so the privacy test can check against them.
@@ -12,8 +13,18 @@ export const SCREENS = [
 ] as const
 export type Screen = (typeof SCREENS)[number]
 
-export const OUTCOMES = ['done', 'offline', 'signed-out', 'error'] as const
+export const OUTCOMES = [
+  'done',
+  'offline',
+  'signed-out',
+  'error',
+] as const satisfies readonly SyncOutcome[]
 export type Outcome = (typeof OUTCOMES)[number]
+// Fails to compile when a SyncOutcome is missing from the list above.
+const _everyOutcomeListed: [Exclude<SyncOutcome, Outcome>] extends [never]
+  ? true
+  : never = true
+void _everyOutcomeListed
 
 export const EDIT_PARTS = ['details', 'notes'] as const
 export const PUT_BACK_KINDS = ['piece', 'photo'] as const

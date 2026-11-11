@@ -77,7 +77,7 @@ export function setSinkForTests(next: TelemetrySink | undefined): void {
 }
 
 // Wait until after first render so the analytics chunk never competes with it.
-function whenIdle(run: () => void): void {
+export function whenIdle(run: () => void): void {
   if (typeof requestIdleCallback === 'function') {
     requestIdleCallback(run, { timeout: 5000 })
   } else {

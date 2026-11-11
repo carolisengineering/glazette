@@ -25,6 +25,13 @@ function fakeSink(): TelemetrySink {
   }
 }
 
+function setVisibility(value: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', {
+    value,
+    configurable: true,
+  })
+}
+
 function start() {
   const router = createAppRouter(createMemoryHistory({ initialEntries: ['/'] }))
   startTelemetry({ router })
@@ -41,9 +48,13 @@ beforeEach(async () => {
   useAccount.setState(SIGNED_OUT)
   calls = []
   setSinkForTests(fakeSink())
+  // Idle work runs at once, except in the tests that check it waits.
+  vi.stubGlobal('requestIdleCallback', (run: () => void) => run())
+  setVisibility('visible')
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   stopTelemetryForTests()
   setSinkForTests(undefined)
   vi.restoreAllMocks()
@@ -81,6 +92,35 @@ describe('startTelemetry', () => {
     const opens = captures('app_opened')
     expect(opens).toHaveLength(2)
     expect(opens[1][2]).toMatchObject({ resumed: true })
+  })
+
+  it('a hidden start sends no app_opened, and the first show sends resumed false', () => {
+    setVisibility('hidden')
+    start()
+    expect(captures('app_opened')).toHaveLength(0)
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(captures('app_opened').map((c) => c[2])).toMatchObject([
+      { resumed: false },
+      { resumed: true },
+    ])
+  })
+
+  it('telemetry_started waits for the app to be idle', async () => {
+    const idle: Array<() => void> = []
+    vi.stubGlobal('requestIdleCallback', (run: () => void) => idle.push(run))
+    const filter = vi.spyOn(db.pieces, 'filter')
+    start()
+    expect(filter).not.toHaveBeenCalled()
+    expect(captures('telemetry_started')).toHaveLength(0)
+    for (const run of idle) run()
+    await vi.waitFor(() =>
+      expect(captures('telemetry_started')).toHaveLength(1),
+    )
   })
 
   it('screen_viewed follows navigation', async () => {
