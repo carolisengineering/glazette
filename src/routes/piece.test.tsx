@@ -13,19 +13,32 @@ import { setSinkForTests } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 
 // Stored blobs don't survive fake-indexeddb as real Blobs, so expose which photo each image shows.
+// Tests call these to say a photo finished loading.
+const shown: Array<() => void> = []
 vi.mock('../components/PhotoImg', () => ({
-  PhotoImg: ({ photoId, alt }: { photoId?: string; alt?: string }) => (
-    <img data-photo-id={photoId} alt={alt} />
-  ),
+  PhotoImg: ({
+    photoId,
+    alt,
+    onShown,
+  }: {
+    photoId?: string
+    alt?: string
+    onShown?: () => void
+  }) => {
+    if (onShown && !shown.includes(onShown)) shown.push(onShown)
+    return <img data-photo-id={photoId} alt={alt} />
+  },
 }))
 
 beforeEach(async () => {
+  shown.length = 0
   await db.delete()
   await db.open()
   await ensureDefaults()
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   setSinkForTests(undefined)
 })
@@ -905,4 +918,38 @@ test('reports piece_opened for a piece without a photo', async () => {
   const [, props] = events.find(([n]) => n === 'piece_opened') ?? []
   expect(props).toMatchObject({ has_photo: false })
   expect(props?.ms).toEqual(expect.any(Number))
+})
+
+test('piece_opened is sent when the hero photo shows within 10 seconds', async () => {
+  const events = captureEvents()
+  const id = await createPiece({ name: 'Quick', photo: photo('q') })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Quick' })
+  await waitFor(() => expect(shown.length).toBeGreaterThan(0))
+  act(() => shown[shown.length - 1]())
+  expect(events.filter(([n]) => n === 'piece_opened')).toEqual([
+    ['piece_opened', { ms: expect.any(Number), has_photo: true }],
+  ])
+})
+
+test('piece_opened is not sent when the hero photo shows after 10 seconds', async () => {
+  const events = captureEvents()
+  const id = await createPiece({ name: 'Slow', photo: photo('s') })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Slow' })
+  await waitFor(() => expect(shown.length).toBeGreaterThan(0))
+  const real = performance.now()
+  vi.spyOn(performance, 'now').mockReturnValue(real + 10_001)
+  act(() => shown[shown.length - 1]())
+  expect(events.filter(([n]) => n === 'piece_opened')).toEqual([])
+})
+
+test('piece_opened is not sent when the hero photo never loads', async () => {
+  const events = captureEvents()
+  const id = await createPiece({ name: 'Stuck', photo: photo('x') })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Stuck' })
+  vi.useFakeTimers({ toFake: ['performance'] })
+  vi.advanceTimersByTime(15_000)
+  expect(events.filter(([n]) => n === 'piece_opened')).toEqual([])
 })

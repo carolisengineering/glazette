@@ -51,7 +51,7 @@ Open the insight's filters and add a person filter. Set "Email" (the `email` pro
 - `backup_saved`: a backup was saved. It says how long it took, and that includes the time the friend spent in the share sheet.
 - `backup_restored`: a backup was restored. It says how long it took.
 - `startup`: the shelf finished loading. It says how long and how many pieces.
-- `piece_opened`: a piece screen finished loading. It says how long and whether it has a photo. It is not sent when the photo never loads, for example one still waiting to download, so the slowest opens are missing.
+- `piece_opened`: a piece screen finished loading. It says how long and whether it has a photo. Opens slower than 10 seconds aren't sent, for example when the photo is still waiting to download, so the slowest opens are missing.
 - `photo_processed`: a chosen photo was prepared. It says how long and its size in megabytes.
 - `sync_records`: a record sync ran. It says how long, how it ended (done, offline, signed-out or error) and how many records went up and down.
 - `sync_photos`: a photo sync ran. It says how long, how it ended, how many photos went up and down and how many bytes.

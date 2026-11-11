@@ -14,6 +14,9 @@ import { Hero } from '../piece/Hero'
 import { Timeline } from '../piece/Timeline'
 import { elapsed, track } from '../telemetry/telemetry'
 
+// Opens slower than this aren't sent: the photo was waiting on the network.
+const OPEN_REPORT_LIMIT_MS = 10_000
+
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
 const secondary =
@@ -88,7 +91,10 @@ function PieceBoard({
   const reportOpened = (hasPhoto: boolean) => {
     if (openedReported.current) return
     openedReported.current = true
-    track('piece_opened', { ms: elapsed(openedAt), has_photo: hasPhoto })
+    // A photo still downloading isn't a measure of how fast the app is.
+    const ms = elapsed(openedAt)
+    if (ms > OPEN_REPORT_LIMIT_MS) return
+    track('piece_opened', { ms, has_photo: hasPhoto })
   }
   const heroHasPhoto = !!heroEntry?.photoId
   // biome-ignore lint/correctness/useExhaustiveDependencies: reportOpened only touches a ref and constants
