@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
@@ -9,7 +9,9 @@ import {
   markLost,
   softDelete,
 } from '../db/ops'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
+import { resetStartupForTests } from './shelf'
 
 beforeEach(async () => {
   await db.delete()
@@ -321,4 +323,28 @@ describe('account button', () => {
     )
     expect(screen.getByRole('dialog', { name: 'Account' })).toBeVisible()
   })
+})
+
+test('reports startup once', async () => {
+  const events: Array<[string, Record<string, unknown>]> = []
+  setSinkForTests({
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  resetStartupForTests()
+  try {
+    await createPiece({ name: 'A' })
+    renderRoute('/')
+    await screen.findByText('A')
+    cleanup()
+    renderRoute('/')
+    await screen.findByText('A')
+    const startups = events.filter(([n]) => n === 'startup')
+    expect(startups).toHaveLength(1)
+    expect(startups[0][1]).toMatchObject({ pieces: 1 })
+  } finally {
+    setSinkForTests(undefined)
+  }
 })

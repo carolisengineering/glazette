@@ -2,6 +2,11 @@ import { create } from 'zustand'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import { moveBytesApart } from '../photos/bytes'
+import {
+  countingPhotoTransport,
+  countingTransport,
+} from '../telemetry/counting'
+import { elapsed, track } from '../telemetry/telemetry'
 import { type SyncOutcome, syncOnce } from './engine'
 import { fetchPhotoTransport } from './photoTransport'
 import { onLocalChange } from './track'
@@ -74,7 +79,15 @@ function runRecords(move: boolean): Promise<SyncOutcome | undefined> {
     // Read after the move, which can take a while.
     const { status, email } = useAccount.getState()
     if (status !== 'signed-in' || !email) return undefined
-    return syncOnce(db, fetchTransport, email)
+    const counting = countingTransport(fetchTransport)
+    const start = performance.now()
+    const outcome = await syncOnce(db, counting.transport, email)
+    track('sync_records', {
+      ms: elapsed(start),
+      outcome,
+      ...counting.counts(),
+    })
+    return outcome
   })().finally(() => {
     if (records === run) records = undefined
   })
@@ -109,6 +122,21 @@ export async function syncRecords(): Promise<SyncOutcome> {
   return (await (records ?? runRecords(false))) ?? 'signed-out'
 }
 
+/** Transfers photos and reports it, unless nothing moved and nothing went wrong. */
+async function timedPhotoTransfer(): Promise<SyncOutcome> {
+  const counting = countingPhotoTransport(fetchPhotoTransport)
+  const start = performance.now()
+  const outcome = await transferPhotos(db, counting.transport)
+  const counts = counting.counts()
+  if (
+    outcome !== 'done' ||
+    counts.uploaded + counts.downloaded + counts.bytes > 0
+  ) {
+    track('sync_photos', { ms: elapsed(start), outcome, ...counts })
+  }
+  return outcome
+}
+
 async function loop(): Promise<void> {
   try {
     do {
@@ -121,7 +149,7 @@ async function loop(): Promise<void> {
       if (outcome === undefined) break
       // Photo bytes follow the records, in the same run.
       if (outcome === 'done') {
-        outcome = await transferPhotos(db, fetchPhotoTransport)
+        outcome = await timedPhotoTransfer()
       }
       if (outcome === 'signed-out') void useAccount.getState().refresh()
       else useSync.setState({ failed: outcome === 'error' })

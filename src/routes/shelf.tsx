@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AccountButton } from '../account/AccountButton'
 import { AccountSheet } from '../account/AccountSheet'
 import { BackupSheet } from '../backup/BackupSheet'
@@ -15,8 +15,22 @@ import {
 } from '../db/queries'
 import { track } from '../telemetry/telemetry'
 
+// Startup is measured once per page load, not each time the shelf shows again.
+let startupReported = false
+
+/** For tests only: lets the next shelf report startup again. */
+export function resetStartupForTests(): void {
+  startupReported = false
+}
+
 export function ShelfScreen() {
   const loaded = usePiecesQuery()
+  const loadedCount = loaded?.length
+  useEffect(() => {
+    if (loadedCount === undefined || startupReported) return
+    startupReported = true
+    track('startup', { ms: Math.round(performance.now()), pieces: loadedCount })
+  }, [loadedCount])
   const views = loaded ?? []
   const [chip, setChip] = useState<ShelfChip>('all')
   const [backupOpen, setBackupOpen] = useState(false)

@@ -893,3 +893,16 @@ test('a notes save reports piece_edited only when the text changed', async () =>
     expect(events).toEqual([['piece_edited', { part: 'notes' }]]),
   )
 })
+
+test('reports piece_opened for a piece without a photo', async () => {
+  const events = captureEvents()
+  const id = await createPiece({ name: 'Bare' })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await waitFor(() =>
+    expect(events.filter(([n]) => n === 'piece_opened')).toHaveLength(1),
+  )
+  const [, props] = events.find(([n]) => n === 'piece_opened') ?? []
+  expect(props).toMatchObject({ has_photo: false })
+  expect(props?.ms).toEqual(expect.any(Number))
+})

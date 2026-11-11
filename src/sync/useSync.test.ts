@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useAccount } from '../account/useAccount'
 import { db } from '../db/db'
 import * as bytes from '../photos/bytes'
+import { setSinkForTests } from '../telemetry/telemetry'
 import * as engine from './engine'
 import { quietly } from './track'
 import * as transfer from './transfer'
@@ -61,6 +62,7 @@ beforeEach(() => {
   setAccount(undefined)
 })
 afterEach(async () => {
+  setSinkForTests(undefined)
   stopSync()
   setAccount(undefined)
   requestSync() // clears a wait check left by a test that never started sync
@@ -467,4 +469,61 @@ test("a run's record part waits for a record sync already running", async () => 
   await flush()
   expect(syncOnce).toHaveBeenCalledTimes(2)
   expect(transferPhotos).toHaveBeenCalledTimes(1)
+})
+
+function captureEvents() {
+  const events: Array<[string, Record<string, unknown>]> = []
+  setSinkForTests({
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  return events
+}
+
+test('reports one sync_records per record sync with its outcome', async () => {
+  const events = captureEvents()
+  syncOnce.mockResolvedValue('offline')
+  setAccount('carol@example.com')
+  await syncRecords()
+  const reported = events.filter(([n]) => n === 'sync_records')
+  expect(reported).toHaveLength(1)
+  expect(reported[0][1]).toMatchObject({
+    outcome: 'offline',
+    pushed: 0,
+    pulled: 0,
+  })
+  expect(reported[0][1].ms).toEqual(expect.any(Number))
+})
+
+test('a record sync that never ran because of sign-out reports nothing', async () => {
+  const events = captureEvents()
+  await syncRecords()
+  expect(events).toEqual([])
+})
+
+test('an idle photo transfer reports nothing', async () => {
+  const events = captureEvents()
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  expect(transferPhotos).toHaveBeenCalledTimes(1)
+  expect(events.filter(([n]) => n === 'sync_photos')).toEqual([])
+})
+
+test('a photo transfer that stopped early reports its outcome', async () => {
+  const events = captureEvents()
+  transferPhotos.mockResolvedValue('offline')
+  setAccount('carol@example.com')
+  requestSync()
+  await flush()
+  const photos = events.filter(([n]) => n === 'sync_photos')
+  expect(photos).toHaveLength(1)
+  expect(photos[0][1]).toMatchObject({
+    outcome: 'offline',
+    uploaded: 0,
+    downloaded: 0,
+    bytes: 0,
+  })
 })

@@ -10,6 +10,8 @@ interface Props {
   alt?: string
   className?: string
   style?: CSSProperties
+  /** Called each time the image has loaded and is showing. */
+  onShown?: () => void
 }
 
 /**
@@ -46,6 +48,7 @@ export function PhotoImg({
   alt = '',
   className = '',
   style,
+  onShown,
 }: Props) {
   // A read or an image can fail for a moment (WebKit, just after bytes are
   // written). Each failure shows the placeholder and tries again a little
@@ -114,6 +117,7 @@ export function PhotoImg({
       alt={alt}
       className={`object-cover ${className}`}
       style={style}
+      onLoad={onShown}
       onError={() => setTries({ ...current, imageFailed: true })}
     />
   )
