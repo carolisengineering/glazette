@@ -1,3 +1,4 @@
+import Dexie, { type Transaction } from 'dexie'
 import type { ProcessedImage } from '../photos/process'
 import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
@@ -109,6 +110,25 @@ function optionalDate(value: string | undefined): string | undefined {
   return value === undefined ? undefined : toIsoDate(value)
 }
 
+/**
+ * Reports a save once its data is committed. Called inside a caller's
+ * transaction, the op's own nested transaction resolves before the real commit,
+ * so this waits for the outer one, and an aborted outer one reports nothing.
+ * Capture `outer` (Dexie.currentTransaction) before the op awaits anything.
+ */
+function reportSave(
+  outer: Transaction | undefined,
+  glazeLayers: number,
+  event: () => void,
+): void {
+  const report = () => {
+    if (glazeLayers > 0) track('glazes_added', { layers: glazeLayers })
+    event()
+  }
+  if (outer) outer.on('complete', report)
+  else report()
+}
+
 export async function createPiece(input: {
   photo?: ProcessedImage
   name?: string
@@ -120,6 +140,7 @@ export async function createPiece(input: {
   glazes?: GlazeInput
 }): Promise<string> {
   const start = performance.now()
+  const outer = Dexie.currentTransaction
   const now = nowIso()
   const stage = input.stage ?? 'thrown'
   const stepDate = optionalDate(input.date ?? input.photo?.takenAt)
@@ -132,6 +153,7 @@ export async function createPiece(input: {
     createdAt,
     updatedAt: now,
   }
+  let layers = 0
   await db.transaction(
     'rw',
     db.pieces,
@@ -155,13 +177,16 @@ export async function createPiece(input: {
       await db.pieces.add(piece)
       await db.entries.bulkAdd(entries)
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
+      layers = apps.length
     },
   )
-  track('piece_logged', {
-    has_photo: !!input.photo,
-    stage,
-    ms: elapsed(start),
-  })
+  reportSave(outer, layers, () =>
+    track('piece_logged', {
+      has_photo: !!input.photo,
+      stage,
+      ms: elapsed(start),
+    }),
+  )
   return piece.id
 }
 
@@ -174,8 +199,10 @@ export async function addStageEntry(input: {
   glazes?: GlazeInput
 }): Promise<string> {
   const start = performance.now()
+  const outer = Dexie.currentTransaction
   const now = nowIso()
   const date = optionalDate(input.date ?? input.photo?.takenAt)
+  let layers = 0
   const chosenId = await db.transaction(
     'rw',
     db.entries,
@@ -205,14 +232,17 @@ export async function addStageEntry(input: {
       await db.entries.bulkAdd(entries)
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
       await db.pieces.update(input.pieceId, { updatedAt: now })
+      layers = apps.length
       return chosenId
     },
   )
-  track('stage_added', {
-    stage: input.stage,
-    has_photo: !!input.photo,
-    ms: elapsed(start),
-  })
+  reportSave(outer, layers, () =>
+    track('stage_added', {
+      stage: input.stage,
+      has_photo: !!input.photo,
+      ms: elapsed(start),
+    }),
+  )
   return chosenId
 }
 

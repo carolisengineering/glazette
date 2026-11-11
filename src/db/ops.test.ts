@@ -569,6 +569,71 @@ test('addGlazesToPiece reports glazes_added only when it adds', async () => {
   expect(events).toEqual([['glazes_added', { layers: 2 }]])
 })
 
+test('createPiece reports glazes_added when it writes glaze rows', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const events = captureEvents()
+  await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+  expect(events.map(([n]) => n)).toEqual(['glazes_added', 'piece_logged'])
+  expect(events[0][1]).toEqual({ layers: 1 })
+})
+
+test('addStageEntry reports glazes_added when it writes glaze rows', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({})
+  const events = captureEvents()
+  await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    glazes: [{ glazeId: 'g1' }, { glazeId: 'g1' }],
+  })
+  expect(events.map(([n]) => n)).toEqual(['glazes_added', 'stage_added'])
+  expect(events[0][1]).toEqual({ layers: 2 })
+})
+
+test('nested in an outer transaction, ops report only after it commits', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const id = await createPiece({})
+  const events = captureEvents()
+  await db.transaction(
+    'rw',
+    db.pieces,
+    db.entries,
+    db.glazeApps,
+    db.photos,
+    db.photoBytes,
+    async () => {
+      await createPiece({ stage: 'glazed', glazes: [{ glazeId: 'g1' }] })
+      await addStageEntry({ pieceId: id, stage: 'trimmed' })
+      expect(events).toEqual([])
+    },
+  )
+  expect(events.map(([n]) => n).sort()).toEqual([
+    'glazes_added',
+    'piece_logged',
+    'stage_added',
+  ])
+})
+
+test('nested in an outer transaction that aborts, ops report nothing', async () => {
+  const id = await createPiece({})
+  const events = captureEvents()
+  await expect(
+    db.transaction(
+      'rw',
+      db.pieces,
+      db.entries,
+      db.glazeApps,
+      db.photos,
+      db.photoBytes,
+      async () => {
+        await addStageEntry({ pieceId: id, stage: 'trimmed' })
+        throw new Error('abort')
+      },
+    ),
+  ).rejects.toThrow('abort')
+  expect(events).toEqual([])
+})
+
 test("a throwing sink doesn't break createPiece", async () => {
   setSinkForTests({
     capture: () => {
