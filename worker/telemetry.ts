@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import type { Env } from './env'
 
-// The only PostHog endpoints the app uses. Anything else is a 404.
-const ALLOWED_PREFIXES = ['e/', 'i/v0/e/', 'batch/', 'flags/']
+// posthog-js with this config only sends POST e/. Anything else is a 404.
+const ALLOWED_PREFIX = 'e/'
 
 // Only these request headers go to PostHog, so cookies and the client's IP stay here.
 const FORWARDED_HEADERS = ['content-type', 'content-encoding', 'user-agent']
@@ -14,10 +14,7 @@ export function telemetryRoutes() {
   const app = new Hono<{ Bindings: Env }>()
   app.all('/*', async (c) => {
     const path = new URL(c.req.url).pathname.replace(/^\/api\/t\//, '')
-    if (
-      (c.req.method !== 'GET' && c.req.method !== 'POST') ||
-      !ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix))
-    ) {
+    if (c.req.method !== 'POST' || !path.startsWith(ALLOWED_PREFIX)) {
       return c.json({ error: 'not_found' }, 404)
     }
 
@@ -27,13 +24,12 @@ export function telemetryRoutes() {
       if (value !== undefined) headers.set(name, value)
     }
     const search = new URL(c.req.url).search
-    const hasBody = c.req.method === 'POST'
     const upstream = await fetch(`${c.env.POSTHOG_HOST}/${path}${search}`, {
       method: c.req.method,
       headers,
-      body: hasBody ? c.req.raw.body : undefined,
+      body: c.req.raw.body,
       // Streaming a request body needs this.
-      ...(hasBody ? { duplex: 'half' } : {}),
+      duplex: 'half',
     } as RequestInit)
 
     const responseHeaders = new Headers()

@@ -27,7 +27,7 @@ test('forwards a batch to PostHog without cookies or IP headers', async () => {
   vi.stubGlobal('fetch', fetchStub)
   const body = '{"batch":[{"event":"x"}]}'
   const res = await createApp().request(
-    '/api/t/batch/?ver=1',
+    '/api/t/e/?ver=1',
     {
       method: 'POST',
       body,
@@ -47,7 +47,7 @@ test('forwards a batch to PostHog without cookies or IP headers', async () => {
   expect(await res.text()).toBe('{"status":1}')
   expect(fetchStub).toHaveBeenCalledOnce()
   const [url, init] = fetchStub.mock.calls[0]
-  expect(url).toBe('https://us.i.posthog.com/batch/?ver=1')
+  expect(url).toBe('https://us.i.posthog.com/e/?ver=1')
   const sent = new Request('http://x', init as RequestInit)
   expect(await sent.text()).toBe(body)
   expect(sent.headers.get('cookie')).toBeNull()
@@ -66,8 +66,16 @@ test('refuses other paths', async () => {
     env,
   )
   const get = await app.request('/api/t/static/array.js', {}, env)
+  const batch = await app.request(
+    '/api/t/batch/',
+    { method: 'POST', body: '{}', headers: { origin } },
+    env,
+  )
+  const getE = await app.request('/api/t/e/?ver=1', {}, env)
   expect(post.status).toBe(404)
   expect(get.status).toBe(404)
+  expect(batch.status).toBe(404)
+  expect(getE.status).toBe(404)
   expect(fetchStub).not.toHaveBeenCalled()
 })
 
@@ -75,7 +83,7 @@ test("still needs the app's origin", async () => {
   const fetchStub = vi.fn()
   vi.stubGlobal('fetch', fetchStub)
   const res = await createApp().request(
-    '/api/t/batch/',
+    '/api/t/e/',
     { method: 'POST', body: '{}', headers: { origin: 'https://evil.example' } },
     env,
   )
