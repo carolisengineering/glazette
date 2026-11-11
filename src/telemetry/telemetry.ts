@@ -102,7 +102,8 @@ async function loadPostHog(): Promise<TelemetrySink> {
     capture_exceptions: false,
     advanced_disable_flags: true,
     disable_external_dependency_loading: true,
-    person_profiles: 'identified_only',
+    // Anonymous devices need a profile so their person properties are kept.
+    person_profiles: 'always',
   })
   posthog.register({ $geoip_disable: true })
   return {
