@@ -166,7 +166,7 @@ test('clay card shows "Speckled buff (retired)" when the clay is deleted', async
   expect(await screen.findByText('Speckled buff (retired)')).toBeVisible()
 })
 
-test('shows caption, glaze names joined with plus, and cone from the glaze', async () => {
+test('shows caption, each glaze on its own line, and cone from the glaze', async () => {
   const id = await firedPiece()
   const speckle = await addGlaze('Speckle')
   const entry = await db.entries
@@ -182,7 +182,10 @@ test('shows caption, glaze names joined with plus, and cone from the glaze', asy
     order: 1,
   })
   renderRoute(`/piece/${id}`)
-  expect(await screen.findByText('Oatmeal + Speckle')).toBeVisible()
+  expect(await screen.findByText('Speckle')).toBeVisible()
+  expect(screen.getAllByTestId('glaze-line').map((l) => l.textContent)).toEqual(
+    ['Oatmeal', 'Speckle'],
+  )
   expect(screen.getByText('Cone 6')).toBeVisible()
   expect(screen.getByText('Fired · Oct 25')).toBeVisible()
 })

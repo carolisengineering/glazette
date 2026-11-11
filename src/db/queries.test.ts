@@ -30,6 +30,7 @@ function view(
     entries,
     stage: last,
     glazeNames: [],
+    glazeColors: [],
   }
 }
 
@@ -114,6 +115,7 @@ describe('buildPieceViews', () => {
     expect(v.stage).toBe('glazed')
     expect(v.clayName).toBe('Porcelain (retired)')
     expect(v.glazeNames).toEqual(['Tenmoku (retired)', 'Celadon'])
+    expect(v.glazeColors).toEqual(['#3A2A20', '#9DBBAA'])
   })
 
   test('ignores deleted pieces, deleted entries and their glaze applications', async () => {
@@ -132,6 +134,7 @@ describe('buildPieceViews', () => {
     // Deleting the Glazed step leaves the filled Trimmed and Bisqued steps.
     expect(views[0].stage).toBe('bisqued')
     expect(views[0].glazeNames).toEqual([])
+    expect(views[0].glazeColors).toEqual([])
   })
 
   test("a deleted glaze layer doesn't show", async () => {
@@ -151,7 +154,7 @@ describe('buildPieceViews', () => {
     const [v] = await load()
     expect(v.piece.id).toBe(id)
     expect(v.glazeNames).toEqual(['Celadon'])
-    expect(v.glazeColor).toBe('#9DBBAA')
+    expect(v.glazeColors).toEqual(['#9DBBAA'])
   })
 
   test('latestPhotoId is the newest live entry that has a photo', async () => {
