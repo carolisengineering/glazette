@@ -13,6 +13,7 @@ import {
   type ShelfChip,
   usePiecesQuery,
 } from '../db/queries'
+import { track } from '../telemetry/telemetry'
 
 export function ShelfScreen() {
   const loaded = usePiecesQuery()
@@ -40,7 +41,10 @@ export function ShelfScreen() {
           <button
             type="button"
             aria-label="Backup"
-            onClick={() => setBackupOpen(true)}
+            onClick={() => {
+              track('screen_viewed', { screen: 'backup' })
+              setBackupOpen(true)
+            }}
             className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink"
           >
             <svg
@@ -59,7 +63,12 @@ export function ShelfScreen() {
               <path d="m9 15.5 3-3 3 3" />
             </svg>
           </button>
-          <AccountButton onClick={() => setAccountOpen(true)} />
+          <AccountButton
+            onClick={() => {
+              track('screen_viewed', { screen: 'account' })
+              setAccountOpen(true)
+            }}
+          />
         </div>
       </header>
       <KilnBanner count={ready} />

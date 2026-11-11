@@ -27,6 +27,7 @@
     "posthog-js": "^1.447.12",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "web-vitals": "6",
     "zustand": "^5.0.16"
   },
   "devDependencies": {

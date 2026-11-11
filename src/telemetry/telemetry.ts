@@ -87,9 +87,7 @@ function whenIdle(run: () => void): void {
 
 async function loadPostHog(): Promise<TelemetrySink> {
   const { default: posthog } = await import('posthog-js')
-  const key = (import.meta.env as { VITE_POSTHOG_KEY?: string })
-    .VITE_POSTHOG_KEY
-  posthog.init(key ?? '', {
+  posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? '', {
     api_host: '/api/t',
     autocapture: false,
     capture_pageview: false,
@@ -107,7 +105,12 @@ async function loadPostHog(): Promise<TelemetrySink> {
   })
   posthog.register({ $geoip_disable: true })
   return {
-    capture: (name, props) => posthog.capture(name, props),
+    // The one-time history event also becomes person properties, set once.
+    capture: (name, props) =>
+      posthog.capture(
+        name,
+        name === 'telemetry_started' ? { ...props, $set_once: props } : props,
+      ),
     identify: (email) => posthog.identify(email),
     reset: () => posthog.reset(),
     captureException: (error) => posthog.captureException(error),
