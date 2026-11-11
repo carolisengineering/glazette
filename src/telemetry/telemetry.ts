@@ -103,7 +103,9 @@ async function loadPostHog(): Promise<TelemetrySink> {
     // Anonymous devices need a profile so their person properties are kept.
     person_profiles: 'always',
   })
-  posthog.register({ $geoip_disable: true })
+  // reset() clears super properties, so this runs again after every reset.
+  const disableGeoip = () => posthog.register({ $geoip_disable: true })
+  disableGeoip()
   return {
     // The one-time history event also becomes person properties, set once.
     capture: (name, props) =>
@@ -112,7 +114,10 @@ async function loadPostHog(): Promise<TelemetrySink> {
         name === 'telemetry_started' ? { ...props, $set_once: props } : props,
       ),
     identify: (email) => posthog.identify(email),
-    reset: () => posthog.reset(),
+    reset: () => {
+      posthog.reset()
+      disableGeoip()
+    },
     captureException: (error) => posthog.captureException(error),
   }
 }

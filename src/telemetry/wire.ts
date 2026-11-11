@@ -13,8 +13,6 @@ import {
 type AppRouter = typeof appRouter
 type AppDb = typeof appDb
 
-const SEEDED_KEY = 'glazette.telemetry.seeded'
-
 export function screenFor(pathname: string): Screen | undefined {
   if (pathname === '/') return 'shelf'
   if (pathname === '/piece' || pathname.startsWith('/piece/')) return 'piece'
@@ -40,19 +38,18 @@ function trackOpen(resumed: boolean): void {
   track('app_opened', { standalone: isStandalone(), resumed })
 }
 
-// Existing users get their history as person properties once per device.
+// Sent on every start, with no local flag: the loader sets it as $set_once, so
+// PostHog keeps the first one per person, and a lost first session can't lose it.
 async function seedExistingUsers(db: AppDb): Promise<void> {
   try {
-    if (localStorage.getItem(SEEDED_KEY)) return
     const pieces = await db.pieces.filter((p) => !p.deletedAt).toArray()
     const first = pieces.map((p) => p.createdAt).sort()[0]
     track('telemetry_started', {
       pieces: pieces.length,
       ...(first ? { first_piece_date: first.slice(0, 10) } : {}),
     })
-    localStorage.setItem(SEEDED_KEY, '1')
   } catch {
-    // Blocked storage or db: skip. Telemetry must never get in the way.
+    // A failed db read: skip. Telemetry must never get in the way.
   }
 }
 

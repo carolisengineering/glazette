@@ -91,6 +91,17 @@ describe('startTelemetry', () => {
     })
   })
 
+  it('screen_viewed is sent for the initial route', async () => {
+    const router = createAppRouter(
+      createMemoryHistory({ initialEntries: ['/glazes'] }),
+    )
+    startTelemetry({ router })
+    await router.load()
+    expect(captures('screen_viewed').map((c) => c[2])).toContainEqual({
+      screen: 'glazes',
+    })
+  })
+
   it('screenFor maps every route', () => {
     expect(screenFor('/')).toBe('shelf')
     expect(screenFor('/piece/abc')).toBe('piece')
@@ -99,7 +110,7 @@ describe('startTelemetry', () => {
     expect(screenFor('/nope')).toBeUndefined()
   })
 
-  it('seeds existing pieces once', async () => {
+  it('sends telemetry_started with pieces and first_piece_date on each start', async () => {
     await db.pieces.bulkAdd([
       {
         id: 'p1',
@@ -128,12 +139,13 @@ describe('startTelemetry', () => {
     })
     stopTelemetryForTests()
     start()
-    await new Promise((r) => setTimeout(r, 50))
-    expect(captures('telemetry_started')).toHaveLength(1)
+    await vi.waitFor(() =>
+      expect(captures('telemetry_started')).toHaveLength(2),
+    )
   })
 
-  it('seeding survives blocked storage', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+  it('seeding survives a failed db read', () => {
+    vi.spyOn(db.pieces, 'filter').mockImplementation(() => {
       throw new Error('blocked')
     })
     expect(() => start()).not.toThrow()
