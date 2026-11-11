@@ -5,6 +5,7 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { shortDate } from '../db/dates'
 import { db } from '../db/db'
 import { setLastBackupAt } from '../db/ops'
+import { elapsed, track } from '../telemetry/telemetry'
 import { backupFileName, exportZip } from './export'
 import { importZip, NewerBackupError, NotABackupError } from './import'
 import { saveFile } from './saveFile'
@@ -54,7 +55,7 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const share = async (blob: Blob, name: string) => {
+  const share = async (blob: Blob, name: string, start: number) => {
     const result = await saveFile(blob, name)
     if (result === 'blocked') {
       setReady({ blob, name })
@@ -64,17 +65,22 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     if (result === 'canceled') return
     setReady(undefined)
     await setLastBackupAt(new Date().toISOString())
+    track('backup_saved', { ms: elapsed(start) })
   }
 
   const save = () =>
     run(async () => {
+      const start = performance.now()
       const now = new Date()
-      await share(await exportZip(now), backupFileName(now))
+      await share(await exportZip(now), backupFileName(now), start)
     })
 
   // No awaits before sharing: iOS needs the share to follow the tap directly.
   const saveReady = () => {
-    if (ready) void run(() => share(ready.blob, ready.name))
+    if (ready) {
+      const start = performance.now()
+      void run(() => share(ready.blob, ready.name, start))
+    }
   }
 
   const restore = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,7 +89,10 @@ export function BackupSheet({ onClose }: { onClose: () => void }) {
     e.target.value = ''
     if (!file) return
     void run(async () => {
-      showToast(restoredMessage(await importZip(file)))
+      const start = performance.now()
+      const result = await importZip(file)
+      track('backup_restored', { ms: elapsed(start) })
+      showToast(restoredMessage(result))
       setReady(undefined)
     })
   }

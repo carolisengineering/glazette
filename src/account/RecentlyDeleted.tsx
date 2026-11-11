@@ -12,6 +12,7 @@ import { bytesOf } from '../photos/bytes'
 import { type DeletedRow, daysLeftLabel, deletedRows } from '../sync/deleted'
 import { fetchDeleted } from '../sync/transport'
 import { requestSync, syncRecords, useSync } from '../sync/useSync'
+import { track } from '../telemetry/telemetry'
 import { useAccount } from './useAccount'
 
 const secondary =
@@ -154,9 +155,11 @@ export function RecentlyDeleted({ onBack }: { onBack: () => void }) {
       }
       if (row.kind === 'piece') {
         await putBackPiece(row.piece.id)
+        track('put_back', { kind: 'piece' })
         setSaid({ ok: true, text: `Put back ${displayName(row.piece)}.` })
       } else {
         const home = await putBackPhoto(row.photo.id)
+        track('put_back', { kind: 'photo' })
         setSaid({
           ok: true,
           text: home

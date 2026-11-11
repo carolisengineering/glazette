@@ -12,6 +12,7 @@ import { EditSheet } from '../piece/EditSheet'
 import { FactCards } from '../piece/FactCards'
 import { Hero } from '../piece/Hero'
 import { Timeline } from '../piece/Timeline'
+import { track } from '../telemetry/telemetry'
 
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
@@ -111,6 +112,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     if (text === savedNotes.current) return
     if (await attempt(() => updatePiece(piece.id, { notes: text }))) {
       savedNotes.current = text
+      track('piece_edited', { part: 'notes' })
     }
   }
 
@@ -124,6 +126,7 @@ function PieceBoard({ view }: { view: PieceDetail }) {
       void updatePiece(pieceId, { notes: text }).then(
         () => {
           savedNotes.current = text
+          track('piece_edited', { part: 'notes' })
         },
         () => {},
       )
@@ -142,9 +145,12 @@ function PieceBoard({ view }: { view: PieceDetail }) {
     const target = pending
     setPending(undefined)
     if (target?.kind === 'entry') {
-      await attempt(() => softDelete('entries', target.entry.id))
+      if (await attempt(() => softDelete('entries', target.entry.id))) {
+        track('step_deleted', {})
+      }
     } else if (target?.kind === 'piece') {
       if (await attempt(() => softDelete('pieces', piece.id))) {
+        track('piece_deleted', {})
         await navigate({ to: '/', replace: true })
       }
     }
@@ -236,7 +242,12 @@ function PieceBoard({ view }: { view: PieceDetail }) {
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => attempt(() => markLost(piece.id, !piece.lost))}
+            onClick={async () => {
+              const lost = !piece.lost
+              if (await attempt(() => markLost(piece.id, lost))) {
+                track('piece_lost', { lost })
+              }
+            }}
             className={secondary}
           >
             {piece.lost ? 'Mark as found' : 'Mark as lost'}

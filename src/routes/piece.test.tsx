@@ -9,6 +9,7 @@ import {
   softDelete,
 } from '../db/ops'
 import type { ProcessedImage } from '../photos/process'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 
 // Stored blobs don't survive fake-indexeddb as real Blobs, so expose which photo each image shows.
@@ -26,7 +27,19 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  setSinkForTests(undefined)
 })
+
+function captureEvents() {
+  const events: Array<[string, Record<string, unknown>]> = []
+  setSinkForTests({
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  return events
+}
 
 function photo(tag: string): ProcessedImage {
   return {
@@ -839,4 +852,44 @@ test('tapping the latest step shows the latest photo even when the toggle was on
   expect(
     screen.getByRole('button', { name: 'Out of the kiln' }),
   ).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('deleting a piece reports piece_deleted', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  const router = renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Delete piece' }),
+  )
+  const events = captureEvents()
+  await userEvent.click(
+    within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }),
+  )
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  expect(events).toContainEqual(['piece_deleted', {}])
+})
+
+test('marking lost reports piece_lost', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  const button = await screen.findByRole('button', { name: 'Mark as lost' })
+  const events = captureEvents()
+  await userEvent.click(button)
+  await waitFor(() =>
+    expect(events).toContainEqual(['piece_lost', { lost: true }]),
+  )
+})
+
+test('a notes save reports piece_edited only when the text changed', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  const notes = await screen.findByRole('textbox', { name: 'Notes' })
+  const events = captureEvents()
+  await userEvent.click(notes)
+  await userEvent.tab()
+  expect(events).toEqual([])
+  await userEvent.type(notes, 'Thin rim')
+  await userEvent.tab()
+  await waitFor(() =>
+    expect(events).toEqual([['piece_edited', { part: 'notes' }]]),
+  )
 })

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import { ensureDefaults } from '../db/ops'
+import { setSinkForTests } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 import { BackupSheet } from './BackupSheet'
 import { exportZip } from './export'
@@ -217,4 +218,48 @@ test('a successful restore clears a kept backup file', async () => {
   await pick(user)
   await screen.findByText('Restored 1 piece')
   expect(screen.getByRole('button', { name: 'Save a backup' })).toBeVisible()
+})
+
+function captureNames() {
+  const names: string[] = []
+  setSinkForTests({
+    capture: (n) => names.push(n),
+    identify: () => {},
+    reset: () => {},
+    captureException: () => {},
+  })
+  return names
+}
+
+afterEach(() => setSinkForTests(undefined))
+
+test('a canceled save reports nothing', async () => {
+  vi.mocked(saveFile).mockResolvedValue('canceled')
+  const names = captureNames()
+  const user = userEvent.setup()
+  render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  await waitFor(() => expect(saveFile).toHaveBeenCalled())
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Save a backup' })).toBeEnabled(),
+  )
+  expect(names).toEqual([])
+})
+
+test('a finished save and a restore report their events', async () => {
+  vi.mocked(saveFile).mockResolvedValue('shared')
+  vi.mocked(importZip).mockResolvedValue({ pieces: 1 } as never)
+  const names = captureNames()
+  const user = userEvent.setup()
+  const { container } = render(<BackupSheet onClose={() => {}} />)
+  await user.click(screen.getByRole('button', { name: 'Save a backup' }))
+  await waitFor(() => expect(names).toEqual(['backup_saved']))
+  const input = container.querySelector('input[type=file]') as HTMLInputElement
+  await user.upload(
+    input,
+    new File(['z'], 'b.zip', { type: 'application/zip' }),
+  )
+  await waitFor(() =>
+    expect(names).toEqual(['backup_saved', 'backup_restored']),
+  )
 })

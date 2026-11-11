@@ -1,6 +1,7 @@
 import type { ProcessedImage } from '../photos/process'
 import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
+import { elapsed, track } from '../telemetry/telemetry'
 import { db, newId } from './db'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
 import { currentStage, latestEntry, STAGES, stagesBetween } from './stage'
@@ -118,6 +119,7 @@ export async function createPiece(input: {
   note?: string
   glazes?: GlazeInput
 }): Promise<string> {
+  const start = performance.now()
   const now = nowIso()
   const stage = input.stage ?? 'thrown'
   const stepDate = optionalDate(input.date ?? input.photo?.takenAt)
@@ -155,6 +157,11 @@ export async function createPiece(input: {
       if (apps.length > 0) await db.glazeApps.bulkAdd(apps)
     },
   )
+  track('piece_logged', {
+    has_photo: !!input.photo,
+    stage,
+    ms: elapsed(start),
+  })
   return piece.id
 }
 
@@ -166,9 +173,10 @@ export async function addStageEntry(input: {
   date?: string
   glazes?: GlazeInput
 }): Promise<string> {
+  const start = performance.now()
   const now = nowIso()
   const date = optionalDate(input.date ?? input.photo?.takenAt)
-  return db.transaction(
+  const chosenId = await db.transaction(
     'rw',
     db.entries,
     db.glazeApps,
@@ -200,6 +208,12 @@ export async function addStageEntry(input: {
       return chosenId
     },
   )
+  track('stage_added', {
+    stage: input.stage,
+    has_photo: !!input.photo,
+    ms: elapsed(start),
+  })
+  return chosenId
 }
 
 /**
@@ -266,17 +280,28 @@ export async function addGlazesToPiece(
   glazes: GlazeInput,
 ): Promise<void> {
   if (glazes.length === 0) return
-  await db.transaction('rw', db.entries, db.glazeApps, db.pieces, async () => {
-    const entries = await db.entries.where('pieceId').equals(pieceId).toArray()
-    const glazed = latestEntry(entries, 'glazed')
-    if (!glazed) return
-    const existing = (
-      await db.glazeApps.where('entryId').equals(glazed.id).toArray()
-    ).filter((a) => !a.deletedAt)
-    const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
-    await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
-    await db.pieces.update(pieceId, { updatedAt: nowIso() })
-  })
+  const added = await db.transaction(
+    'rw',
+    db.entries,
+    db.glazeApps,
+    db.pieces,
+    async () => {
+      const entries = await db.entries
+        .where('pieceId')
+        .equals(pieceId)
+        .toArray()
+      const glazed = latestEntry(entries, 'glazed')
+      if (!glazed) return false
+      const existing = (
+        await db.glazeApps.where('entryId').equals(glazed.id).toArray()
+      ).filter((a) => !a.deletedAt)
+      const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
+      await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
+      await db.pieces.update(pieceId, { updatedAt: nowIso() })
+      return true
+    },
+  )
+  if (added) track('glazes_added', { layers: glazes.length })
 }
 
 /** Sets a step's date, or clears it (removes the field) when `date` is undefined. */

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { track } from '../telemetry/telemetry'
 import { fetchSession, signOutRemote } from './api'
 
 const KEY = 'glazette.account'
@@ -109,8 +110,11 @@ export const useAccount = create<AccountState>((set) => ({
     writePending(false)
     writeCached(email)
     set({ status: 'signed-in', email })
+    track('signed_in', {})
   },
   signOut: async () => {
+    // First, so the event goes out under the identity that's about to be reset.
+    track('signed_out', {})
     generation++
     try {
       await signOutRemote()
