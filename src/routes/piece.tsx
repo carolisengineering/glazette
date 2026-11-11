@@ -262,7 +262,7 @@ function PieceBoard({
             onChange={(e) => setNotes(e.target.value)}
             onBlur={saveNotes}
             rows={4}
-            className="rounded-[20px] border-0 bg-surface p-4 text-[16px] leading-normal text-ink outline-accent"
+            className="rounded-[20px] border-0 bg-surface p-4 text-[16px] leading-normal text-ink"
           />
         </section>
 

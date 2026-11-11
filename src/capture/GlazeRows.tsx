@@ -27,7 +27,7 @@ const METHODS: NonNullable<GlazeApplication['method']>[] = [
 
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
 const input =
-  'h-12 min-w-0 rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent placeholder:text-[#6b7580]'
+  'h-12 min-w-0 rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink placeholder:text-[#6b7580]'
 
 export const newGlazeRow = (): GlazeRow => ({
   key: crypto.randomUUID(),

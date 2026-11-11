@@ -150,7 +150,7 @@ export function ClayChips({
           value={pick.otherName}
           onChange={(e) => pick.setOtherName(e.target.value)}
           placeholder="Clay name"
-          className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink outline-accent"
+          className="h-[52px] rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink"
         />
       ) : null}
     </div>
