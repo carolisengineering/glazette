@@ -20,6 +20,8 @@ import { elapsed, track } from '../telemetry/telemetry'
 // Opens slower than this aren't sent: the photo was waiting on the network.
 const OPEN_REPORT_LIMIT_MS = 10_000
 
+const UNDO_STALE = "Couldn't undo. The step changed."
+
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
 const secondary =
@@ -169,7 +171,11 @@ function PieceBoard({
     showToast('Photo changed', {
       action: {
         label: 'Undo',
-        onPress: () => void attempt(() => undoPhotoSwap(swap)),
+        onPress: () =>
+          void attempt(async () => {
+            // The step was deleted or its photo changed again since the save.
+            if (!(await undoPhotoSwap(swap))) showToast(UNDO_STALE)
+          }),
       },
       duration: 6000,
     })

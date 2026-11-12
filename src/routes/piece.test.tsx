@@ -1112,6 +1112,27 @@ test('a swap shows Photo changed with Undo, and Undo puts the old photo back', a
   expect(screen.queryByText('Photo changed')).not.toBeInTheDocument()
 })
 
+test("Undo after the step went away says it couldn't undo", async () => {
+  const id = await firedPiece()
+  const before = await stepWithPhoto(id, 'fired')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Edit step' }),
+  )
+  const sheet = screen.getByRole('dialog', { name: 'Fired step' })
+  pickFile(within(sheet).getByTestId('library-input'))
+  const save = within(sheet).getByRole('button', { name: 'Save' })
+  await waitFor(() => expect(save).toBeEnabled())
+  await userEvent.click(save)
+  const toast = await screen.findByText('Photo changed')
+  await act(() => softDelete('entries', before?.id ?? ''))
+  await userEvent.click(within(toast).getByRole('button', { name: 'Undo' }))
+  expect(
+    await screen.findByText("Couldn't undo. The step changed."),
+  ).toBeVisible()
+  expect(screen.queryByText(SAVE_ERROR)).not.toBeInTheDocument()
+})
+
 test('a save that keeps the photo shows no Undo', async () => {
   const id = await firedPiece()
   renderRoute(`/piece/${id}`)
