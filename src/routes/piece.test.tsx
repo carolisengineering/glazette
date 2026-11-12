@@ -1161,3 +1161,132 @@ test('adding a photo reports piece_edited photo', async () => {
   )
   expect(events.filter(([n]) => n === 'piece_edited')).toHaveLength(1)
 })
+
+/** A piece with a Glazed step wearing Celadon. */
+async function glazedPiece() {
+  const celadon = await addGlaze('Celadon', '6')
+  return createPiece({
+    name: 'Bowl',
+    stage: 'glazed',
+    glazes: [{ glazeId: celadon }],
+  })
+}
+
+const glazeNames = () =>
+  within(screen.getByRole('list', { name: 'Glazes' }))
+    .getAllByRole('listitem')
+    .map((l) => l.textContent)
+
+test('Edit shows glazes only once the piece has a Glazed step', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  let dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    within(dialog).queryByRole('textbox', { name: 'Glaze 1' }),
+  ).not.toBeInTheDocument()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await addStageEntry({ pieceId: id, stage: 'glazed' })
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('')
+})
+
+test('Edit adds a forgotten glaze and moves it to the bottom layer first', async () => {
+  const id = await glazedPiece()
+  await addGlaze('Floating Blue', '6')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: 'Move glaze 2 up' }),
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Floating Blue', 'Celadon']),
+  )
+})
+
+test('a piece logged straight to Fired can get glazes from Edit', async () => {
+  const id = await createPiece({ name: 'Cup', stage: 'fired' })
+  await addGlaze('Oatmeal', '6')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.type(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+    'Oatmeal',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(glazeNames()).toEqual(['Oatmeal']))
+})
+
+test('a failed Edit save adds no library glaze', async () => {
+  const id = await glazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Brand New',
+  )
+  const update = vi
+    .spyOn(db.pieces, 'update')
+    .mockRejectedValue(new Error('full'))
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  update.mockRestore()
+  expect(screen.getByRole('dialog', { name: 'Edit piece' })).toBeVisible()
+  expect((await db.glazes.toArray()).map((g) => g.name)).not.toContain(
+    'Brand New',
+  )
+})
+
+test("changing glazes reports piece_edited glazes; leaving them alone doesn't", async () => {
+  const id = await glazedPiece()
+  const events = captureEvents()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  let dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await within(dialog).findByDisplayValue('Celadon')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  const edited = () => events.filter(([n]) => n === 'piece_edited')
+  expect(edited()).toEqual([['piece_edited', { part: 'details' }]])
+
+  events.length = 0
+  await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Speckle',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(edited()).toContainEqual(['piece_edited', { part: 'glazes' }]),
+  )
+  expect(edited()).toContainEqual(['piece_edited', { part: 'details' }])
+})

@@ -350,7 +350,11 @@ function PieceBoard({
         />
       ) : null}
       {editing ? (
-        <EditSheet piece={piece} onClose={() => setEditing(false)} />
+        <EditSheet
+          piece={piece}
+          glazedStepId={latestEntry(entries, 'glazed')?.id}
+          onClose={() => setEditing(false)}
+        />
       ) : null}
       {pending ? (
         <ConfirmDialog

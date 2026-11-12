@@ -1,5 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { type GlazeRow, GlazeRows } from '../capture/GlazeRows'
+import { loadGlazeRows, resolveGlazes } from '../capture/resolveGlazes'
 import {
   ClayChips,
   type Form,
@@ -12,16 +14,19 @@ import { useModal } from '../components/useModal'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
+import { setStepGlazes } from '../db/stepEdits'
 import type { Piece } from '../db/types'
 import { track } from '../telemetry/telemetry'
 
 interface Props {
   piece: Piece
+  /** The piece's latest Glazed step, when it has one; its glazes can be edited here. */
+  glazedStepId?: string
   onClose: () => void
 }
 
-/** Edit a piece's name, form and clay. */
-export function EditSheet({ piece, onClose }: Props) {
+/** Edit a piece's name, form, clay and (once Glazed) glazes. */
+export function EditSheet({ piece, glazedStepId, onClose }: Props) {
   const titleId = useId()
   const nameRef = useRef<HTMLInputElement>(null)
   useModal(nameRef, onClose)
@@ -35,19 +40,49 @@ export function EditSheet({ piece, onClose }: Props) {
     piece.form === 'other' ? undefined : piece.form,
   )
   const clay = useClayPick(piece.clayId)
+  const [rows, setRows] = useState<GlazeRow[]>()
   const [saving, setSaving] = useState(false)
   const { show: showToast, toast } = useToast()
+
+  useEffect(() => {
+    if (!glazedStepId) return
+    let active = true
+    loadGlazeRows(glazedStepId).then(
+      (loaded) => {
+        if (active) setRows(loaded)
+      },
+      // Without the rows the section stays hidden and Save leaves glazes alone.
+      () => {},
+    )
+    return () => {
+      active = false
+    }
+  }, [glazedStepId])
 
   const save = async () => {
     if (saving) return
     setSaving(true)
     try {
-      await updatePiece(piece.id, {
-        name: name.trim() || undefined,
-        form: form ?? (piece.form === 'other' ? 'other' : undefined),
-        clayId: await clay.resolve(),
-      })
+      // One transaction, so a failed save doesn't leave new clays or library glazes behind.
+      const glazesChanged = await db.transaction(
+        'rw',
+        [db.pieces, db.clays, db.entries, db.glazeApps, db.glazes, db.settings],
+        async () => {
+          await updatePiece(piece.id, {
+            name: name.trim() || undefined,
+            form: form ?? (piece.form === 'other' ? 'other' : undefined),
+            clayId: await clay.resolve(),
+          })
+          if (!glazedStepId || !rows) return false
+          const glazes = await resolveGlazes(
+            rows,
+            (await db.settings.get('app'))?.defaultCone ?? '6',
+          )
+          return setStepGlazes(glazedStepId, glazes)
+        },
+      )
       track('piece_edited', { part: 'details' })
+      if (glazesChanged) track('piece_edited', { part: 'glazes' })
       onClose()
     } catch {
       showToast(SAVE_ERROR)
@@ -86,6 +121,9 @@ export function EditSheet({ piece, onClose }: Props) {
           retired={current?.deletedAt ? current : undefined}
           pick={clay}
         />
+        {glazedStepId && rows ? (
+          <GlazeRows value={rows} onChange={setRows} />
+        ) : null}
         <div className="flex gap-3">
           <button
             type="button"
