@@ -9,8 +9,7 @@ import { useCaptureStore } from '../capture/store'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
-import { photoErrorMessage, processImage } from '../photos/process'
-import { elapsed, track } from '../telemetry/telemetry'
+import { processPickedPhoto } from '../photos/processPickedPhoto'
 
 const captureRoute = getRouteApi('/capture')
 
@@ -61,16 +60,11 @@ export function CaptureScreen() {
     setError(undefined)
     setProcessing(true)
     try {
-      const start = performance.now()
-      const processed = await processImage(file)
-      track('photo_processed', {
-        ms: elapsed(start),
-        megabytes: Math.round(file.size / 1e5) / 10,
-      })
+      const processed = await processPickedPhoto(file)
       if (mounted.current) useCaptureStore.getState().setPhoto(processed)
     } catch (err) {
       if (!mounted.current) return
-      setError(photoErrorMessage(err))
+      setError((err as Error).message)
     } finally {
       if (mounted.current) setProcessing(false)
     }

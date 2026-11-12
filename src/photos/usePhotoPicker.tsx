@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type CameraHandle, CameraInput } from '../capture/CameraInput'
-import { elapsed, track } from '../telemetry/telemetry'
-import { type ProcessedImage, photoErrorMessage, processImage } from './process'
+import type { ProcessedImage } from './process'
+import { processPickedPhoto } from './processPickedPhoto'
 
 /**
  * Picks one photo. `open()` shows the library input, which on iPhone offers
@@ -28,15 +28,10 @@ export function usePhotoPicker(
   const onFile = async (file: File) => {
     setProcessing(true)
     try {
-      const start = performance.now()
-      const processed = await processImage(file)
-      track('photo_processed', {
-        ms: elapsed(start),
-        megabytes: Math.round(file.size / 1e5) / 10,
+      const processed = await processPickedPhoto(file).catch((err: Error) => {
+        if (mounted.current) callbacks.current.onError(err.message)
       })
-      if (mounted.current) callbacks.current.onPicked(processed)
-    } catch (err) {
-      if (mounted.current) callbacks.current.onError(photoErrorMessage(err))
+      if (processed && mounted.current) callbacks.current.onPicked(processed)
     } finally {
       if (mounted.current) setProcessing(false)
     }
