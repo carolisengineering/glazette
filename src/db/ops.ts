@@ -59,7 +59,7 @@ export function defaultNoteFor(stage: Stage, settings: Settings): string {
   return ''
 }
 
-type GlazeInput = Array<{
+export type GlazeInput = Array<{
   glazeId: string
   dips?: number
   method?: GlazeApplication['method']

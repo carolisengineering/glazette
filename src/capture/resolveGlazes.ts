@@ -3,7 +3,7 @@ import type { addStageEntry } from '../db/ops'
 import { upsertGlaze } from '../db/ops'
 import { notDeleted } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { GlazeRow } from './GlazeRows'
+import { type GlazeRow, newGlazeRow } from './GlazeRows'
 
 /** Match each row to a library glaze (by id, then name ignoring case) or create it once. */
 export async function resolveGlazes(rows: GlazeRow[], cone: string) {
@@ -30,4 +30,21 @@ export async function resolveGlazes(rows: GlazeRow[], cone: string) {
     })
   }
   return out
+}
+
+/** The inverse of `resolveGlazes`: a step's live layers as editable rows. */
+export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
+  const apps = (await db.glazeApps.where('entryId').equals(entryId).toArray())
+    .filter(notDeleted)
+    .sort((a, b) => a.order - b.order)
+  if (apps.length === 0) return [newGlazeRow()]
+  const glazes = await db.glazes.bulkGet(apps.map((a) => a.glazeId))
+  return apps.map((a, i) => ({
+    key: crypto.randomUUID(),
+    glazeId: a.glazeId,
+    name: glazes[i]?.name ?? '',
+    dips: a.dips,
+    method: a.method,
+    note: a.note,
+  }))
 }
