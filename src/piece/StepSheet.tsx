@@ -9,7 +9,7 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { fromDateInput, toDateInput } from '../db/dates'
 import { db } from '../db/db'
 import { STAGE_LABEL } from '../db/stage'
-import { type PhotoSwap, saveStepDetails } from '../db/stepEdits'
+import { type PhotoSwap, saveStepDetails, setStepGlazes } from '../db/stepEdits'
 import type { StageEntry } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { usePhotoPicker } from '../photos/usePhotoPicker'
@@ -17,6 +17,11 @@ import { track } from '../telemetry/telemetry'
 
 interface Props {
   entry: StageEntry
+  /**
+   * The piece's glaze step (see `glazeStep`). A Glazed step's sheet edits that
+   * step's glazes, which may not be its own: a later Glazed photo has none.
+   */
+  glazeStepId?: string
   onClose: () => void
   onSaved: (swap: PhotoSwap | undefined) => void
 }
@@ -26,12 +31,13 @@ const field =
 const linkButton =
   'flex h-11 items-center text-[15px] font-semibold text-accent'
 
-/** Edit one step's photo, date, note and (Glazed steps) glazes. Nothing is written until Save. */
-export function StepSheet({ entry, onClose, onSaved }: Props) {
+/** Edit one step's photo, date, note and (Glazed steps) the piece's glazes. Nothing is written until Save. */
+export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
   const titleId = useId()
   const photoRef = useRef<HTMLButtonElement>(null)
   useModal(photoRef, onClose)
-  const glazed = entry.stage === 'glazed'
+  const glazesOn =
+    entry.stage === 'glazed' ? (glazeStepId ?? entry.id) : undefined
   const [photo, setPhoto] = useState<ProcessedImage>()
   const previewUrl = usePhotoUrl(photo?.thumb ?? photo?.blob)
   const [note, setNote] = useState(entry.note ?? '')
@@ -48,9 +54,9 @@ export function StepSheet({ entry, onClose, onSaved }: Props) {
   }, showToast)
 
   useEffect(() => {
-    if (!glazed) return
+    if (!glazesOn) return
     let active = true
-    loadGlazeRows(entry.id).then(
+    loadGlazeRows(glazesOn).then(
       (loaded) => {
         if (active) setRows(loaded)
       },
@@ -60,7 +66,7 @@ export function StepSheet({ entry, onClose, onSaved }: Props) {
     return () => {
       active = false
     }
-  }, [entry.id, glazed])
+  }, [glazesOn])
 
   // Native date inputs report '' while a field is half-edited, so an empty
   // field clears the date only after Clear date. The same day as stored keeps
@@ -88,20 +94,20 @@ export function StepSheet({ entry, onClose, onSaved }: Props) {
           db.photoBytes,
         ],
         async () => {
-          const glazes =
-            glazed && rows
-              ? await resolveGlazes(
-                  rows,
-                  (await db.settings.get('app'))?.defaultCone ?? '6',
-                )
-              : undefined
-          return saveStepDetails({
+          const swap = await saveStepDetails({
             entryId: entry.id,
             note,
             date: dateToSave(),
             photo,
-            glazes,
           })
+          if (glazesOn && rows) {
+            const glazes = await resolveGlazes(
+              rows,
+              (await db.settings.get('app'))?.defaultCone ?? '6',
+            )
+            await setStepGlazes(glazesOn, glazes)
+          }
+          return swap
         },
       )
       track('piece_edited', { part: 'step' })
@@ -218,7 +224,9 @@ export function StepSheet({ entry, onClose, onSaved }: Props) {
             className={field}
           />
         </div>
-        {glazed && rows ? <GlazeRows value={rows} onChange={setRows} /> : null}
+        {glazesOn && rows ? (
+          <GlazeRows value={rows} onChange={setRows} />
+        ) : null}
         <div className="flex gap-3">
           <button
             type="button"

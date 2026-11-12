@@ -51,6 +51,21 @@ export function glazedStepWithGlazes(
   )
 }
 
+/**
+ * The piece's glaze step: the one Glazed step whose glazes the Glaze box shows
+ * and every glaze editor changes. That's the step with the layers, or, before
+ * any step has layers, the latest Glazed step. A later Glazed photo with no
+ * glazes of its own doesn't take over.
+ */
+export function glazeStep(
+  entries: StageEntry[],
+  glazeApps: { entryId: string }[],
+): StageEntry | undefined {
+  return (
+    glazedStepWithGlazes(entries, glazeApps) ?? latestEntry(entries, 'glazed')
+  )
+}
+
 /** Ascending rank of two entries: later stage first, then later date; within a stage an undated entry ranks below a dated one. Sort with (a, b) => compareEntries(b, a) for newest first. */
 export function compareEntries(a: StageEntry, b: StageEntry): number {
   const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)

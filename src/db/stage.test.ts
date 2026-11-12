@@ -3,6 +3,7 @@ import {
   currentStage,
   dayCount,
   displayName,
+  glazeStep,
   latestEntry,
   missingStages,
   nextStage,
@@ -148,4 +149,17 @@ test('missingStages skips stages that have a deleted entry', () => {
 test('missingStages is empty with no live entries', () => {
   expect(missingStages([])).toEqual([])
   expect(missingStages([entry('a', 'thrown', D1, D2)])).toEqual([])
+})
+
+test('glazeStep is the latest live Glazed step with glazes, else the latest Glazed step', () => {
+  const withGlazes = entry('a', 'glazed', D1)
+  const bare = entry('b', 'glazed', D2)
+  const apps = [{ entryId: 'a' }]
+  // A later Glazed step with no glazes (another photo) doesn't take over.
+  expect(glazeStep([withGlazes, bare], apps)).toBe(withGlazes)
+  // A deleted step's glazes don't count.
+  expect(glazeStep([entry('a', 'glazed', D1, D2), bare], apps)).toBe(bare)
+  // No step has glazes yet: the latest Glazed step gets them.
+  expect(glazeStep([withGlazes, bare], [])).toBe(bare)
+  expect(glazeStep([entry('t', 'thrown', D1)], [])).toBeUndefined()
 })

@@ -72,7 +72,6 @@ export interface StepDetails {
   note: string // trimmed; '' removes the note
   date: string | undefined // any parseable date, stored as full ISO; undefined clears
   photo?: ProcessedImage // a photo to put on the step
-  glazes?: GlazeInput // Glazed steps only; omitted leaves glazes alone
 }
 
 export interface PhotoSwap {
@@ -83,8 +82,8 @@ export interface PhotoSwap {
 }
 
 /**
- * Saves a step's note, date, photo and (Glazed steps) glazes in one
- * transaction. Replacing an existing photo with a different image returns the
+ * Saves a step's note, date and photo in one transaction. Glazes are saved
+ * separately with `setStepGlazes`, on the piece's glaze step. Replacing an existing photo with a different image returns the
  * swap so it can be undone; the old photo goes to Recently Deleted unless
  * another live step shows it.
  */
@@ -94,7 +93,6 @@ export async function saveStepDetails(
   return db.transaction(
     'rw',
     db.entries,
-    db.glazeApps,
     db.pieces,
     db.photos,
     db.photoBytes,
@@ -110,12 +108,10 @@ export async function saveStepDetails(
       if (dateChanged) patch.date = date
 
       let swap: PhotoSwap | undefined
-      let photoChanged = false
       if (input.photo) {
         const newPhotoId = await storePhoto(input.photo)
         if (newPhotoId !== entry.photoId) {
           patch.photoId = newPhotoId
-          photoChanged = true
           if (entry.photoId) {
             swap = {
               entryId: entry.id,
@@ -126,20 +122,13 @@ export async function saveStepDetails(
           }
         }
       }
-      if (Object.keys(patch).length > 0) {
-        await db.entries.update(entry.id, patch)
-      }
+      if (Object.keys(patch).length === 0) return undefined
+      await db.entries.update(entry.id, patch)
       if (swap) {
         await releasePhoto(db, { ...entry, ...patch }, swap.oldPhotoId, now)
       }
-      let glazesChanged = false
-      if (input.glazes && entry.stage === 'glazed') {
-        glazesChanged = await setStepGlazes(entry.id, input.glazes)
-      }
       if (dateChanged) await followStartDate(entry.pieceId)
-      if (Object.keys(patch).length > 0 || photoChanged || glazesChanged) {
-        await db.pieces.update(entry.pieceId, { updatedAt: now })
-      }
+      await db.pieces.update(entry.pieceId, { updatedAt: now })
       return swap
     },
   )

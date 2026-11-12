@@ -20,7 +20,7 @@ import { track } from '../telemetry/telemetry'
 
 interface Props {
   piece: Piece
-  /** The piece's latest Glazed step, when it has one; its glazes can be edited here. */
+  /** The piece's glaze step (see `glazeStep`), once it has one; its glazes can be edited here. */
   glazedStepId?: string
   onClose: () => void
 }

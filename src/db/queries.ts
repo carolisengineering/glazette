@@ -1,11 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import {
-  currentStage,
-  glazedStepWithGlazes,
-  latestEntry,
-  STAGES,
-} from './stage'
+import { currentStage, glazeStep, latestEntry, STAGES } from './stage'
 import type {
   Clay,
   Glaze,
@@ -24,7 +19,12 @@ export interface PieceView {
   stage?: Stage
   latestPhotoId?: string
   clayName?: string
-  /** Glaze names of the latest live Glazed entry, in layering order. */
+  /**
+   * The piece's glaze step (see `glazeStep`): the Glazed step these layers come
+   * from and the one every glaze editor changes. Undefined before Glazed.
+   */
+  glazeStepId?: string
+  /** Glaze names of the glaze step, in layering order. */
   glazeNames: string[]
   /** The same layers with their swatch colors, for showing each one on its own. */
   glazeLayers: { name: string; color: string }[]
@@ -62,7 +62,7 @@ export function buildPieceViews(
 
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
-    const glazedEntry = glazedStepWithGlazes(own, glazeApps)
+    const glazedEntry = glazeStep(own, glazeApps)
     const layers = glazedEntry
       ? glazeApps
           .filter(
@@ -82,6 +82,7 @@ export function buildPieceViews(
       stage: currentStage(own),
       latestPhotoId: latestEntry(own.filter((e) => e.photoId))?.photoId,
       clayName: clay ? nameWithRetired(clay) : undefined,
+      glazeStepId: glazedEntry?.id,
       glazeNames,
       glazeLayers: layers.map((g, i) => ({
         name: glazeNames[i],
@@ -156,7 +157,7 @@ export async function liveDefaultClayId(): Promise<string | undefined> {
 }
 
 export interface PieceDetail extends PieceView {
-  /** Cone of the first glaze with one on the latest Glazed entry, else the default cone. */
+  /** Cone of the first glaze with one on the glaze step, else the default cone. */
   cone?: string
 }
 
@@ -184,10 +185,9 @@ export function usePiece(id: string): PieceDetail | null | undefined {
       glazes,
       clay ? [clay] : [],
     )
-    const glazed = latestEntry(view.entries, 'glazed')
     const glazeById = new Map(glazes.map((g) => [g.id, g]))
     const glazedCone = glazeApps
-      .filter((a) => a.entryId === glazed?.id)
+      .filter((a) => a.entryId === view.glazeStepId)
       .sort((a, b) => a.order - b.order)
       .map((a) => glazeById.get(a.glazeId)?.cone)
       .find(Boolean)

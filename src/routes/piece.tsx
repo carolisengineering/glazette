@@ -345,6 +345,7 @@ function PieceBoard({
         <StepSheet
           key={openStep.id}
           entry={openStep}
+          glazeStepId={view.glazeStepId}
           onClose={() => closeStep(openStep.id)}
           onSaved={stepSaved}
         />
@@ -352,7 +353,7 @@ function PieceBoard({
       {editing ? (
         <EditSheet
           piece={piece}
-          glazedStepId={latestEntry(entries, 'glazed')?.id}
+          glazedStepId={view.glazeStepId}
           onClose={() => setEditing(false)}
         />
       ) : null}

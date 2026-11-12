@@ -196,25 +196,6 @@ test('a swapped-out photo shown on another live step stays live', async () => {
   expect((await db.entries.get('e2'))?.photoId).toBe(oldId)
 })
 
-test('glazes are saved only on a Glazed step', async () => {
-  await seed('bisqued', [])
-  await saveStepDetails({
-    entryId: 'e1',
-    note: '',
-    date: undefined,
-    glazes: [{ glazeId: 'A' }],
-  })
-  expect(await db.glazeApps.count()).toBe(0)
-  await db.entries.add({ id: 'e3', pieceId: 'p1', stage: 'glazed' })
-  await saveStepDetails({
-    entryId: 'e3',
-    note: '',
-    date: undefined,
-    glazes: [{ glazeId: 'A' }],
-  })
-  expect(await db.glazeApps.count()).toBe(1)
-})
-
 test('changing the earliest date moves the piece start date', async () => {
   await seed('trimmed', [])
   await saveStepDetails({ entryId: 'e1', note: '', date: '2026-02-01' })
@@ -226,11 +207,9 @@ test('changing the earliest date moves the piece start date', async () => {
 test('a failed write leaves nothing changed', async () => {
   const oldId = await seedWithPhoto()
   await db.entries.update('e1', { note: 'before' })
+  // The piece's updatedAt is the last write, after the photo swap.
   const spy = vi
-    .spyOn(db.glazeApps, 'add')
-    .mockRejectedValue(new Error('storage full'))
-  const bulk = vi
-    .spyOn(db.glazeApps, 'bulkAdd')
+    .spyOn(db.pieces, 'update')
     .mockRejectedValue(new Error('storage full'))
   await expect(
     saveStepDetails({
@@ -238,11 +217,10 @@ test('a failed write leaves nothing changed', async () => {
       note: 'after',
       date: D1,
       photo: photo('new'),
-      glazes: [{ glazeId: 'A' }],
     }),
   ).rejects.toThrow()
+  expect(spy).toHaveBeenCalled()
   spy.mockRestore()
-  bulk.mockRestore()
   const entry = await db.entries.get('e1')
   expect(entry?.note).toBe('before')
   expect(entry?.photoId).toBe(oldId)

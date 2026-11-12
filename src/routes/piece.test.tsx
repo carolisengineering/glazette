@@ -1265,6 +1265,86 @@ test('a failed Edit save adds no library glaze', async () => {
   expect((await db.pieces.get(id))?.name).toBe('Bowl')
 })
 
+/** Glazed Oct 1 with Celadon, then a second Glazed photo Oct 3 with no glazes. */
+async function twiceGlazedPiece() {
+  const celadon = await addGlaze('Celadon', '10')
+  await addGlaze('Floating Blue', '6')
+  const id = await createPiece({
+    name: 'Morning Mug',
+    stage: 'glazed',
+    photo: photo('oct1'),
+    date: '2026-10-01T12:00:00Z',
+    glazes: [{ glazeId: celadon }],
+  })
+  const oct3 = await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    photo: photo('oct3'),
+    date: '2026-10-03T12:00:00Z',
+  })
+  return { id, oct3 }
+}
+
+test('Edit changes the glazes the Glaze box shows, even after a later Glazed photo', async () => {
+  const { id } = await twiceGlazedPiece()
+  renderRoute(`/piece/${id}`)
+  await waitFor(() => expect(glazeNames()).toEqual(['Celadon']))
+  // Firing reads the cone from the same step, not the bare Oct 3 one.
+  expect(screen.getByText('Cone 10')).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Celadon', 'Floating Blue']),
+  )
+})
+
+test("a later Glazed photo's step sheet edits the glazes the Glaze box shows", async () => {
+  const { id, oct3 } = await twiceGlazedPiece()
+  const oct3Photo = (await db.entries.get(oct3))?.photoId
+  renderRoute(`/piece/${id}`)
+  await waitFor(() =>
+    expect(hero()).toHaveAttribute('data-photo-id', oct3Photo),
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Edit step' }))
+  const sheet = screen.getByRole('dialog', { name: 'Glazed step' })
+  expect(
+    await within(sheet).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(sheet).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(sheet).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(
+    within(sheet).getByRole('button', { name: 'Move glaze 2 up' }),
+  )
+  await userEvent.click(within(sheet).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Floating Blue', 'Celadon']),
+  )
+  // The layers stay on the one glaze step; the Oct 3 step still has none.
+  expect(await db.glazeApps.where('entryId').equals(oct3).toArray()).toEqual([])
+})
+
 test("changing glazes reports piece_edited glazes; leaving them alone doesn't", async () => {
   const id = await glazedPiece()
   const events = captureEvents()
