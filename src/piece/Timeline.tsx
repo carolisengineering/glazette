@@ -22,6 +22,10 @@ interface Props {
   shownId?: string
   /** A step with a photo was tapped. */
   onShow: (entry: StageEntry) => void
+  /** A photo-less step's name or note was tapped: open its details. */
+  onOpen: (entry: StageEntry) => void
+  /** A photo-less step's empty photo spot was tapped. */
+  onAddPhoto: (entry: StageEntry) => void
 }
 
 function TrashButton({
@@ -107,7 +111,8 @@ function DateEditor({
 
 /**
  * The piece's journey, one row per entry. Tapping a step with a photo shows it
- * at the top; steps without a photo are slim rows with an editable date.
+ * at the top. A step without a photo is a slim row: an empty photo spot that
+ * adds one, its name and note that open its details, and an editable date.
  */
 export function Timeline({
   entries,
@@ -115,6 +120,8 @@ export function Timeline({
   onSetDate,
   shownId,
   onShow,
+  onOpen,
+  onAddPhoto,
 }: Props) {
   const [editingId, setEditingId] = useState<string>()
   if (entries.length === 0) return null
@@ -159,20 +166,41 @@ export function Timeline({
         ) : (
           <li key={e.id} className="flex flex-col py-0.5">
             <div className="flex items-center gap-3.5">
-              <span
-                aria-hidden="true"
-                className="mx-[19px] size-1.5 flex-none rounded-full bg-border"
-              />
-              <div className="flex min-w-0 flex-1 flex-col">
+              <button
+                type="button"
+                aria-label={`Add ${STAGE_LABEL[e.stage]} photo`}
+                onClick={() => onAddPhoto(e)}
+                className="flex size-11 flex-none items-center justify-center rounded-xl border-[1.5px] border-dashed border-border text-muted"
+              >
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 8h3l2-2.5h6L17 8h3v11H4z" />
+                  <circle cx="12" cy="13" r="3.5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpen(e)}
+                className="flex min-h-11 min-w-0 flex-1 flex-col justify-center text-left"
+              >
                 <span className="text-[15px] font-semibold text-muted">
                   {STAGE_LABEL[e.stage]}
                 </span>
                 {e.note ? (
-                  <span className="truncate text-[14px] text-muted">
+                  <span className="w-full truncate text-[14px] text-muted">
                     {e.note}
                   </span>
                 ) : null}
-              </div>
+              </button>
               <button
                 type="button"
                 onClick={() =>
