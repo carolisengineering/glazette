@@ -810,7 +810,9 @@ test('a tap is forgotten once its step becomes the latest, so a new latest step 
   await userEvent.click(stepButton('Glazed'))
   const fired = await stepWithPhoto(id, 'fired')
   await act(() => softDelete('entries', fired?.id ?? ''))
-  await screen.findByText(/^Glazed · /)
+  // The header already showed Glazed while it was picked; wait until Glazed is the latest.
+  await waitFor(() => expect(hero()).toHaveAccessibleName('Morning Mug'))
+  expect(screen.getByText(/^Glazed · /)).toBeVisible()
   await act(() =>
     addStageEntry({
       pieceId: id,
