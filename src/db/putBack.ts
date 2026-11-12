@@ -2,6 +2,7 @@ import { hashesHeld } from '../photos/bytes'
 import { changeTime } from '../sync/records'
 import { db as appDb, type GlazetteDB, newId, UNDELETE_PHOTO } from './db'
 import { buildSteps } from './ops'
+import { releasePhoto } from './photoLinks'
 import { currentStage, STAGES, stagesBetween } from './stage'
 import type { Photo, Piece, Stage } from './types'
 
@@ -129,11 +130,18 @@ export function putBackPhoto(
     const step = photo.lastEntryId
       ? await db.entries.get(photo.lastEntryId)
       : undefined
-    if (step && !step.deletedAt && !step.photoId && step.pieceId === home.id) {
+    if (
+      step &&
+      !step.deletedAt &&
+      step.pieceId === home.id &&
+      step.photoId !== id
+    ) {
+      // A free step takes the photo; a step showing another photo swaps back.
       await db.entries.update(step.id, {
         photoId: id,
         updatedAt: changeTime(step, now),
       })
+      if (step.photoId) await releasePhoto(db, step, step.photoId, now)
     } else {
       const existing = await db.entries
         .where('pieceId')
