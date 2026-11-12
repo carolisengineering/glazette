@@ -4,6 +4,7 @@ import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
 import { elapsed, track } from '../telemetry/telemetry'
 import { db, newId } from './db'
+import { releasePhoto } from './photoLinks'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
 import { currentStage, latestEntry, STAGES, stagesBetween } from './stage'
 import { followStartDate } from './startDate'
@@ -20,7 +21,7 @@ import type {
 const nowIso = (): string => new Date().toISOString()
 
 /** Stored dates are always full ISO timestamps; stage and timeline ordering compares them as strings. */
-function toIsoDate(value: string): string {
+export function toIsoDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`)
   return date.toISOString()
@@ -388,17 +389,7 @@ export async function removePhoto(entryId: string): Promise<void> {
     if (!photoId) return
     const now = nowIso()
     await db.entries.update(entryId, { photoId: undefined })
-    const stillUsed = await db.entries
-      .filter((e) => e.photoId === photoId && !e.deletedAt)
-      .count()
-    if (stillUsed === 0) {
-      await db.photos.update(photoId, {
-        deletedAt: now,
-        lastPieceId: entry.pieceId,
-        lastEntryId: entry.id,
-        lastStage: entry.stage,
-      })
-    }
+    await releasePhoto(db, entry, photoId, now)
     await db.pieces.update(entry.pieceId, { updatedAt: now })
   })
 }

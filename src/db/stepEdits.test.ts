@@ -1,5 +1,6 @@
+import type { ProcessedImage } from '../photos/process'
 import { db } from './db'
-import { setStepGlazes } from './stepEdits'
+import { saveStepDetails, setStepGlazes } from './stepEdits'
 import type { GlazeApplication, Piece, StageEntry } from './types'
 
 const T1 = '2026-01-01T00:00:00.000Z'
@@ -79,4 +80,167 @@ test('throws for a step that is not Glazed', async () => {
   await expect(setStepGlazes('e1', [{ glazeId: 'A' }])).rejects.toThrow(
     'Step not found',
   )
+})
+
+const photo = (hash: string): ProcessedImage => ({
+  blob: new Blob(['full']),
+  thumb: new Blob(['thumb']),
+  hash,
+  width: 10,
+  height: 20,
+  takenAt: '2026-10-31T09:00:00.000Z',
+})
+
+const D1 = '2026-03-01T00:00:00.000Z'
+
+test('saves note and date, and clears them', async () => {
+  await seed('trimmed', [])
+  await saveStepDetails({
+    entryId: 'e1',
+    note: '  nice  ',
+    date: '2026-03-05',
+  })
+  const saved = await db.entries.get('e1')
+  expect(saved?.note).toBe('nice')
+  expect(saved?.date).toBe(new Date('2026-03-05').toISOString())
+  await saveStepDetails({ entryId: 'e1', note: '  ', date: undefined })
+  const cleared = await db.entries.get('e1')
+  expect(cleared?.note).toBeUndefined()
+  expect(cleared?.date).toBeUndefined()
+})
+
+test('rejects a missing step', async () => {
+  await expect(
+    saveStepDetails({ entryId: 'nope', note: '', date: undefined }),
+  ).rejects.toThrow('Step not found')
+})
+
+async function seedWithPhoto(): Promise<string> {
+  await seed('glazed', [])
+  const { storePhoto } = await import('../photos/store')
+  const id = await db.transaction('rw', db.photos, db.photoBytes, () =>
+    storePhoto(photo('old')),
+  )
+  await db.entries.update('e1', { photoId: id, date: D1 })
+  return id
+}
+
+test('swapping a photo returns the swap and sends the old photo to Recently Deleted', async () => {
+  const oldId = await seedWithPhoto()
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: D1,
+    photo: photo('new'),
+  })
+  const entry = await db.entries.get('e1')
+  expect(entry?.photoId).not.toBe(oldId)
+  expect(swap).toEqual({
+    entryId: 'e1',
+    oldPhotoId: oldId,
+    newPhotoId: entry?.photoId,
+    oldDate: D1,
+  })
+  const old = await db.photos.get(oldId)
+  expect(old?.deletedAt).toBeTruthy()
+  expect(old?.lastEntryId).toBe('e1')
+  expect(old?.lastPieceId).toBe('p1')
+  expect(old?.lastStage).toBe('glazed')
+})
+
+test('a photo on a step that had none is not a swap', async () => {
+  await seed('trimmed', [])
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: undefined,
+    photo: photo('new'),
+  })
+  expect(swap).toBeUndefined()
+  expect((await db.entries.get('e1'))?.photoId).toBeTruthy()
+})
+
+test('choosing the same image again is not a swap', async () => {
+  const oldId = await seedWithPhoto()
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: D1,
+    photo: photo('old'),
+  })
+  expect(swap).toBeUndefined()
+  expect((await db.entries.get('e1'))?.photoId).toBe(oldId)
+  expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
+})
+
+test('a swapped-out photo shown on another live step stays live', async () => {
+  const oldId = await seedWithPhoto()
+  await db.entries.add({
+    id: 'e2',
+    pieceId: 'p1',
+    stage: 'trimmed',
+    photoId: oldId,
+  })
+  await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: D1,
+    photo: photo('new'),
+  })
+  expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
+  expect((await db.entries.get('e2'))?.photoId).toBe(oldId)
+})
+
+test('glazes are saved only on a Glazed step', async () => {
+  await seed('bisqued', [])
+  await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: undefined,
+    glazes: [{ glazeId: 'A' }],
+  })
+  expect(await db.glazeApps.count()).toBe(0)
+  await db.entries.add({ id: 'e3', pieceId: 'p1', stage: 'glazed' })
+  await saveStepDetails({
+    entryId: 'e3',
+    note: '',
+    date: undefined,
+    glazes: [{ glazeId: 'A' }],
+  })
+  expect(await db.glazeApps.count()).toBe(1)
+})
+
+test('changing the earliest date moves the piece start date', async () => {
+  await seed('trimmed', [])
+  await saveStepDetails({ entryId: 'e1', note: '', date: '2026-02-01' })
+  expect((await db.pieces.get('p1'))?.createdAt).toBe(
+    new Date('2026-02-01').toISOString(),
+  )
+})
+
+test('a failed write leaves nothing changed', async () => {
+  const oldId = await seedWithPhoto()
+  await db.entries.update('e1', { note: 'before' })
+  const spy = vi
+    .spyOn(db.glazeApps, 'add')
+    .mockRejectedValue(new Error('storage full'))
+  const bulk = vi
+    .spyOn(db.glazeApps, 'bulkAdd')
+    .mockRejectedValue(new Error('storage full'))
+  await expect(
+    saveStepDetails({
+      entryId: 'e1',
+      note: 'after',
+      date: D1,
+      photo: photo('new'),
+      glazes: [{ glazeId: 'A' }],
+    }),
+  ).rejects.toThrow()
+  spy.mockRestore()
+  bulk.mockRestore()
+  const entry = await db.entries.get('e1')
+  expect(entry?.note).toBe('before')
+  expect(entry?.photoId).toBe(oldId)
+  expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
 })
