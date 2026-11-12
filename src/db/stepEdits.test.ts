@@ -1,6 +1,11 @@
 import type { ProcessedImage } from '../photos/process'
 import { db } from './db'
-import { saveStepDetails, setStepGlazes } from './stepEdits'
+import {
+  addPhotoToStep,
+  saveStepDetails,
+  setStepGlazes,
+  undoPhotoSwap,
+} from './stepEdits'
 import type { GlazeApplication, Piece, StageEntry } from './types'
 
 const T1 = '2026-01-01T00:00:00.000Z'
@@ -243,4 +248,133 @@ test('a failed write leaves nothing changed', async () => {
   expect(entry?.photoId).toBe(oldId)
   expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
   expect(await db.photos.count()).toBe(1)
+})
+
+async function swapped() {
+  const oldId = await seedWithPhoto()
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: '2026-04-01',
+    photo: photo('new'),
+  })
+  if (!swap) throw new Error('expected a swap')
+  return { oldId, swap }
+}
+
+test('undo puts the old photo and date back and sends the new photo to Recently Deleted', async () => {
+  const { oldId, swap } = await swapped()
+  expect(await undoPhotoSwap(swap)).toBe(true)
+  const entry = await db.entries.get('e1')
+  expect(entry?.photoId).toBe(oldId)
+  expect(entry?.date).toBe(D1)
+  expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
+  const fresh = await db.photos.get(swap.newPhotoId)
+  expect(fresh?.deletedAt).toBeTruthy()
+  expect(fresh?.lastEntryId).toBe('e1')
+})
+
+test('undo keeps a note saved in the same save', async () => {
+  await seedWithPhoto()
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: 'keep me',
+    date: D1,
+    photo: photo('new'),
+  })
+  if (!swap) throw new Error('expected a swap')
+  await undoPhotoSwap(swap)
+  expect((await db.entries.get('e1'))?.note).toBe('keep me')
+})
+
+test('undo does nothing once the step shows another photo', async () => {
+  const { swap } = await swapped()
+  await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: D1,
+    photo: photo('third'),
+  })
+  const before = await db.entries.get('e1')
+  const photos = await db.photos.toArray()
+  expect(await undoPhotoSwap(swap)).toBe(false)
+  expect(await db.entries.get('e1')).toEqual(before)
+  expect(await db.photos.toArray()).toEqual(photos)
+})
+
+test('undo does nothing for a deleted step', async () => {
+  const { swap } = await swapped()
+  await db.entries.update('e1', { deletedAt: '2026-05-01T00:00:00.000Z' })
+  const photos = await db.photos.toArray()
+  expect(await undoPhotoSwap(swap)).toBe(false)
+  expect((await db.entries.get('e1'))?.photoId).toBe(swap.newPhotoId)
+  expect(await db.photos.toArray()).toEqual(photos)
+})
+
+test('undo leaves a new photo that another live step shows', async () => {
+  const { swap } = await swapped()
+  await db.entries.add({
+    id: 'e2',
+    pieceId: 'p1',
+    stage: 'trimmed',
+    photoId: swap.newPhotoId,
+  })
+  expect(await undoPhotoSwap(swap)).toBe(true)
+  expect((await db.photos.get(swap.newPhotoId))?.deletedAt).toBeUndefined()
+})
+
+test('undo relinks an old photo that another step kept live', async () => {
+  const oldId = await seedWithPhoto()
+  await db.entries.add({
+    id: 'e2',
+    pieceId: 'p1',
+    stage: 'trimmed',
+    photoId: oldId,
+  })
+  const swap = await saveStepDetails({
+    entryId: 'e1',
+    note: '',
+    date: D1,
+    photo: photo('new'),
+  })
+  if (!swap) throw new Error('expected a swap')
+  expect(await undoPhotoSwap(swap)).toBe(true)
+  expect((await db.entries.get('e1'))?.photoId).toBe(oldId)
+  expect((await db.photos.get(oldId))?.deletedAt).toBeUndefined()
+})
+
+test('undo does nothing when the old photo was purged', async () => {
+  const { oldId, swap } = await swapped()
+  await db.photos.update(oldId, { purgedAt: '2026-05-01T00:00:00.000Z' })
+  expect(await undoPhotoSwap(swap)).toBe(false)
+  expect((await db.entries.get('e1'))?.photoId).toBe(swap.newPhotoId)
+})
+
+test('addPhotoToStep dates an undated step from the photo', async () => {
+  await seed('trimmed', [])
+  await addPhotoToStep('e1', photo('new'))
+  const entry = await db.entries.get('e1')
+  expect(entry?.photoId).toBeTruthy()
+  expect(entry?.date).toBe('2026-10-31T09:00:00.000Z')
+  expect((await db.pieces.get('p1'))?.createdAt).toBe(
+    '2026-10-31T09:00:00.000Z',
+  )
+})
+
+test('addPhotoToStep keeps a date the step already has', async () => {
+  await seed('trimmed', [])
+  await db.entries.update('e1', { date: D1 })
+  await addPhotoToStep('e1', photo('new'))
+  expect((await db.entries.get('e1'))?.date).toBe(D1)
+  expect((await db.entries.get('e1'))?.photoId).toBeTruthy()
+})
+
+test('addPhotoToStep refuses a step that has a photo', async () => {
+  await seedWithPhoto()
+  await expect(addPhotoToStep('e1', photo('new'))).rejects.toThrow(
+    'Step has a photo',
+  )
+  await expect(addPhotoToStep('nope', photo('new'))).rejects.toThrow(
+    'Step not found',
+  )
 })
