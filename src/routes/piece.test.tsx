@@ -8,7 +8,7 @@ import {
   markLost,
   softDelete,
 } from '../db/ops'
-import type { ProcessedImage } from '../photos/process'
+import { type ProcessedImage, processImage } from '../photos/process'
 import { setSinkForTests } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 
@@ -30,11 +30,30 @@ vi.mock('../components/PhotoImg', () => ({
   },
 }))
 
+vi.mock('../photos/process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../photos/process')>()),
+  processImage: vi.fn(),
+}))
+
+/** What processImage returns for a picked file. */
+const picked: ProcessedImage = {
+  blob: new Blob(['new'], { type: 'image/jpeg' }),
+  thumb: new Blob(['tnew'], { type: 'image/jpeg' }),
+  width: 10,
+  height: 10,
+  hash: 'hash-new',
+  takenAt: '2026-11-04T10:00:00.000Z',
+}
+
 beforeEach(async () => {
   shown.length = 0
   await db.delete()
   await db.open()
   await ensureDefaults()
+  vi.mocked(processImage).mockReset()
+  vi.mocked(processImage).mockResolvedValue(picked)
+  URL.createObjectURL = vi.fn(() => `blob:${crypto.randomUUID()}`)
+  URL.revokeObjectURL = vi.fn()
 })
 
 afterEach(() => {
@@ -573,6 +592,9 @@ test('a step with no photo is a slim row with Add date and no thumbnail', async 
   const row = trimmedRow()
   expect(row.querySelector('img')).toBeNull()
   expect(
+    within(row).getByRole('button', { name: 'Add Trimmed photo' }),
+  ).toBeVisible()
+  expect(
     within(row).getByRole('button', { name: 'Add Trimmed date' }),
   ).toBeVisible()
   expect(
@@ -722,21 +744,22 @@ const stepWithPhoto = (pieceId: string, stage: string) =>
 const photoOfStage = async (pieceId: string, stage: string) =>
   (await stepWithPhoto(pieceId, stage))?.photoId
 
-const stepButton = (label: string) =>
-  screen.getByRole('button', { name: new RegExp(`^${label}`) })
-
 const hero = () => screen.getByRole('img', { name: /^Morning Mug/ })
 
-/** The journey's buttons that show a step's photo, top to bottom. */
+/** The journey's buttons that show a step's photo (the ones with a thumbnail), top to bottom. */
 const stepButtons = () => {
   const journey = screen
     .getByRole('heading', { name: 'Journey' })
     .closest('section') as HTMLElement
   return within(journey)
     .getAllByRole('button')
-    .filter(
-      (b) => !/^(Delete |Add .* date$|\w+ date, )/.test(b.ariaLabel ?? ''),
-    )
+    .filter((b) => b.querySelector('img'))
+}
+
+const stepButton = (label: string) => {
+  const button = stepButtons().find((b) => b.textContent?.startsWith(label))
+  if (!button) throw new Error(`no ${label} photo step`)
+  return button
 }
 
 test('tapping an earlier step shows its photo and stage at the top, and tapping the latest step goes back', async () => {
@@ -810,7 +833,9 @@ test('a tap is forgotten once its step becomes the latest, so a new latest step 
   await userEvent.click(stepButton('Glazed'))
   const fired = await stepWithPhoto(id, 'fired')
   await act(() => softDelete('entries', fired?.id ?? ''))
-  await screen.findByText(/^Glazed · /)
+  // The header already showed Glazed while it was picked; wait until Glazed is the latest.
+  await waitFor(() => expect(hero()).toHaveAccessibleName('Morning Mug'))
+  expect(screen.getByText(/^Glazed · /)).toBeVisible()
   await act(() =>
     addStageEntry({
       pieceId: id,
@@ -833,7 +858,7 @@ test('only steps with a photo can be tapped to show it', async () => {
   const id = await journeyPiece()
   renderRoute(`/piece/${id}`)
   await screen.findByRole('heading', { name: 'Morning Mug' })
-  // Thrown, Trimmed and the bare Bisqued step have no photo, only date and delete buttons.
+  // Thrown, Trimmed and the bare Bisqued step have no photo, so no thumbnail to tap.
   expect(
     stepButtons().map((b) => b.textContent?.match(/^[A-Z][a-z]+/)?.[0]),
   ).toEqual(['Fired', 'Glazed', 'Bisqued'])
@@ -961,4 +986,437 @@ test('piece_opened is not sent when the hero photo never loads', async () => {
   vi.useFakeTimers({ toFake: ['performance'] })
   vi.advanceTimersByTime(15_000)
   expect(events.filter(([n]) => n === 'piece_opened')).toEqual([])
+})
+
+/** The screen's own photo input, outside any sheet. */
+const screenLibraryInput = () => {
+  const inputs = screen
+    .getAllByTestId('library-input')
+    .filter((i) => !i.closest('[role="dialog"]'))
+  expect(inputs).toHaveLength(1)
+  return inputs[0] as HTMLInputElement
+}
+
+const pickFile = (input: HTMLElement) =>
+  fireEvent.change(input, {
+    target: { files: [new File(['x'], 'pot.jpg', { type: 'image/jpeg' })] },
+  })
+
+const trimmedStep = async () =>
+  (await db.entries.toArray()).find((e) => e.stage === 'trimmed')
+
+test('Edit step on the top photo opens the step shown there', async () => {
+  const id = await journeyPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Edit step' }),
+  )
+  const fired = screen.getByRole('dialog', { name: 'Fired step' })
+  await userEvent.click(within(fired).getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+  await userEvent.click(stepButton('Glazed'))
+  await userEvent.click(screen.getByRole('button', { name: 'Edit step' }))
+  const glazed = screen.getByRole('dialog', { name: 'Glazed step' })
+  expect(
+    await within(glazed).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Oatmeal')
+})
+
+test('no Edit step button when the piece has no photo', async () => {
+  const id = await createPiece({ name: 'Bare' })
+  await addStageEntry({ pieceId: id, stage: 'trimmed' })
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  expect(
+    screen.queryByRole('button', { name: 'Edit step' }),
+  ).not.toBeInTheDocument()
+})
+
+test("tapping a photo-less step's name opens its details; Add date still edits inline", async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Trimmed' }),
+  )
+  const sheet = screen.getByRole('dialog', { name: 'Trimmed step' })
+  await userEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed date' }),
+  )
+  expect(screen.getByLabelText('Trimmed date')).toBeVisible()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('the empty photo spot adds a photo dated from the photo', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  const input = screenLibraryInput()
+  const click = vi.spyOn(input, 'click')
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed photo' }),
+  )
+  // The picker opens inside the tap, with no sheet first.
+  expect(click).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+  pickFile(input)
+  await waitFor(async () =>
+    expect((await trimmedStep())?.photoId).toBeDefined(),
+  )
+  const step = await trimmedStep()
+  expect(step?.date).toBe(picked.takenAt)
+  await waitFor(() =>
+    expect(trimmedRow().querySelector('img')).toHaveAttribute(
+      'data-photo-id',
+      step?.photoId,
+    ),
+  )
+})
+
+test('a swap shows Photo changed with Undo, and Undo puts the old photo back', async () => {
+  const id = await firedPiece()
+  const before = await stepWithPhoto(id, 'fired')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Edit step' }),
+  )
+  const sheet = screen.getByRole('dialog', { name: 'Fired step' })
+  pickFile(within(sheet).getByTestId('library-input'))
+  const save = within(sheet).getByRole('button', { name: 'Save' })
+  await waitFor(() => expect(save).toBeEnabled())
+  await userEvent.click(save)
+
+  const toast = await screen.findByText('Photo changed')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  const swapped = await db.entries.get(before?.id ?? '')
+  expect(swapped?.photoId).not.toBe(before?.photoId)
+  await waitFor(() =>
+    expect(hero()).toHaveAttribute('data-photo-id', swapped?.photoId),
+  )
+
+  await userEvent.click(within(toast).getByRole('button', { name: 'Undo' }))
+  await waitFor(async () =>
+    expect((await db.entries.get(before?.id ?? ''))?.photoId).toBe(
+      before?.photoId,
+    ),
+  )
+  expect((await db.entries.get(before?.id ?? ''))?.date).toBe(before?.date)
+  await waitFor(() =>
+    expect(hero()).toHaveAttribute('data-photo-id', before?.photoId),
+  )
+  expect(screen.queryByText('Photo changed')).not.toBeInTheDocument()
+})
+
+test("Undo after the step went away says it couldn't undo", async () => {
+  const id = await firedPiece()
+  const before = await stepWithPhoto(id, 'fired')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Edit step' }),
+  )
+  const sheet = screen.getByRole('dialog', { name: 'Fired step' })
+  pickFile(within(sheet).getByTestId('library-input'))
+  const save = within(sheet).getByRole('button', { name: 'Save' })
+  await waitFor(() => expect(save).toBeEnabled())
+  await userEvent.click(save)
+  const toast = await screen.findByText('Photo changed')
+  await act(() => softDelete('entries', before?.id ?? ''))
+  await userEvent.click(within(toast).getByRole('button', { name: 'Undo' }))
+  expect(
+    await screen.findByText("Couldn't undo. The step changed."),
+  ).toBeVisible()
+  expect(screen.queryByText(SAVE_ERROR)).not.toBeInTheDocument()
+})
+
+test('a save that keeps the photo shows no Undo', async () => {
+  const id = await firedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Edit step' }),
+  )
+  const sheet = screen.getByRole('dialog', { name: 'Fired step' })
+  await userEvent.type(
+    within(sheet).getByRole('textbox', { name: 'Note' }),
+    ', thin',
+  )
+  await userEvent.click(within(sheet).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  expect(screen.queryByText('Photo changed')).not.toBeInTheDocument()
+  expect((await stepWithPhoto(id, 'fired'))?.note).toBe(
+    'Cone 6 oxidation, thin',
+  )
+})
+
+test('the step sheet closes when its step goes away', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Trimmed' }),
+  )
+  expect(screen.getByRole('dialog', { name: 'Trimmed step' })).toBeVisible()
+  await act(async () => softDelete('entries', (await trimmedStep())?.id ?? ''))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+})
+
+test('adding a photo reports piece_edited photo', async () => {
+  const id = await pieceWithBareTrim()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Bare' })
+  const events = captureEvents()
+  await userEvent.click(
+    within(trimmedRow()).getByRole('button', { name: 'Add Trimmed photo' }),
+  )
+  pickFile(screenLibraryInput())
+  await waitFor(() =>
+    expect(events).toContainEqual(['piece_edited', { part: 'photo' }]),
+  )
+  expect(events.filter(([n]) => n === 'piece_edited')).toHaveLength(1)
+})
+
+/** A piece with a Glazed step wearing Celadon. */
+async function glazedPiece() {
+  const celadon = await addGlaze('Celadon', '6')
+  return createPiece({
+    name: 'Bowl',
+    stage: 'glazed',
+    glazes: [{ glazeId: celadon }],
+  })
+}
+
+const glazeNames = () =>
+  within(screen.getByRole('list', { name: 'Glazes' }))
+    .getAllByRole('listitem')
+    .map((l) => l.textContent)
+
+test('Edit shows glazes only once the piece has a Glazed step', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  let dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    within(dialog).queryByRole('textbox', { name: 'Glaze 1' }),
+  ).not.toBeInTheDocument()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await addStageEntry({ pieceId: id, stage: 'glazed' })
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('')
+})
+
+test('Edit adds a forgotten glaze and moves it to the bottom layer first', async () => {
+  const id = await glazedPiece()
+  await addGlaze('Floating Blue', '6')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: 'Move glaze 2 up' }),
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Floating Blue', 'Celadon']),
+  )
+})
+
+test('a piece logged straight to Fired can get glazes from Edit', async () => {
+  const id = await createPiece({ name: 'Cup', stage: 'fired' })
+  await addGlaze('Oatmeal', '6')
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.type(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+    'Oatmeal',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(glazeNames()).toEqual(['Oatmeal']))
+})
+
+test('a failed Edit save adds no library glaze', async () => {
+  const id = await glazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  const nameField = within(dialog).getByRole('textbox', { name: 'Name' })
+  await userEvent.clear(nameField)
+  await userEvent.type(nameField, 'Renamed')
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Brand New',
+  )
+  // Fails the new layer's write, which comes after the piece update and the
+  // new library glaze, so both have to roll back.
+  const add = vi.spyOn(db.glazeApps, 'add').mockRejectedValue(new Error('full'))
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
+  expect(add).toHaveBeenCalled()
+  add.mockRestore()
+  expect(screen.getByRole('dialog', { name: 'Edit piece' })).toBeVisible()
+  expect((await db.glazes.toArray()).map((g) => g.name)).not.toContain(
+    'Brand New',
+  )
+  expect((await db.pieces.get(id))?.name).toBe('Bowl')
+})
+
+/** Glazed Oct 1 with Celadon, then a second Glazed photo Oct 3 with no glazes. */
+async function twiceGlazedPiece() {
+  const celadon = await addGlaze('Celadon', '10')
+  await addGlaze('Floating Blue', '6')
+  const id = await createPiece({
+    name: 'Morning Mug',
+    stage: 'glazed',
+    photo: photo('oct1'),
+    date: '2026-10-01T12:00:00Z',
+    glazes: [{ glazeId: celadon }],
+  })
+  const oct3 = await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    photo: photo('oct3'),
+    date: '2026-10-03T12:00:00Z',
+  })
+  return { id, oct3 }
+}
+
+test('Edit changes the glazes the Glaze box shows, even after a later Glazed photo', async () => {
+  const { id } = await twiceGlazedPiece()
+  renderRoute(`/piece/${id}`)
+  await waitFor(() => expect(glazeNames()).toEqual(['Celadon']))
+  // Firing reads the cone from the same step, not the bare Oct 3 one.
+  expect(screen.getByText('Cone 10')).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  expect(
+    await within(dialog).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(dialog).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Celadon', 'Floating Blue']),
+  )
+})
+
+test("a later Glazed photo's step sheet edits the glazes the Glaze box shows", async () => {
+  const { id, oct3 } = await twiceGlazedPiece()
+  const oct3Photo = (await db.entries.get(oct3))?.photoId
+  renderRoute(`/piece/${id}`)
+  await waitFor(() =>
+    expect(hero()).toHaveAttribute('data-photo-id', oct3Photo),
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Edit step' }))
+  const sheet = screen.getByRole('dialog', { name: 'Glazed step' })
+  expect(
+    await within(sheet).findByRole('textbox', { name: 'Glaze 1' }),
+  ).toHaveValue('Celadon')
+  await userEvent.click(
+    within(sheet).getByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(sheet).getByRole('textbox', { name: 'Glaze 2' }),
+    'Floating Blue',
+  )
+  await userEvent.click(
+    within(sheet).getByRole('button', { name: 'Move glaze 2 up' }),
+  )
+  await userEvent.click(within(sheet).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  await waitFor(() =>
+    expect(glazeNames()).toEqual(['Floating Blue', 'Celadon']),
+  )
+  // The layers stay on the one glaze step; the Oct 3 step still has none.
+  expect(await db.glazeApps.where('entryId').equals(oct3).toArray()).toEqual([])
+})
+
+test("changing glazes reports piece_edited glazes; leaving them alone doesn't", async () => {
+  const id = await glazedPiece()
+  const events = captureEvents()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  let dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await within(dialog).findByDisplayValue('Celadon')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  const edited = () => events.filter(([n]) => n === 'piece_edited')
+  expect(edited()).toEqual([['piece_edited', { part: 'details' }]])
+
+  events.length = 0
+  await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Speckle',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(edited()).toContainEqual(['piece_edited', { part: 'glazes' }]),
+  )
+  expect(edited()).toContainEqual(['piece_edited', { part: 'details' }])
+})
+
+test('saving only the name leaves the glazes alone, even ones that changed meanwhile', async () => {
+  const id = await glazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await within(dialog).findByDisplayValue('Celadon')
+  // Another device changes the layer after the sheet opened.
+  const [layer] = await db.glazeApps.toArray()
+  await act(() => db.glazeApps.update(layer.id, { dips: 3 }))
+  const before = await db.glazeApps.toArray()
+  const events = captureEvents()
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Name' }),
+    ' two',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  expect((await db.pieces.get(id))?.name).toBe('Bowl two')
+  expect(await db.glazeApps.toArray()).toEqual(before)
+  expect(events).not.toContainEqual(['piece_edited', { part: 'glazes' }])
 })

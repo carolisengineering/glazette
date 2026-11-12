@@ -16,6 +16,13 @@ export class UnsupportedImageError extends Error {
   }
 }
 
+/** What to tell the user when a chosen photo can't be used. */
+export function photoErrorMessage(error: unknown): string {
+  return error instanceof UnsupportedImageError
+    ? "This photo format isn't supported"
+    : "Couldn't open this photo. Try again."
+}
+
 export interface ProcessedImage {
   blob: Blob
   thumb: Blob

@@ -51,6 +51,21 @@ export function glazedStepWithGlazes(
   )
 }
 
+/**
+ * The piece's glaze step: the one Glazed step whose glazes the Glaze box shows
+ * and every glaze editor changes. That's the step with the layers, or, before
+ * any step has layers, the latest Glazed step. A later Glazed photo with no
+ * glazes of its own doesn't take over.
+ */
+export function glazeStep(
+  entries: StageEntry[],
+  glazeApps: { entryId: string }[],
+): StageEntry | undefined {
+  return (
+    glazedStepWithGlazes(entries, glazeApps) ?? latestEntry(entries, 'glazed')
+  )
+}
+
 /** Ascending rank of two entries: later stage first, then later date; within a stage an undated entry ranks below a dated one. Sort with (a, b) => compareEntries(b, a) for newest first. */
 export function compareEntries(a: StageEntry, b: StageEntry): number {
   const byStage = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)
@@ -91,18 +106,50 @@ export function displayName(piece: Piece): string {
   return piece.form ? `Untitled ${piece.form}` : 'Untitled piece'
 }
 
-/**
- * "Day N" for a piece: local calendar days since it was thrown, plus one, so
- * the day it was thrown is Day 1. Undefined when createdAt is not a valid date.
- */
-export function dayCount(piece: Piece, now: Date): number | undefined {
-  const created = new Date(piece.createdAt)
-  if (Number.isNaN(created.getTime())) return undefined
-  const start = new Date(
-    created.getFullYear(),
-    created.getMonth(),
-    created.getDate(),
+/** The earliest of some stored dates (full ISO strings), ignoring missing ones. */
+function earliestDate(dates: (string | undefined)[]): string | undefined {
+  return dates.reduce<string | undefined>(
+    (min, d) => (d && (min === undefined || d < min) ? d : min),
+    undefined,
   )
+}
+
+/**
+ * The date a piece's "Day N" counts from, read from its live steps. The first
+ * step is the live step of the earliest stage (the earliest dated one when that
+ * stage has several). When it has a date, that's the start. When it doesn't,
+ * the start is `createdAt`, or an earlier dated step's date: other steps can
+ * move the start earlier, never later.
+ */
+export function startDate(piece: Piece, entries: StageEntry[]): string {
+  const live = entries.filter((e) => !e.deletedAt)
+  if (live.length === 0) return piece.createdAt
+  const firstStage = Math.min(...live.map((e) => STAGES.indexOf(e.stage)))
+  const first = earliestDate(
+    live
+      .filter((e) => STAGES.indexOf(e.stage) === firstStage)
+      .map((e) => e.date),
+  )
+  if (first !== undefined) return first
+  const earliest = earliestDate(live.map((e) => e.date))
+  return earliest !== undefined && earliest < piece.createdAt
+    ? earliest
+    : piece.createdAt
+}
+
+/**
+ * "Day N" for a piece: local calendar days since its start date (see
+ * `startDate`), plus one, so the first day is Day 1. Undefined when the start
+ * is not a valid date.
+ */
+export function dayCount(
+  piece: Piece,
+  entries: StageEntry[],
+  now: Date,
+): number | undefined {
+  const begun = new Date(startDate(piece, entries))
+  if (Number.isNaN(begun.getTime())) return undefined
+  const start = new Date(begun.getFullYear(), begun.getMonth(), begun.getDate())
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const days = Math.round((today.getTime() - start.getTime()) / DAY_MS)
   return Math.max(0, days) + 1

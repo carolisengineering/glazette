@@ -2,6 +2,7 @@ import { hashesHeld } from '../photos/bytes'
 import { changeTime } from '../sync/records'
 import { db as appDb, type GlazetteDB, newId, UNDELETE_PHOTO } from './db'
 import { buildSteps } from './ops'
+import { releasePhoto } from './photoLinks'
 import { currentStage, STAGES, stagesBetween } from './stage'
 import type { Photo, Piece, Stage } from './types'
 
@@ -83,8 +84,11 @@ export function putBackPiece(
 /**
  * Brings a deleted photo back where it was: on its free step, on a new step of
  * the piece it was on, or on a new piece when that piece is gone. A deleted
- * piece comes back too. Returns the piece the photo is now on, or undefined
- * (changing nothing) when the photo is missing, live or purged.
+ * piece comes back too. When its old step now shows another photo, it goes
+ * back on that step anyway and the other photo goes to Recently Deleted
+ * (unless another live step still shows it). Returns the piece the photo is
+ * now on, or undefined (changing nothing) when the photo is missing, live or
+ * purged.
  */
 export function putBackPhoto(
   id: string,
@@ -129,11 +133,18 @@ export function putBackPhoto(
     const step = photo.lastEntryId
       ? await db.entries.get(photo.lastEntryId)
       : undefined
-    if (step && !step.deletedAt && !step.photoId && step.pieceId === home.id) {
+    if (
+      step &&
+      !step.deletedAt &&
+      step.pieceId === home.id &&
+      step.photoId !== id
+    ) {
+      // A free step takes the photo; a step showing another photo swaps back.
       await db.entries.update(step.id, {
         photoId: id,
         updatedAt: changeTime(step, now),
       })
+      if (step.photoId) await releasePhoto(db, step, step.photoId, now)
     } else {
       const existing = await db.entries
         .where('pieceId')

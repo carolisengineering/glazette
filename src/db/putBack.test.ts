@@ -141,21 +141,6 @@ test('a photo goes back on its free step', async () => {
   expect(row?.needsDownload).toBeUndefined()
 })
 
-test('a photo whose step has another photo gets a new step', async () => {
-  await seed({
-    pieces: [piece('p1')],
-    entries: [step('e1', 'p1', { stage: 'glazed', photoId: 'other' })],
-    photos: [photo('ph1', { deletedAt: T2, ...place })],
-  })
-  const result = await putBackPhoto('ph1')
-  expect(result?.id).toBe('p1')
-  const steps = await db.entries.where('pieceId').equals('p1').toArray()
-  const added = steps.filter((s) => s.id !== 'e1')
-  expect(added).toHaveLength(1)
-  expect(added[0]).toMatchObject({ stage: 'glazed', photoId: 'ph1', date: T2 })
-  expect((await db.entries.get('e1'))?.photoId).toBe('other')
-})
-
 test('a photo whose step was deleted gets a new step', async () => {
   await seed({
     pieces: [piece('p1')],
@@ -272,5 +257,46 @@ describe('on a device whose clock is behind the one that deleted', () => {
     expect((await db.pieces.get('p1'))?.updatedAt).toBe(AFTER)
     expect((await db.entries.get('e1'))?.updatedAt).toBe(AFTER)
     expect((await db.photos.get('ph1'))?.updatedAt).toBe(AFTER)
+  })
+})
+
+describe('a swapped-out photo', () => {
+  const swapped = (): Photo =>
+    photo('old', { hash: 'b'.repeat(64), deletedAt: T2, ...place })
+
+  test('putting back a swapped-out photo returns it to its step and sends the replacement to Recently Deleted', async () => {
+    await seed({
+      pieces: [piece('p1')],
+      entries: [
+        step('e1', 'p1', { stage: 'glazed', photoId: 'new', date: T1 }),
+      ],
+      photos: [photo('new'), swapped()],
+    })
+    await putBackPhoto('old')
+    const entries = await db.entries.where('pieceId').equals('p1').toArray()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ id: 'e1', photoId: 'old', date: T1 })
+    expect((await db.photos.get('old'))?.deletedAt).toBeUndefined()
+    expect(await db.photos.get('new')).toMatchObject({
+      deletedAt: expect.any(String),
+      lastPieceId: 'p1',
+      lastEntryId: 'e1',
+      lastStage: 'glazed',
+    })
+  })
+
+  test('the replacement stays live when another step shows it', async () => {
+    await seed({
+      pieces: [piece('p1')],
+      entries: [
+        step('e1', 'p1', { stage: 'glazed', photoId: 'new' }),
+        step('e2', 'p1', { stage: 'fired', photoId: 'new' }),
+      ],
+      photos: [photo('new'), swapped()],
+    })
+    await putBackPhoto('old')
+    expect((await db.entries.get('e1'))?.photoId).toBe('old')
+    expect((await db.entries.get('e2'))?.photoId).toBe('new')
+    expect((await db.photos.get('new'))?.deletedAt).toBeUndefined()
   })
 })

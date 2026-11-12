@@ -33,7 +33,8 @@ export function FactCards({ view }: { view: PieceDetail }) {
             className="m-0 flex list-none flex-col gap-1 p-0"
           >
             {view.glazeLayers.map((layer, i) => (
-              // The same glaze can be layered twice, and layers never reorder in place.
+              // The same glaze can be layered twice. Reordered layers come back as a new
+              // list from the database, so an index key just re-renders each row.
               // biome-ignore lint/suspicious/noArrayIndexKey: layers carry no id here
               <li key={i} className={`flex items-start gap-1.5 ${valueText}`}>
                 <span

@@ -4,8 +4,15 @@ import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
 import { elapsed, track } from '../telemetry/telemetry'
 import { db, newId } from './db'
+import { releasePhoto } from './photoLinks'
 import { DEFAULT_CLAY_NAME, DEFAULT_SETTINGS } from './seed'
-import { currentStage, latestEntry, STAGES, stagesBetween } from './stage'
+import {
+  currentStage,
+  glazeStep,
+  latestEntry,
+  STAGES,
+  stagesBetween,
+} from './stage'
 import type {
   Clay,
   Glaze,
@@ -19,7 +26,7 @@ import type {
 const nowIso = (): string => new Date().toISOString()
 
 /** Stored dates are always full ISO timestamps; stage and timeline ordering compares them as strings. */
-function toIsoDate(value: string): string {
+export function toIsoDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`)
   return date.toISOString()
@@ -58,7 +65,7 @@ export function defaultNoteFor(stage: Stage, settings: Settings): string {
   return ''
 }
 
-type GlazeInput = Array<{
+export type GlazeInput = Array<{
   glazeId: string
   dips?: number
   method?: GlazeApplication['method']
@@ -304,7 +311,7 @@ export async function restagePiece(
   })
 }
 
-/** Adds glaze applications to the piece's latest live Glazed step; does nothing when there is none. */
+/** Adds glaze applications to the piece's glaze step (see `glazeStep`); does nothing when it has no Glazed step. */
 export async function addGlazesToPiece(
   pieceId: string,
   glazes: GlazeInput,
@@ -322,11 +329,12 @@ export async function addGlazesToPiece(
         .where('pieceId')
         .equals(pieceId)
         .toArray()
-      const glazed = latestEntry(entries, 'glazed')
-      if (!glazed) return false
-      const existing = (
-        await db.glazeApps.where('entryId').equals(glazed.id).toArray()
+      const apps = (
+        await db.glazeApps.where('pieceId').equals(pieceId).toArray()
       ).filter((a) => !a.deletedAt)
+      const glazed = glazeStep(entries, apps)
+      if (!glazed) return false
+      const existing = apps.filter((a) => a.entryId === glazed.id)
       const start = existing.reduce((max, a) => Math.max(max, a.order + 1), 0)
       await db.glazeApps.bulkAdd(glazeRows(glazed.id, pieceId, glazes, start))
       await db.pieces.update(pieceId, { updatedAt: nowIso() })
@@ -386,17 +394,7 @@ export async function removePhoto(entryId: string): Promise<void> {
     if (!photoId) return
     const now = nowIso()
     await db.entries.update(entryId, { photoId: undefined })
-    const stillUsed = await db.entries
-      .filter((e) => e.photoId === photoId && !e.deletedAt)
-      .count()
-    if (stillUsed === 0) {
-      await db.photos.update(photoId, {
-        deletedAt: now,
-        lastPieceId: entry.pieceId,
-        lastEntryId: entry.id,
-        lastStage: entry.stage,
-      })
-    }
+    await releasePhoto(db, entry, photoId, now)
     await db.pieces.update(entry.pieceId, { updatedAt: now })
   })
 }

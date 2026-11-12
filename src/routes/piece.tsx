@@ -6,16 +6,21 @@ import { shortDate } from '../db/dates'
 import { markLost, setEntryDate, softDelete, updatePiece } from '../db/ops'
 import { type PieceDetail, usePiece } from '../db/queries'
 import { displayName, latestEntry, nextStage, STAGE_LABEL } from '../db/stage'
+import { addPhotoToStep, type PhotoSwap, undoPhotoSwap } from '../db/stepEdits'
 import type { StageEntry } from '../db/types'
+import { usePhotoPicker } from '../photos/usePhotoPicker'
 import { BeforeAfter, type Side } from '../piece/BeforeAfter'
 import { EditSheet } from '../piece/EditSheet'
 import { FactCards } from '../piece/FactCards'
 import { Hero } from '../piece/Hero'
+import { StepSheet } from '../piece/StepSheet'
 import { Timeline } from '../piece/Timeline'
 import { elapsed, track } from '../telemetry/telemetry'
 
 // Opens slower than this aren't sent: the photo was waiting on the network.
 const OPEN_REPORT_LIMIT_MS = 10_000
+
+const UNDO_STALE = "Couldn't undo. The step changed."
 
 const heading =
   'm-0 text-[14px] font-semibold tracking-[0.08em] text-muted uppercase'
@@ -103,6 +108,19 @@ function PieceBoard({
   }, [heroHasPhoto])
   const latest = latestEntry(entries)
   const headerEntry = picked ?? latest
+
+  // The step whose details sheet is open, looked up live so the sheet closes
+  // if the step goes away (deleted here or synced away).
+  const [openId, setOpenId] = useState<string>()
+  const openStep = entries.find((e) => e.id === openId)
+  const openGone = openId !== undefined && !openStep
+  useEffect(() => {
+    if (openGone) setOpenId(undefined)
+  }, [openGone])
+  // Only closes the sheet it came from: a save that finishes after Escape
+  // still calls onClose, and must not close a sheet opened since.
+  const closeStep = (id: string) =>
+    setOpenId((current) => (current === id ? undefined : current))
   const next = nextStage(stage)
 
   const showStep = (entry: StageEntry) => {
@@ -126,6 +144,41 @@ function PieceBoard({
       showToast(SAVE_ERROR)
       return false
     }
+  }
+
+  // The empty photo spots share one picker; the tapped step is remembered
+  // here because open() has to run inside the tap, before any await.
+  const photoTarget = useRef<string>(undefined)
+  const picker = usePhotoPicker(async (photo) => {
+    const target = photoTarget.current
+    photoTarget.current = undefined
+    if (!target) return
+    if (await attempt(() => addPhotoToStep(target, photo))) {
+      track('piece_edited', { part: 'photo' })
+    }
+  }, showToast)
+  const addPhoto = (entry: StageEntry) => {
+    // A second tap while a photo is processing would send it to the wrong step.
+    if (picker.processing) return
+    photoTarget.current = entry.id
+    picker.open()
+  }
+
+  // One toast per save that swapped a photo. It doesn't depend on the sheet,
+  // which may already be gone when a save finishes.
+  const stepSaved = (swap: PhotoSwap | undefined) => {
+    if (!swap) return
+    showToast('Photo changed', {
+      action: {
+        label: 'Undo',
+        onPress: () =>
+          void attempt(async () => {
+            // The step was deleted or its photo changed again since the save.
+            if (!(await undoPhotoSwap(swap))) showToast(UNDO_STALE)
+          }),
+      },
+      duration: 6000,
+    })
   }
 
   // Latest text and last saved text, read through refs so the unmount save is never stale.
@@ -188,6 +241,7 @@ function PieceBoard({
         photoId={heroEntry?.photoId}
         onShown={() => reportOpened(true)}
         alt={picked ? `${name}, ${STAGE_LABEL[picked.stage]}` : name}
+        onEdit={heroEntry?.photoId ? () => setOpenId(heroEntry.id) : undefined}
       >
         {compare && !picked ? (
           <BeforeAfter value={side} onChange={setSide} />
@@ -248,6 +302,8 @@ function PieceBoard({
               }
               shownId={heroEntry?.id}
               onShow={showStep}
+              onOpen={(entry) => setOpenId(entry.id)}
+              onAddPhoto={addPhoto}
             />
           </section>
         ) : null}
@@ -290,8 +346,22 @@ function PieceBoard({
       </div>
 
       {toast}
+      {picker.input}
+      {openStep ? (
+        <StepSheet
+          key={openStep.id}
+          entry={openStep}
+          glazeStepId={view.glazeStepId}
+          onClose={() => closeStep(openStep.id)}
+          onSaved={stepSaved}
+        />
+      ) : null}
       {editing ? (
-        <EditSheet piece={piece} onClose={() => setEditing(false)} />
+        <EditSheet
+          piece={piece}
+          glazedStepId={view.glazeStepId}
+          onClose={() => setEditing(false)}
+        />
       ) : null}
       {pending ? (
         <ConfirmDialog

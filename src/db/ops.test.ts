@@ -409,7 +409,7 @@ test('restagePiece Glazed→Thrown→Bisqued leaves one live step per stage, pho
   expect(entries[0].photoId).toBeUndefined()
 })
 
-test('addGlazesToPiece attaches to the latest Glazed step and ignores empty or missing', async () => {
+test('addGlazesToPiece attaches to the Glazed step and ignores empty or missing', async () => {
   const id = await createPiece({ stage: 'glazed' })
   await addGlazesToPiece(id, [])
   expect(await db.glazeApps.count()).toBe(0)
@@ -423,6 +423,29 @@ test('addGlazesToPiece attaches to the latest Glazed step and ignores empty or m
   const other = await createPiece({ stage: 'bisqued' })
   await addGlazesToPiece(other, [{ glazeId: 'g3' }])
   expect(await db.glazeApps.count()).toBe(2)
+})
+
+test('addGlazesToPiece adds to the glaze step, not a later bare Glazed step', async () => {
+  const id = await createPiece({
+    stage: 'glazed',
+    date: '2026-10-01T12:00:00.000Z',
+    glazes: [{ glazeId: 'g1' }],
+  })
+  const bare = await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    date: '2026-10-03T12:00:00.000Z',
+  })
+  const [withLayers] = (await db.glazeApps.toArray()).map((a) => a.entryId)
+  await addGlazesToPiece(id, [{ glazeId: 'g2' }])
+  const live = (await db.glazeApps.toArray())
+    .filter((a) => !a.deletedAt)
+    .sort((a, b) => a.order - b.order)
+  expect(live.map((a) => [a.entryId, a.glazeId, a.order])).toEqual([
+    [withLayers, 'g1', 0],
+    [withLayers, 'g2', 1],
+  ])
+  expect(live.some((a) => a.entryId === bare)).toBe(false)
 })
 
 test('addGlazesToPiece ignores deleted layers', async () => {
@@ -465,6 +488,13 @@ test('setEntryDate sets, then clears, the date', async () => {
   )
   await setEntryDate(entry.id, undefined)
   expect('date' in ((await db.entries.get(entry.id)) as object)).toBe(false)
+})
+
+test("setEntryDate leaves the piece's createdAt alone; Day N reads the steps", async () => {
+  const id = await createPiece({ date: '2026-10-08T12:00:00Z' })
+  const [thrown] = await liveByStage(id)
+  await setEntryDate(thrown.id, '2026-10-01T12:00:00.000Z')
+  expect((await db.pieces.get(id))?.createdAt).toBe('2026-10-08T12:00:00.000Z')
 })
 
 test('restagePiece never removes rows', async () => {

@@ -80,7 +80,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
     picked ??
     (view.piece.lost && current ? current : (nextStage(current) ?? 'fired'))
   const name = displayName(view.piece)
-  const days = dayCount(view.piece, new Date())
+  const days = dayCount(view.piece, view.entries, new Date())
   const meta = [view.clayName, days ? `Day ${days}` : undefined]
     .filter(Boolean)
     .join(' · ')

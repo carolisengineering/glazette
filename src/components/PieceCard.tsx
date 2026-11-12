@@ -19,7 +19,7 @@ function metaLine(view: PieceView, now: Date): string {
 }
 
 function dayLabel(view: PieceView, now: Date): string | undefined {
-  const day = dayCount(view.piece, now)
+  const day = dayCount(view.piece, view.entries, now)
   return day === undefined ? undefined : `Day ${day}`
 }
 

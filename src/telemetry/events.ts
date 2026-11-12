@@ -26,7 +26,13 @@ const _everyOutcomeListed: [Exclude<SyncOutcome, Outcome>] extends [never]
   : never = true
 void _everyOutcomeListed
 
-export const EDIT_PARTS = ['details', 'notes'] as const
+export const EDIT_PARTS = [
+  'details',
+  'notes',
+  'step',
+  'glazes',
+  'photo',
+] as const
 export const PUT_BACK_KINDS = ['piece', 'photo'] as const
 export const VITAL_METRICS = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as const
 

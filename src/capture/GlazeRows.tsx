@@ -53,6 +53,13 @@ export function GlazeRows({ value, onChange }: Props) {
     onChange(rest.length > 0 ? rest : [newGlazeRow()])
   }
 
+  // Swap a row with its neighbor; the list is layer order, first on top.
+  const move = (index: number, by: -1 | 1) => {
+    const next = [...value]
+    ;[next[index], next[index + by]] = [next[index + by], next[index]]
+    onChange(next)
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <span className={label}>Glaze · from your library</span>
@@ -80,7 +87,53 @@ export function GlazeRows({ value, onChange }: Props) {
                 placeholder="Glaze name"
                 className={`${input} flex-1`}
               />
-              {value.length > 1 || row.name.trim() ? (
+              {value.length > 1 ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label={`Move glaze ${n} up`}
+                    disabled={i === 0}
+                    onClick={() => move(i, -1)}
+                    className="flex size-11 flex-none items-center justify-center rounded-full disabled:opacity-30"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#5B6672"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M6 15l6-6 6 6" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Move glaze ${n} down`}
+                    disabled={i === value.length - 1}
+                    onClick={() => move(i, 1)}
+                    className="flex size-11 flex-none items-center justify-center rounded-full disabled:opacity-30"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#5B6672"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                </>
+              ) : null}
+              {value.length > 1 || row.name.trim() || row.glazeId ? (
                 <button
                   type="button"
                   aria-label={`Remove glaze ${n}`}
