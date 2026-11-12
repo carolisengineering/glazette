@@ -4,7 +4,6 @@ import { changeTime } from '../sync/records'
 import { db, newId, UNDELETE_PHOTO } from './db'
 import { type GlazeInput, toIsoDate } from './ops'
 import { releasePhoto } from './photoLinks'
-import { followStartDate } from './startDate'
 import type { GlazeApplication, StageEntry } from './types'
 
 const nowIso = (): string => new Date().toISOString()
@@ -104,8 +103,7 @@ export async function saveStepDetails(
       const date = input.date === undefined ? undefined : toIsoDate(input.date)
       const patch: Partial<StageEntry> = {}
       if (note !== entry.note) patch.note = note
-      const dateChanged = date !== entry.date
-      if (dateChanged) patch.date = date
+      if (date !== entry.date) patch.date = date
 
       let swap: PhotoSwap | undefined
       if (input.photo) {
@@ -127,7 +125,6 @@ export async function saveStepDetails(
       if (swap) {
         await releasePhoto(db, { ...entry, ...patch }, swap.oldPhotoId, now)
       }
-      if (dateChanged) await followStartDate(entry.pieceId)
       await db.pieces.update(entry.pieceId, { updatedAt: now })
       return swap
     },
@@ -161,7 +158,6 @@ export async function undoPhotoSwap(swap: PhotoSwap): Promise<boolean> {
     }
     await db.entries.update(entry.id, patch)
     await releasePhoto(db, { ...entry, ...patch }, swap.newPhotoId, now)
-    await followStartDate(entry.pieceId)
     await db.pieces.update(entry.pieceId, { updatedAt: now })
     return true
   })
@@ -186,10 +182,8 @@ export async function addPhotoToStep(
       if (!entry || entry.deletedAt) throw new Error('Step not found')
       if (entry.photoId) throw new Error('Step has a photo')
       const patch: Partial<StageEntry> = { photoId: await storePhoto(photo) }
-      const undated = !entry.date
-      if (undated) patch.date = toIsoDate(photo.takenAt)
+      if (!entry.date) patch.date = toIsoDate(photo.takenAt)
       await db.entries.update(entry.id, patch)
-      if (undated) await followStartDate(entry.pieceId)
       await db.pieces.update(entry.pieceId, { updatedAt: nowIso() })
     },
   )

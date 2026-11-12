@@ -196,12 +196,10 @@ test('a swapped-out photo shown on another live step stays live', async () => {
   expect((await db.entries.get('e2'))?.photoId).toBe(oldId)
 })
 
-test('changing the earliest date moves the piece start date', async () => {
+test("changing a step's date leaves the piece's createdAt alone; Day N reads the steps", async () => {
   await seed('trimmed', [])
   await saveStepDetails({ entryId: 'e1', note: '', date: '2026-02-01' })
-  expect((await db.pieces.get('p1'))?.createdAt).toBe(
-    new Date('2026-02-01').toISOString(),
-  )
+  expect((await db.pieces.get('p1'))?.createdAt).toBe(T1)
 })
 
 test('a failed write leaves nothing changed', async () => {
@@ -334,9 +332,7 @@ test('addPhotoToStep dates an undated step from the photo', async () => {
   const entry = await db.entries.get('e1')
   expect(entry?.photoId).toBeTruthy()
   expect(entry?.date).toBe('2026-10-31T09:00:00.000Z')
-  expect((await db.pieces.get('p1'))?.createdAt).toBe(
-    '2026-10-31T09:00:00.000Z',
-  )
+  expect((await db.pieces.get('p1'))?.createdAt).toBe(T1)
 })
 
 test('addPhotoToStep keeps a date the step already has', async () => {

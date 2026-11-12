@@ -13,7 +13,6 @@ import {
   STAGES,
   stagesBetween,
 } from './stage'
-import { followStartDate } from './startDate'
 import type {
   Clay,
   Glaze,
@@ -356,7 +355,6 @@ export async function setEntryDate(
     if (!entry) throw new Error('Entry not found')
     await db.entries.update(entryId, { date: value })
     await db.pieces.update(entry.pieceId, { updatedAt: nowIso() })
-    await followStartDate(entry.pieceId)
   })
 }
 

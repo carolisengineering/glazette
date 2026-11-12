@@ -96,14 +96,79 @@ test('displayName falls back to "Untitled bowl" / "Untitled piece"', () => {
 
 test('dayCount is Day 1 on the day it was thrown and counts local calendar days', () => {
   const p = piece({ createdAt: new Date(2026, 10, 1, 10).toISOString() })
-  expect(dayCount(p, new Date(2026, 10, 1, 23, 30))).toBe(1)
-  expect(dayCount(p, new Date(2026, 10, 2, 0, 5))).toBe(2)
-  expect(dayCount(p, new Date(2026, 10, 3, 9))).toBe(3)
-  expect(dayCount(p, new Date(2026, 9, 30, 10))).toBe(1)
+  expect(dayCount(p, [], new Date(2026, 10, 1, 23, 30))).toBe(1)
+  expect(dayCount(p, [], new Date(2026, 10, 2, 0, 5))).toBe(2)
+  expect(dayCount(p, [], new Date(2026, 10, 3, 9))).toBe(3)
+  expect(dayCount(p, [], new Date(2026, 9, 30, 10))).toBe(1)
 })
 
 test('dayCount is undefined for an invalid createdAt', () => {
-  expect(dayCount(piece({ createdAt: 'nope' }), new Date())).toBeUndefined()
+  expect(dayCount(piece({ createdAt: 'nope' }), [], new Date())).toBeUndefined()
+})
+
+describe('dayCount counts from the first step', () => {
+  // Noon local time on a day in October 2026; "now" is Oct 20, so Oct d is Day 21 - d.
+  const oct = (d: number) => new Date(2026, 9, d, 12).toISOString()
+  const now = new Date(2026, 9, 20, 9)
+  const created = (d: number) => piece({ createdAt: oct(d) })
+
+  test('a dated first step later than createdAt', () => {
+    const entries = [
+      entry('e1', 'thrown', oct(5)),
+      entry('e2', 'bisqued', oct(9)),
+    ]
+    expect(dayCount(created(1), entries, now)).toBe(16)
+  })
+
+  test('a dated first step earlier than createdAt', () => {
+    const entries = [
+      entry('e1', 'thrown', oct(2)),
+      entry('e2', 'bisqued', oct(9)),
+    ]
+    expect(dayCount(created(5), entries, now)).toBe(19)
+  })
+
+  test('an undated first step: a later dated step does not move it later', () => {
+    const entries = [
+      entry('e1', 'thrown', undefined),
+      entry('e2', 'trimmed', oct(4)),
+    ]
+    expect(dayCount(created(1), entries, now)).toBe(20)
+  })
+
+  test('an undated first step: an earlier dated step moves it earlier', () => {
+    const entries = [
+      entry('e1', 'thrown', undefined),
+      entry('e2', 'trimmed', oct(3)),
+      entry('e3', 'bisqued', oct(2)),
+    ]
+    expect(dayCount(created(5), entries, now)).toBe(19)
+  })
+
+  test('a deleted Thrown step is not the first step', () => {
+    const entries = [
+      entry('e1', 'thrown', oct(1), oct(6)),
+      entry('e2', 'trimmed', oct(8)),
+      entry('e3', 'bisqued', oct(12)),
+    ]
+    expect(dayCount(created(1), entries, now)).toBe(13)
+  })
+
+  test('with several steps at the earliest stage, the earliest dated one counts', () => {
+    const entries = [
+      entry('e1', 'thrown', undefined),
+      entry('e2', 'thrown', oct(11)),
+      entry('e3', 'thrown', oct(9)),
+      entry('e4', 'trimmed', oct(7)),
+    ]
+    expect(dayCount(created(1), entries, now)).toBe(12)
+  })
+
+  test('with no dated step, createdAt counts', () => {
+    expect(dayCount(created(4), [entry('e1', 'thrown', undefined)], now)).toBe(
+      17,
+    )
+  })
 })
 
 const D1 = '2026-11-01T12:00:00.000Z'

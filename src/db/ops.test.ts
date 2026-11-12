@@ -490,11 +490,11 @@ test('setEntryDate sets, then clears, the date', async () => {
   expect('date' in ((await db.entries.get(entry.id)) as object)).toBe(false)
 })
 
-test('setEntryDate on the earliest step moves the piece start date', async () => {
+test("setEntryDate leaves the piece's createdAt alone; Day N reads the steps", async () => {
   const id = await createPiece({ date: '2026-10-08T12:00:00Z' })
   const [thrown] = await liveByStage(id)
   await setEntryDate(thrown.id, '2026-10-01T12:00:00.000Z')
-  expect((await db.pieces.get(id))?.createdAt).toBe('2026-10-01T12:00:00.000Z')
+  expect((await db.pieces.get(id))?.createdAt).toBe('2026-10-08T12:00:00.000Z')
 })
 
 test('restagePiece never removes rows', async () => {
