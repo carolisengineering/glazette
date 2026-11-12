@@ -9,7 +9,7 @@ import { useCaptureStore } from '../capture/store'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
-import { processImage, UnsupportedImageError } from '../photos/process'
+import { photoErrorMessage, processImage } from '../photos/process'
 import { elapsed, track } from '../telemetry/telemetry'
 
 const captureRoute = getRouteApi('/capture')
@@ -70,11 +70,7 @@ export function CaptureScreen() {
       if (mounted.current) useCaptureStore.getState().setPhoto(processed)
     } catch (err) {
       if (!mounted.current) return
-      setError(
-        err instanceof UnsupportedImageError
-          ? "This photo format isn't supported"
-          : "Couldn't open this photo. Try again.",
-      )
+      setError(photoErrorMessage(err))
     } finally {
       if (mounted.current) setProcessing(false)
     }
