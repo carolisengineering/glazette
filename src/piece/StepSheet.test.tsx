@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -306,6 +307,57 @@ test('an unreadable photo shows the photo error and keeps the old photo', async 
     within(dialog).getByRole('button', { name: 'Change photo' }),
   ).toBeEnabled()
   expect(within(dialog).getByLabelText('Date')).toHaveValue('2026-10-21')
+})
+
+/** A Glazed step wearing one Celadon layer. */
+async function glazedStep(): Promise<StageEntry> {
+  const celadon = crypto.randomUUID()
+  await db.glazes.add({ id: celadon, name: 'Celadon', color: '#aaaaaa' })
+  const pieceId = await createPiece({ name: 'Mug' })
+  const id = await addStageEntry({
+    pieceId,
+    stage: 'glazed',
+    glazes: [{ glazeId: celadon }],
+  })
+  return (await db.entries.get(id)) as StageEntry
+}
+
+test('saving only a note leaves the glazes alone, even ones that changed meanwhile', async () => {
+  const entry = await glazedStep()
+  const events = captureEvents()
+  const { dialog, onClose } = renderSheet(entry)
+  await within(dialog).findByDisplayValue('Celadon')
+  // Another device changes the layer after the sheet opened.
+  const [layer] = await liveApps(entry.id)
+  await act(() => db.glazeApps.update(layer.id, { note: 'rim only' }))
+  const before = await db.glazeApps.toArray()
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Note' }),
+    'Thin',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(onClose).toHaveBeenCalled())
+  expect((await db.entries.get(entry.id))?.note).toBe('Thin')
+  expect(await db.glazeApps.toArray()).toEqual(before)
+  expect(events).not.toContainEqual(['piece_edited', { part: 'glazes' }])
+})
+
+test('changing glazes in the step sheet reports piece_edited glazes', async () => {
+  const entry = await glazedStep()
+  const events = captureEvents()
+  const { dialog, onClose } = renderSheet(entry)
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: '+ add another glaze' }),
+  )
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
+    'Speckle',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(onClose).toHaveBeenCalled())
+  expect(await liveApps(entry.id)).toHaveLength(2)
+  expect(events).toContainEqual(['piece_edited', { part: 'glazes' }])
+  expect(events).toContainEqual(['piece_edited', { part: 'step' }])
 })
 
 test('Save reports piece_edited step', async () => {

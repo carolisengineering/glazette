@@ -1,7 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useId, useRef, useState } from 'react'
-import { type GlazeRow, GlazeRows } from '../capture/GlazeRows'
-import { loadGlazeRows, resolveGlazes } from '../capture/resolveGlazes'
+import { useId, useRef, useState } from 'react'
+import { GlazeRows } from '../capture/GlazeRows'
 import {
   ClayChips,
   type Form,
@@ -14,9 +13,9 @@ import { useModal } from '../components/useModal'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
-import { setStepGlazes } from '../db/stepEdits'
 import type { Piece } from '../db/types'
 import { track } from '../telemetry/telemetry'
+import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   piece: Piece
@@ -40,24 +39,9 @@ export function EditSheet({ piece, glazedStepId, onClose }: Props) {
     piece.form === 'other' ? undefined : piece.form,
   )
   const clay = useClayPick(piece.clayId)
-  const [rows, setRows] = useState<GlazeRow[]>()
+  const glazes = useGlazeRows(glazedStepId)
   const [saving, setSaving] = useState(false)
   const { show: showToast, toast } = useToast()
-
-  useEffect(() => {
-    if (!glazedStepId) return
-    let active = true
-    loadGlazeRows(glazedStepId).then(
-      (loaded) => {
-        if (active) setRows(loaded)
-      },
-      // Without the rows the section stays hidden and Save leaves glazes alone.
-      () => {},
-    )
-    return () => {
-      active = false
-    }
-  }, [glazedStepId])
 
   const save = async () => {
     if (saving) return
@@ -73,12 +57,8 @@ export function EditSheet({ piece, glazedStepId, onClose }: Props) {
             form: form ?? (piece.form === 'other' ? 'other' : undefined),
             clayId: await clay.resolve(),
           })
-          if (!glazedStepId || !rows) return false
-          const glazes = await resolveGlazes(
-            rows,
-            (await db.settings.get('app'))?.defaultCone ?? '6',
-          )
-          return setStepGlazes(glazedStepId, glazes)
+          if (!glazedStepId || !glazes.rows || !glazes.changed) return false
+          return saveGlazeRows(glazedStepId, glazes.rows)
         },
       )
       track('piece_edited', { part: 'details' })
@@ -121,8 +101,8 @@ export function EditSheet({ piece, glazedStepId, onClose }: Props) {
           retired={current?.deletedAt ? current : undefined}
           pick={clay}
         />
-        {glazedStepId && rows ? (
-          <GlazeRows value={rows} onChange={setRows} />
+        {glazedStepId && glazes.rows ? (
+          <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
         ) : null}
         <div className="flex gap-3">
           <button

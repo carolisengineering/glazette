@@ -1375,3 +1375,27 @@ test("changing glazes reports piece_edited glazes; leaving them alone doesn't", 
   )
   expect(edited()).toContainEqual(['piece_edited', { part: 'details' }])
 })
+
+test('saving only the name leaves the glazes alone, even ones that changed meanwhile', async () => {
+  const id = await glazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await within(dialog).findByDisplayValue('Celadon')
+  // Another device changes the layer after the sheet opened.
+  const [layer] = await db.glazeApps.toArray()
+  await act(() => db.glazeApps.update(layer.id, { dips: 3 }))
+  const before = await db.glazeApps.toArray()
+  const events = captureEvents()
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: 'Name' }),
+    ' two',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  )
+  expect((await db.pieces.get(id))?.name).toBe('Bowl two')
+  expect(await db.glazeApps.toArray()).toEqual(before)
+  expect(events).not.toContainEqual(['piece_edited', { part: 'glazes' }])
+})

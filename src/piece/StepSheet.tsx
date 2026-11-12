@@ -1,6 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { type GlazeRow, GlazeRows } from '../capture/GlazeRows'
-import { loadGlazeRows, resolveGlazes } from '../capture/resolveGlazes'
+import { useId, useRef, useState } from 'react'
+import { GlazeRows } from '../capture/GlazeRows'
 import { PhotoImg } from '../components/PhotoImg'
 import { fieldLabel } from '../components/PieceFields'
 import { useModal } from '../components/useModal'
@@ -9,11 +8,12 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { fromDateInput, toDateInput } from '../db/dates'
 import { db } from '../db/db'
 import { STAGE_LABEL } from '../db/stage'
-import { type PhotoSwap, saveStepDetails, setStepGlazes } from '../db/stepEdits'
+import { type PhotoSwap, saveStepDetails } from '../db/stepEdits'
 import type { StageEntry } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { usePhotoPicker } from '../photos/usePhotoPicker'
 import { track } from '../telemetry/telemetry'
+import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   entry: StageEntry
@@ -43,7 +43,7 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
   const [note, setNote] = useState(entry.note ?? '')
   const [dateField, setDateField] = useState(toDateInput(entry.date))
   const [cleared, setCleared] = useState(false)
-  const [rows, setRows] = useState<GlazeRow[]>()
+  const glazes = useGlazeRows(glazesOn)
   const [saving, setSaving] = useState(false)
   const { show: showToast, toast } = useToast()
 
@@ -52,21 +52,6 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
     setDateField(toDateInput(picked.takenAt))
     setCleared(false)
   }, showToast)
-
-  useEffect(() => {
-    if (!glazesOn) return
-    let active = true
-    loadGlazeRows(glazesOn).then(
-      (loaded) => {
-        if (active) setRows(loaded)
-      },
-      // Without the rows the section stays hidden and Save leaves glazes alone.
-      () => {},
-    )
-    return () => {
-      active = false
-    }
-  }, [glazesOn])
 
   // Native date inputs report '' while a field is half-edited, so an empty
   // field clears the date only after Clear date. The same day as stored keeps
@@ -82,7 +67,7 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
     setSaving(true)
     try {
       // One transaction, so a failed save doesn't leave new library glazes behind.
-      const swap = await db.transaction(
+      const { swap, glazesChanged } = await db.transaction(
         'rw',
         [
           db.pieces,
@@ -100,17 +85,15 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
             date: dateToSave(),
             photo,
           })
-          if (glazesOn && rows) {
-            const glazes = await resolveGlazes(
-              rows,
-              (await db.settings.get('app'))?.defaultCone ?? '6',
-            )
-            await setStepGlazes(glazesOn, glazes)
-          }
-          return swap
+          const glazesChanged =
+            glazesOn && glazes.rows && glazes.changed
+              ? await saveGlazeRows(glazesOn, glazes.rows)
+              : false
+          return { swap, glazesChanged }
         },
       )
       track('piece_edited', { part: 'step' })
+      if (glazesChanged) track('piece_edited', { part: 'glazes' })
       onSaved(swap)
       onClose()
     } catch {
@@ -224,8 +207,8 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
             className={field}
           />
         </div>
-        {glazesOn && rows ? (
-          <GlazeRows value={rows} onChange={setRows} />
+        {glazesOn && glazes.rows ? (
+          <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
         ) : null}
         <div className="flex gap-3">
           <button
