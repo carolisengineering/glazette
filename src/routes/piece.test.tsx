@@ -1241,6 +1241,9 @@ test('a failed Edit save adds no library glaze', async () => {
   renderRoute(`/piece/${id}`)
   await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
   const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  const nameField = within(dialog).getByRole('textbox', { name: 'Name' })
+  await userEvent.clear(nameField)
+  await userEvent.type(nameField, 'Renamed')
   await userEvent.click(
     await within(dialog).findByRole('button', { name: '+ add another glaze' }),
   )
@@ -1248,16 +1251,18 @@ test('a failed Edit save adds no library glaze', async () => {
     within(dialog).getByRole('textbox', { name: 'Glaze 2' }),
     'Brand New',
   )
-  const update = vi
-    .spyOn(db.pieces, 'update')
-    .mockRejectedValue(new Error('full'))
+  // Fails the new layer's write, which comes after the piece update and the
+  // new library glaze, so both have to roll back.
+  const add = vi.spyOn(db.glazeApps, 'add').mockRejectedValue(new Error('full'))
   await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
   expect(await screen.findByText(SAVE_ERROR)).toBeVisible()
-  update.mockRestore()
+  expect(add).toHaveBeenCalled()
+  add.mockRestore()
   expect(screen.getByRole('dialog', { name: 'Edit piece' })).toBeVisible()
   expect((await db.glazes.toArray()).map((g) => g.name)).not.toContain(
     'Brand New',
   )
+  expect((await db.pieces.get(id))?.name).toBe('Bowl')
 })
 
 test("changing glazes reports piece_edited glazes; leaving them alone doesn't", async () => {
