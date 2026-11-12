@@ -56,6 +56,24 @@ describe('Toast', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('a toast with an action sits at the bottom, clear of the top buttons; a plain one at the top', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByText('with action'))
+    const action = screen.getByRole('status')
+    expect(action.className).toContain(
+      'bottom-[max(1rem,env(safe-area-inset-bottom))]',
+    )
+    expect(action.className).not.toContain('top-[')
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+    fireEvent.click(screen.getByText('plain'))
+    const plain = screen.getByRole('status')
+    expect(plain.className).toContain(
+      'top-[max(1rem,env(safe-area-inset-top))]',
+    )
+    expect(plain.className).not.toContain('bottom-[')
+  })
+
   it('a plain toast has no button', () => {
     render(<Harness />)
     fireEvent.click(screen.getByText('plain'))
