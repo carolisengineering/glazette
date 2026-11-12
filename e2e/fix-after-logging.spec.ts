@@ -1,11 +1,12 @@
-import { addPieceWithPhoto, expect, type Page, test } from './helpers'
+import type { Page } from '@playwright/test'
+import { addPieceWithPhoto, expect, test } from './helpers'
 
 /** A fingerprint of the bytes the top photo shows, stable across object URLs. */
 async function heroDigest(page: Page, name: string): Promise<string | null> {
   const img = page.getByRole('img', { name: new RegExp(`^${name}`) })
   await expect(img).toHaveAttribute('src', /^blob:/)
   // The object URL can be swapped out mid-read; null means "try again".
-  return img.evaluate(async (el) => {
+  return img.evaluate(async (el: Element) => {
     try {
       const res = await fetch((el as HTMLImageElement).src)
       const buf = await crypto.subtle.digest('SHA-256', await res.arrayBuffer())
