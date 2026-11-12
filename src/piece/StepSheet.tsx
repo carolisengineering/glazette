@@ -54,9 +54,12 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
   }, showToast)
 
   // Native date inputs report '' while a field is half-edited, so an empty
-  // field clears the date only after Clear date. The same day as stored keeps
-  // the stored time, so the step doesn't move in the journey.
+  // field clears the date only after Clear date. While the field shows a
+  // picked photo's day, the photo's own time is saved; the same day as stored
+  // keeps the stored time, so the step doesn't move in the journey. Any other
+  // day saves at noon.
   const dateToSave = (): string | undefined => {
+    if (photo && dateField === toDateInput(photo.takenAt)) return photo.takenAt
     if (dateField === toDateInput(entry.date)) return entry.date
     return fromDateInput(dateField) ?? (cleared ? undefined : entry.date)
   }

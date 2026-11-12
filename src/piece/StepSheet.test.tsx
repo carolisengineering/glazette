@@ -212,9 +212,24 @@ test('picking a photo fills the date from it, and Save swaps it', async () => {
   expect(old?.deletedAt).toBeDefined()
   const saved = await db.entries.get(entry.id)
   expect(saved?.photoId).not.toBe(oldPhotoId)
-  expect(saved?.date).toBe(fromDateInput('2026-11-04'))
+  // The photo's own time, not noon, while the field still shows its day.
+  expect(saved?.date).toBe(picked.takenAt)
   expect(onSaved).toHaveBeenCalledWith(
     expect.objectContaining({ oldPhotoId, newPhotoId: saved?.photoId }),
+  )
+})
+
+test('a picked photo with the date changed to another day saves that day at noon', async () => {
+  const entry = await step('bisqued', { photo: photo('old') })
+  const { dialog, onClose } = renderSheet(entry)
+  pickFile(dialog)
+  const date = within(dialog).getByLabelText('Date')
+  await waitFor(() => expect(date).toHaveValue('2026-11-04'))
+  fireEvent.change(date, { target: { value: '2026-11-06' } })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(onClose).toHaveBeenCalled())
+  expect((await db.entries.get(entry.id))?.date).toBe(
+    fromDateInput('2026-11-06'),
   )
 })
 
