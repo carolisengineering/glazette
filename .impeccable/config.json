@@ -1,0 +1,15 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": ["src/**/*.test.tsx"],
+        "createdAt": "2026-11-12T14:03:59.321Z",
+        "reason": "Agent: test files mock PhotoImg with a src-less <img> stand-in; it never ships"
+      }
+    ]
+  }
+}
