@@ -5,15 +5,19 @@ import { notDeleted } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { type GlazeRow, newGlazeRow } from './GlazeRows'
 
-/** Match each row to a library glaze (by id, then name ignoring case) or create it once. */
+/**
+ * Match each row to a library glaze (by id, then name ignoring case) or create
+ * it once. Blank rows are skipped, but a row that already points at a glaze is
+ * kept even without a name: its library glaze may not have synced yet.
+ */
 export async function resolveGlazes(rows: GlazeRow[], cone: string) {
   const live = (await db.glazes.toArray()).filter(notDeleted)
   const byName = new Map(live.map((g) => [g.name.trim().toLowerCase(), g.id]))
   const out: Parameters<typeof addStageEntry>[0]['glazes'] = []
   for (const row of rows) {
     const name = row.name.trim()
-    if (!name) continue
     let glazeId = row.glazeId
+    if (!name && !glazeId) continue
     if (!glazeId) {
       const key = name.toLowerCase()
       glazeId = byName.get(key)
@@ -32,7 +36,10 @@ export async function resolveGlazes(rows: GlazeRow[], cone: string) {
   return out
 }
 
-/** The inverse of `resolveGlazes`: a step's live layers as editable rows. */
+/**
+ * The inverse of `resolveGlazes`: a step's live layers as editable rows. A
+ * layer whose library glaze isn't here yet keeps its glazeId with a blank name.
+ */
 export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
   const apps = (await db.glazeApps.where('entryId').equals(entryId).toArray())
     .filter(notDeleted)

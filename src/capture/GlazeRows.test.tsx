@@ -56,3 +56,15 @@ describe('GlazeRows move buttons', () => {
     expect(screen.queryByRole('button', { name: /Move glaze/ })).toBeNull()
   })
 })
+
+it('a lone layer whose glaze has not synced yet can still be removed', () => {
+  render(
+    <GlazeRows
+      value={[{ key: 'k', glazeId: 'gMissing', name: '' }]}
+      onChange={() => {}}
+    />,
+  )
+  expect(
+    screen.getByRole('button', { name: 'Remove glaze 1' }),
+  ).toBeInTheDocument()
+})

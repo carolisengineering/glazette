@@ -133,7 +133,7 @@ export function GlazeRows({ value, onChange }: Props) {
                   </button>
                 </>
               ) : null}
-              {value.length > 1 || row.name.trim() ? (
+              {value.length > 1 || row.name.trim() || row.glazeId ? (
                 <button
                   type="button"
                   aria-label={`Remove glaze ${n}`}
