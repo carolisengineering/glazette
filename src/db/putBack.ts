@@ -84,8 +84,11 @@ export function putBackPiece(
 /**
  * Brings a deleted photo back where it was: on its free step, on a new step of
  * the piece it was on, or on a new piece when that piece is gone. A deleted
- * piece comes back too. Returns the piece the photo is now on, or undefined
- * (changing nothing) when the photo is missing, live or purged.
+ * piece comes back too. When its old step now shows another photo, it goes
+ * back on that step anyway and the other photo goes to Recently Deleted
+ * (unless another live step still shows it). Returns the piece the photo is
+ * now on, or undefined (changing nothing) when the photo is missing, live or
+ * purged.
  */
 export function putBackPhoto(
   id: string,
