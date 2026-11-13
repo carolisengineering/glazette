@@ -9,19 +9,16 @@ import { useCaptureStore } from '../capture/store'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
+import type { Stage } from '../db/types'
 import { processPickedPhoto } from '../photos/processPickedPhoto'
-import {
-  dropPieceLogged,
-  holdPieceLogged,
-  releaseHeldPieces,
-} from '../telemetry/heldPieces'
+import { elapsed, track } from '../telemetry/telemetry'
 
 const captureRoute = getRouteApi('/capture')
 
 type Step =
   | { name: 'review' }
   | { name: 'choose' }
-  | { name: 'details'; pieceId?: string }
+  | { name: 'details'; pieceId?: string; saveMs?: number }
   | { name: 'pick' }
   | { name: 'stage'; pieceId: string; fromPick: boolean }
 
@@ -47,8 +44,6 @@ export function CaptureScreen() {
     return () => {
       mounted.current = false
       useCaptureStore.getState().reset()
-      // Camera-first pieces report once the details sheet ends, however it ends.
-      void releaseHeldPieces()
     }
   }, [])
 
@@ -86,18 +81,16 @@ export function CaptureScreen() {
 
   /** Retake from the details sheet: the piece was already saved, so discard it first. */
   const retaking = useRef(false)
-  const retakeNewPiece = async (id: string) => {
+  const retakeNewPiece = async (id: string, stage: Stage, saveMs: number) => {
     if (retaking.current) return
     retaking.current = true
     // Open the camera in the tap itself: iOS drops the user activation after an await.
     retake()
-    // Dropped first so a release during the await can't report a piece being discarded.
-    const dropped = dropPieceLogged(id)
     try {
       await softDelete('pieces', id)
     } catch {
-      // The piece stays, so its report is still owed.
-      if (dropped) holdPieceLogged(id, dropped)
+      // The piece stays, so it is reported after all, with the stage the sheet showed.
+      track('piece_logged', { has_photo: true, stage, ms: saveMs })
       showToast("Couldn't discard that piece. It's still on your shelf.")
     } finally {
       retaking.current = false
@@ -109,14 +102,17 @@ export function CaptureScreen() {
     if (!photo || saving) return
     setSaving(true)
     try {
-      const id = await createPiece({
-        photo,
-        clayId: await liveDefaultClayId(),
-        holdReport: true,
-      })
-      // Left while saving: the unmount release already ran, so release now.
-      if (!mounted.current) void releaseHeldPieces()
-      setStep({ name: 'details', pieceId: id })
+      const clayId = await liveDefaultClayId()
+      // The details sheet sends piece_logged when it ends, with the stage picked there.
+      const start = performance.now()
+      const id = await createPiece({ photo, clayId, report: false })
+      const saveMs = elapsed(start)
+      // Left while saving: the sheet never opens, so report the piece as saved.
+      if (!mounted.current) {
+        track('piece_logged', { has_photo: true, stage: 'thrown', ms: saveMs })
+      } else {
+        setStep({ name: 'details', pieceId: id, saveMs })
+      }
     } catch {
       showToast(SAVE_ERROR)
     } finally {
@@ -167,8 +163,15 @@ export function CaptureScreen() {
         <NewPieceSheet
           pieceId={step.pieceId}
           photo={photo}
+          saveMs={step.saveMs}
           onDone={done}
-          onRetake={() => void retakeNewPiece(step.pieceId as string)}
+          onRetake={(stage) =>
+            void retakeNewPiece(
+              step.pieceId as string,
+              stage,
+              step.saveMs as number,
+            )
+          }
         />
       ) : (
         <NewPieceSheet onDone={done} onClose={close} />

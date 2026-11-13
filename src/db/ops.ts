@@ -2,7 +2,6 @@ import Dexie, { type Transaction } from 'dexie'
 import type { ProcessedImage } from '../photos/process'
 import { storePhoto } from '../photos/store'
 import { quietly } from '../sync/track'
-import { holdPieceLogged } from '../telemetry/heldPieces'
 import { elapsed, track } from '../telemetry/telemetry'
 import { db, newId } from './db'
 import { releasePhoto } from './photoLinks'
@@ -146,8 +145,11 @@ export async function createPiece(input: {
   stage?: Stage
   note?: string
   glazes?: GlazeInput
-  /** Hold the piece_logged report until the caller releases it, so it carries the piece's final starting stage. */
-  holdReport?: boolean
+  /**
+   * Sends piece_logged once the save lands (default true). A caller passing
+   * false is responsible for sending piece_logged itself.
+   */
+  report?: boolean
 }): Promise<string> {
   const start = performance.now()
   const outer = Dexie.currentTransaction
@@ -190,12 +192,19 @@ export async function createPiece(input: {
       layers = apps.length
     },
   )
-  reportSave(outer, layers, () => {
-    const has_photo = !!input.photo
-    const ms = elapsed(start)
-    if (input.holdReport) holdPieceLogged(piece.id, { has_photo, ms })
-    else track('piece_logged', { has_photo, stage, ms })
-  })
+  reportSave(
+    outer,
+    layers,
+    input.report === false
+      ? undefined
+      : () => {
+          track('piece_logged', {
+            has_photo: !!input.photo,
+            stage,
+            ms: elapsed(start),
+          })
+        },
+  )
   return piece.id
 }
 

@@ -10,7 +10,6 @@ import {
   processImage,
   UnsupportedImageError,
 } from '../photos/process'
-import { clearHeldPiecesForTests } from '../telemetry/heldPieces'
 import { setSinkForTests, type TelemetrySink } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 import { useCaptureStore } from './store'
@@ -59,7 +58,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   clickSpy.mockRestore()
-  clearHeldPiecesForTests()
   setSinkForTests(undefined)
 })
 
@@ -437,7 +435,8 @@ test('Retake on the details sheet soft-deletes the new piece and returns to the 
 test('Retake on the details sheet shows a toast when the discard fails', async () => {
   renderRoute('/capture')
   await submitAsNewPiece()
-  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await screen.findByText('Saved to your shelf as Bisqued')
   vi.spyOn(ops, 'softDelete').mockRejectedValueOnce(new Error('boom'))
   await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
   expect(
@@ -445,10 +444,16 @@ test('Retake on the details sheet shows a toast when the discard fails', async (
       "Couldn't discard that piece. It's still on your shelf.",
     ),
   ).toBeVisible()
-  // The piece stayed, so leaving capture still reports it, once.
-  expect(pieceLogged()).toHaveLength(0)
+  // The piece stayed, so it is reported once, with the stage the sheet showed.
+  expect(pieceLogged()).toEqual([
+    [
+      'piece_logged',
+      { has_photo: true, stage: 'bisqued', ms: expect.any(Number) },
+    ],
+  ])
   cleanup()
-  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toHaveLength(1)
 })
 
 test('Cancel goes back to the piece when capture came from one', async () => {
@@ -774,9 +779,10 @@ test('camera-first: Done reports piece_logged once, with the picked stage', asyn
   expect(pieceLogged()).toEqual([])
   await clickDone()
   await waitFor(() => expect(pieceLogged()).toHaveLength(1))
-  expect(pieceLogged()[0][1]).toMatchObject({
+  expect(pieceLogged()[0][1]).toEqual({
     stage: 'bisqued',
     has_photo: true,
+    ms: expect.any(Number),
   })
 })
 
