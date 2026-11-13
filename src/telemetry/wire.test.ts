@@ -76,12 +76,25 @@ describe('startTelemetry', () => {
 
   it('a normal launch is not marked', () => {
     start()
-    expect(calls[0]).toEqual(['register', { app_version: 'dev' }])
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
+  })
+
+  it('a launch with no note registers after_update false explicitly, so an old true cannot stick', () => {
+    start()
+    const props = calls[0][1] as Record<string, unknown>
+    expect('after_update' in props).toBe(true)
+    expect(props.after_update).toBe(false)
   })
 
   it('registers app_version before the first event', () => {
     start()
-    expect(calls[0]).toEqual(['register', { app_version: 'dev' }])
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
     expect(calls.findIndex((c) => c[0] === 'capture')).toBeGreaterThan(0)
   })
 

@@ -80,10 +80,13 @@ export function startTelemetry(
   if (stop) return
   const router = deps.router ?? appRouter
   const db = deps.db ?? appDb
-  // The note is read only here, once per page load.
+  // The note is read only here, once per page load. after_update is always
+  // registered, as true or false: PostHog keeps super properties on the device
+  // and a register never removes a key, so leaving it out would let an old
+  // true stick to every later launch.
   registerSuperProps({
     app_version: APP_VERSION,
-    ...(consumeUpdateReload() ? { after_update: true as const } : {}),
+    after_update: consumeUpdateReload(),
   })
   initTelemetry()
 
