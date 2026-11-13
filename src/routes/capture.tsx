@@ -10,7 +10,11 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
 import { processPickedPhoto } from '../photos/processPickedPhoto'
-import { dropPieceLogged, releaseHeldPieces } from '../telemetry/heldPieces'
+import {
+  dropPieceLogged,
+  holdPieceLogged,
+  releaseHeldPieces,
+} from '../telemetry/heldPieces'
 
 const captureRoute = getRouteApi('/capture')
 
@@ -87,10 +91,13 @@ export function CaptureScreen() {
     retaking.current = true
     // Open the camera in the tap itself: iOS drops the user activation after an await.
     retake()
-    dropPieceLogged(id)
+    // Dropped first so a release during the await can't report a piece being discarded.
+    const dropped = dropPieceLogged(id)
     try {
       await softDelete('pieces', id)
     } catch {
+      // The piece stays, so its report is still owed.
+      if (dropped) holdPieceLogged(id, dropped)
       showToast("Couldn't discard that piece. It's still on your shelf.")
     } finally {
       retaking.current = false

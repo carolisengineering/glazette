@@ -445,6 +445,10 @@ test('Retake on the details sheet shows a toast when the discard fails', async (
       "Couldn't discard that piece. It's still on your shelf.",
     ),
   ).toBeVisible()
+  // The piece stayed, so leaving capture still reports it, once.
+  expect(pieceLogged()).toHaveLength(0)
+  cleanup()
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
 })
 
 test('Cancel goes back to the piece when capture came from one', async () => {
