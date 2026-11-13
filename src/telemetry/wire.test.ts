@@ -21,6 +21,7 @@ function fakeSink(): TelemetrySink {
     capture: (n, p) => calls.push(['capture', n, p]),
     identify: (e) => calls.push(['identify', e]),
     reset: () => calls.push(['reset']),
+    register: (p) => calls.push(['register', p]),
     captureException: (e) => calls.push(['captureException', e]),
   }
 }
@@ -62,6 +63,12 @@ afterEach(() => {
 })
 
 describe('startTelemetry', () => {
+  it('registers app_version before the first event', () => {
+    start()
+    expect(calls[0]).toEqual(['register', { app_version: 'dev' }])
+    expect(calls.findIndex((c) => c[0] === 'capture')).toBeGreaterThan(0)
+  })
+
   it('identifies a signed-in device at start', () => {
     useAccount.setState({ status: 'signed-in', email: 'a@x.com' })
     start()
@@ -73,7 +80,9 @@ describe('startTelemetry', () => {
     start()
     useAccount.setState(SIGNED_OUT)
     useAccount.setState({ status: 'signed-in', email: 'b@x.com' })
-    const identity = calls.filter((c) => c[0] !== 'capture')
+    const identity = calls.filter(
+      (c) => c[0] !== 'capture' && c[0] !== 'register',
+    )
     expect(identity).toEqual([
       ['identify', 'a@x.com'],
       ['reset'],

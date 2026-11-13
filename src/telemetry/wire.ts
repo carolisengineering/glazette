@@ -3,9 +3,11 @@ import { db as appDb } from '../db/db'
 import { router as appRouter } from '../router'
 import type { Screen, VITAL_METRICS } from './events'
 import {
+  APP_VERSION,
   captureError,
   identify,
   initTelemetry,
+  registerSuperProps,
   resetIdentity,
   track,
   whenIdle,
@@ -77,6 +79,7 @@ export function startTelemetry(
   if (stop) return
   const router = deps.router ?? appRouter
   const db = deps.db ?? appDb
+  registerSuperProps({ app_version: APP_VERSION })
   initTelemetry()
 
   let identified: string | undefined

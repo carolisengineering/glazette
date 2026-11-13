@@ -3,9 +3,15 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { appVersion, buildSha } from './scripts/app-version.ts'
 
 // https://vite.dev/config/
 export default defineConfig(({ command, isPreview }) => ({
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(
+      appVersion(new Date(), buildSha()),
+    ),
+  },
   plugins: [
     react(),
     tailwindcss(),

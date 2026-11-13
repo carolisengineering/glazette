@@ -34,6 +34,7 @@ function captureEvents() {
     capture: (n, p) => events.push([n, p]),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   }
   setSinkForTests(sink)
@@ -692,6 +693,7 @@ test("a throwing sink doesn't break createPiece", async () => {
     },
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   const id = await createPiece({ name: 'Mug' })

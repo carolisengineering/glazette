@@ -233,6 +233,7 @@ describe('useAccount', () => {
       capture: (n) => events.push(n),
       identify: () => {},
       reset: () => {},
+      register: () => {},
       captureException: () => {},
     })
     useAccount.getState().signedIn('me@example.com')

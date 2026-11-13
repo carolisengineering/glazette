@@ -256,6 +256,7 @@ test('errors from a photo reach telemetry, a signed-out stop does not', async ()
     capture: () => {},
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: (e) => captured.push(e),
   })
   const a = await withBytes('a', 'clay one', { needsUpload: 1 })
@@ -285,6 +286,7 @@ test('an unexpected error that ends the whole transfer reaches telemetry', async
     capture: () => {},
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: (e) => captured.push(e),
   })
   const boom = new Error('db down')

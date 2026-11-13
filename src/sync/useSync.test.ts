@@ -477,6 +477,7 @@ function captureEvents() {
     capture: (n, p) => events.push([n, p]),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   return events
