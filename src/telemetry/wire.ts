@@ -12,6 +12,7 @@ import {
   track,
   whenIdle,
 } from './telemetry'
+import { consumeUpdateReload } from './updateReload'
 
 type AppRouter = typeof appRouter
 type AppDb = typeof appDb
@@ -79,7 +80,11 @@ export function startTelemetry(
   if (stop) return
   const router = deps.router ?? appRouter
   const db = deps.db ?? appDb
-  registerSuperProps({ app_version: APP_VERSION })
+  // The note is read only here, once per page load.
+  registerSuperProps({
+    app_version: APP_VERSION,
+    ...(consumeUpdateReload() ? { after_update: true as const } : {}),
+  })
   initTelemetry()
 
   let identified: string | undefined

@@ -1,5 +1,6 @@
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { useEffect, useRef } from 'react'
+import { markUpdateReload } from '../telemetry/updateReload'
 
 /** Stays on screen until the user taps Reload, since a waiting update shouldn't be missed. */
 export function ReloadPrompt() {
@@ -34,7 +35,10 @@ export function ReloadPrompt() {
       <span>New version available</span>
       <button
         type="button"
-        onClick={() => updateServiceWorker(true)}
+        onClick={() => {
+          markUpdateReload()
+          updateServiceWorker(true)
+        }}
         className="min-h-11 rounded-xl bg-accent px-4 text-[15px] font-semibold text-white"
       >
         Reload

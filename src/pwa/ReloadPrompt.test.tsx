@@ -33,6 +33,23 @@ test('ReloadPrompt shows Reload only when a new version is waiting', async () =>
   expect(state.update).toHaveBeenCalledWith(true)
 })
 
+test('Reload leaves an update note before reloading', async () => {
+  sessionStorage.removeItem('glazette:update-reload')
+  state.needRefresh = true
+  state.update.mockReset()
+  let noteWasThere = false
+  state.update.mockImplementation(() => {
+    noteWasThere = sessionStorage.getItem('glazette:update-reload') !== null
+  })
+  render(<ReloadPrompt />)
+  await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+  expect(noteWasThere).toBe(true)
+  expect(sessionStorage.getItem('glazette:update-reload')).not.toBeNull()
+  expect(state.update).toHaveBeenCalledWith(true)
+  sessionStorage.removeItem('glazette:update-reload')
+  state.needRefresh = false
+})
+
 test('ReloadPrompt checks for a new version when the app becomes visible', () => {
   state.registration.update.mockClear()
   render(<ReloadPrompt />)

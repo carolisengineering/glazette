@@ -46,6 +46,7 @@ beforeEach(async () => {
   await db.delete()
   await db.open()
   localStorage.clear()
+  sessionStorage.removeItem('glazette:update-reload')
   useAccount.setState(SIGNED_OUT)
   calls = []
   setSinkForTests(fakeSink())
@@ -63,6 +64,21 @@ afterEach(() => {
 })
 
 describe('startTelemetry', () => {
+  it('after an update Reload, every event from this load is marked', () => {
+    sessionStorage.setItem('glazette:update-reload', String(Date.now()))
+    start()
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: true },
+    ])
+    expect(sessionStorage.getItem('glazette:update-reload')).toBeNull()
+  })
+
+  it('a normal launch is not marked', () => {
+    start()
+    expect(calls[0]).toEqual(['register', { app_version: 'dev' }])
+  })
+
   it('registers app_version before the first event', () => {
     start()
     expect(calls[0]).toEqual(['register', { app_version: 'dev' }])
