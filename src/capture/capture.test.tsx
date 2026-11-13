@@ -869,3 +869,36 @@ test('camera-first: leaving while the piece is still saving reports it once it l
     create.mockRestore()
   }
 })
+
+test('on the pick sheet, Retake and New are disabled while "Save as a new piece" is saving', async () => {
+  await createPiece({ name: 'Mug' })
+  renderRoute('/capture')
+  await chooseFile()
+  await userEvent.click(await screen.findByRole('button', { name: 'Update' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+  const newBtn = await screen.findByRole('button', {
+    name: 'Not here? Save as a new piece',
+  })
+  const real = ops.createPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const create = vi
+    .spyOn(ops, 'createPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await userEvent.click(newBtn)
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    expect(newBtn).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retake' })).toBeDisabled()
+    release()
+    await screen.findByText('Saved to your shelf as Thrown')
+    expect(screen.getByPlaceholderText('Name it later')).toBeVisible()
+  } finally {
+    create.mockRestore()
+  }
+})

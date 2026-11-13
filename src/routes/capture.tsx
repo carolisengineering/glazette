@@ -183,6 +183,7 @@ export function CaptureScreen() {
         onPick={(id) => setStep({ name: 'stage', pieceId: id, fromPick: true })}
         onNew={photo ? startNewPiece : () => setStep({ name: 'details' })}
         onRetake={photo ? retake : undefined}
+        busy={saving}
         onClose={close}
       />
     )
