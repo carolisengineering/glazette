@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { appVersion } from './app-version'
+import { appVersion } from './app-version.ts'
 
 test('appVersion uses the Chicago date and the 7-character commit', () => {
   // 03:00 UTC on Nov 13 is still Nov 12 in Chicago.
