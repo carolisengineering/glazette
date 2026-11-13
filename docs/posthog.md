@@ -34,7 +34,7 @@ Friends who used Glazette before telemetry will look brand new, because PostHog 
 
 Every event carries `app_version`. It looks like `2026-11-12 5c69b37`: the build date in Chicago time, then the commit.
 
-`after_update` is false on normal loads and true on everything from the page load right after someone taps Reload on "New version available". Events sent by app versions before this one don't have it at all. Leave the true ones out when counting launches or reading speed, because that load is not a real launch and its speed is not typical. When you leave them out, filter on "is not true" rather than "equals false", so the older events without the property stay in. The dashboard already does this.
+`after_update` is true on events from the start of the page load right after someone taps Reload on "New version available", until the app first goes to the background. It is false otherwise. Events sent by app versions before this one don't have it at all. Leave the true ones out when counting launches or reading speed, because that load is not a real launch and its speed is not typical. When you leave them out, filter on "is not true" rather than "equals false", so the older events without the property stay in. The dashboard already does this.
 
 ## Leave yourself out
 

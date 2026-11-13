@@ -84,10 +84,8 @@ export function startTelemetry(
   // registered, as true or false: PostHog keeps super properties on the device
   // and a register never removes a key, so leaving it out would let an old
   // true stick to every later launch.
-  registerSuperProps({
-    app_version: APP_VERSION,
-    after_update: consumeUpdateReload(),
-  })
+  const afterUpdate = consumeUpdateReload()
+  registerSuperProps({ app_version: APP_VERSION, after_update: afterUpdate })
   initTelemetry()
 
   let identified: string | undefined
@@ -105,8 +103,17 @@ export function startTelemetry(
   // A launch that starts hidden counts as opened when first shown, so it is not counted twice.
   let firstOpenSent = document.visibilityState !== 'hidden'
   if (firstOpenSent) trackOpen(false)
+  // On iPhone a page can stay open in the background for days, so the update
+  // mark lasts only until the app first comes back to the foreground. It is
+  // cleared on that return, not on going hidden: web-vitals reports some
+  // measures at hide time, and those belong to the marked reload.
+  let markPending = afterUpdate
   const onVisibility = () => {
     if (document.visibilityState !== 'visible') return
+    if (markPending) {
+      markPending = false
+      registerSuperProps({ after_update: false })
+    }
     trackOpen(firstOpenSent)
     firstOpenSent = true
   }

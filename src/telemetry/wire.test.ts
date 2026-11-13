@@ -236,3 +236,54 @@ describe('startTelemetry', () => {
     expect(calls).toContainEqual(['captureException', error])
   })
 })
+
+describe('the update mark lasts until the first return to the foreground', () => {
+  const NOTE = 'glazette:update-reload'
+  const resume = () => {
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  const clears = () => calls.filter((c) => c[0] === 'register').slice(1)
+
+  it('a marked load clears after_update before the first resume is reported', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    calls.length = 0
+    resume()
+    const clearAt = calls.findIndex(
+      (c) => c[0] === 'register' && c[1] && 'after_update' in (c[1] as object),
+    )
+    const openAt = calls.findIndex(
+      (c) => c[0] === 'capture' && c[1] === 'app_opened',
+    )
+    expect(calls[clearAt]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
+    expect(openAt).toBeGreaterThan(clearAt)
+  })
+
+  it('going hidden alone does not clear it', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(clears()).toHaveLength(0)
+  })
+
+  it('a second resume registers nothing more', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    resume()
+    resume()
+    expect(clears()).toHaveLength(1)
+  })
+
+  it('an unmarked load registers nothing on a resume', () => {
+    start()
+    resume()
+    expect(clears()).toHaveLength(0)
+  })
+})
