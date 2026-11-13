@@ -72,3 +72,6 @@ export type EventProps = {
 }
 
 export type EventName = keyof EventProps
+
+/** Properties attached to every event, set once rather than per event. */
+export type SuperProps = { app_version: string; after_update: boolean }

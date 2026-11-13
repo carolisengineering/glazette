@@ -145,6 +145,11 @@ export async function createPiece(input: {
   stage?: Stage
   note?: string
   glazes?: GlazeInput
+  /**
+   * Sends piece_logged once the save lands (default true). A caller passing
+   * false is responsible for sending piece_logged itself.
+   */
+  report?: boolean
 }): Promise<string> {
   const start = performance.now()
   const outer = Dexie.currentTransaction
@@ -187,12 +192,18 @@ export async function createPiece(input: {
       layers = apps.length
     },
   )
-  reportSave(outer, layers, () =>
-    track('piece_logged', {
-      has_photo: !!input.photo,
-      stage,
-      ms: elapsed(start),
-    }),
+  reportSave(
+    outer,
+    layers,
+    input.report === false
+      ? undefined
+      : () => {
+          track('piece_logged', {
+            has_photo: !!input.photo,
+            stage,
+            ms: elapsed(start),
+          })
+        },
   )
   return piece.id
 }

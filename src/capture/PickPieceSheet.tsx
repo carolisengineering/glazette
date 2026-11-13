@@ -12,6 +12,8 @@ interface Props {
   /** The photo under review, shown above the sheet. */
   photo?: ProcessedImage
   onRetake?: () => void
+  /** A save is running: Retake and New are disabled until it lands. */
+  busy?: boolean
   /** Without a photo, the sheet has its own Close at the top left. */
   onClose?: () => void
 }
@@ -38,6 +40,7 @@ export function PickPieceSheet({
   onNew,
   photo,
   onRetake,
+  busy,
   onClose,
 }: Props) {
   const views = usePieces()
@@ -62,6 +65,7 @@ export function PickPieceSheet({
             <button
               type="button"
               onClick={onRetake}
+              disabled={busy}
               className="absolute top-12 left-5 h-11 rounded-[22px] bg-camera/60 px-4 text-[15px] font-medium text-white"
             >
               Retake
@@ -184,6 +188,7 @@ export function PickPieceSheet({
           <button
             type="button"
             onClick={onNew}
+            disabled={busy}
             className="flex min-h-11 flex-none items-center self-center px-3 text-[15px] font-medium text-accent"
           >
             Not here? Save as a new piece

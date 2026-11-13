@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CloseIcon } from '../components/CloseIcon'
 import {
   ClayChips,
@@ -22,6 +22,7 @@ import { liveDefaultClayId } from '../db/queries'
 import { STAGE_LABEL } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
+import { track } from '../telemetry/telemetry'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
 import { NoPhoto } from './NoPhoto'
 import { resolveGlazes } from './resolveGlazes'
@@ -31,9 +32,11 @@ interface Props {
   /** With a photo the piece is already saved. Without one, nothing is written until Done. */
   pieceId?: string
   photo?: ProcessedImage
+  /** With a photo, how long the piece's save took. Sent with piece_logged when the sheet ends. */
+  saveMs?: number
   onDone: () => void
-  /** Discards the just-saved piece and starts the capture over. */
-  onRetake?: () => void
+  /** Discards the just-saved piece and starts the capture over. Gets the stage the sheet shows. */
+  onRetake?: (stage: Stage) => void
   /** Leaves the no-photo sheet without saving. */
   onClose?: () => void
 }
@@ -42,6 +45,7 @@ interface Props {
 export function NewPieceSheet({
   pieceId,
   photo,
+  saveMs,
   onDone,
   onRetake,
   onClose,
@@ -68,6 +72,30 @@ export function NewPieceSheet({
   const { show: showToast, toast } = useToast()
   const showGlazes = stage === 'glazed' || stage === 'fired'
 
+  // With a photo the piece was saved as Thrown before this sheet opened, so its
+  // piece_logged report waits until the sheet ends, however it ends, and carries
+  // the stage shown then. Retake discards the piece, so it reports nothing.
+  // StrictMode's extra effect run happens only in development, where telemetry is off.
+  const shownStage = useRef<Stage>('thrown')
+  const discarded = useRef(false)
+  const reportMs = pieceId && photo ? saveMs : undefined
+  useEffect(() => {
+    if (reportMs === undefined) return
+    return () => {
+      if (discarded.current) return
+      track('piece_logged', {
+        has_photo: true,
+        stage: shownStage.current,
+        ms: reportMs,
+      })
+    }
+  }, [reportMs])
+
+  const retake = () => {
+    discarded.current = true
+    onRetake?.(stage)
+  }
+
   // With a photo the piece already exists, so a tap moves it right away. Taps
   // during a move are ignored, so the saved stage always matches the selection.
   const pickStage = async (next: Stage) => {
@@ -81,6 +109,7 @@ export function NewPieceSheet({
     setMoving(true)
     try {
       await restagePiece(pieceId, next)
+      shownStage.current = next
       setStage(next)
     } catch {
       showToast(SAVE_ERROR)
@@ -146,7 +175,7 @@ export function NewPieceSheet({
           ) : null}
           <button
             type="button"
-            onClick={onRetake}
+            onClick={retake}
             disabled={saving}
             className="absolute top-12 left-5 h-11 rounded-[22px] bg-camera/60 px-4 text-[15px] font-medium text-white disabled:opacity-50"
           >

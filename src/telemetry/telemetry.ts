@@ -1,9 +1,12 @@
-import type { EventName, EventProps } from './events'
+import type { EventName, EventProps, SuperProps } from './events'
+
+export const APP_VERSION: string = import.meta.env.VITE_APP_VERSION ?? 'dev'
 
 export interface TelemetrySink {
   capture(name: string, props: Record<string, unknown>): void
   identify(email: string): void
   reset(): void
+  register(props: Record<string, unknown>): void
   captureException(error: unknown): void
 }
 
@@ -11,6 +14,7 @@ const MAX_BUFFERED = 100
 
 let sink: TelemetrySink | undefined
 let started = false
+let superProps: Partial<SuperProps> = {}
 // Closures over sink calls, so identify and reset keep their order with captures.
 let buffer: Array<(s: TelemetrySink) => void> = []
 
@@ -49,8 +53,19 @@ export function identify(email: string): void {
   send((s) => s.identify(email))
 }
 
+export function registerSuperProps(props: Partial<SuperProps>): void {
+  superProps = { ...superProps, ...props }
+  const snapshot = superProps
+  send((s) => s.register(snapshot))
+}
+
 export function resetIdentity(): void {
   send((s) => s.reset())
+  // reset() clears registered properties, so they go back on right after. This
+  // is its own call so a failing reset can't skip it.
+  send((s) => {
+    if (Object.keys(superProps).length > 0) s.register(superProps)
+  })
 }
 
 export function captureError(error: unknown): void {
@@ -73,6 +88,7 @@ function flush(s: TelemetrySink): void {
 export function setSinkForTests(next: TelemetrySink | undefined): void {
   sink = next
   started = false
+  superProps = {}
   buffer = []
 }
 
@@ -121,6 +137,7 @@ async function loadPostHog(): Promise<TelemetrySink> {
       posthog.reset()
       disableGeoip()
     },
+    register: (p) => posthog.register(p),
     captureException: (error) => posthog.captureException(error),
   }
 }

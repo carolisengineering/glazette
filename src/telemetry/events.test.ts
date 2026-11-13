@@ -7,6 +7,7 @@ import {
   OUTCOMES,
   PUT_BACK_KINDS,
   SCREENS,
+  type SuperProps,
   VITAL_METRICS,
 } from './events'
 
@@ -41,6 +42,11 @@ const EXAMPLES: { [N in EventName]: EventProps[N] } = {
   telemetry_started: { first_piece_date: '2026-03-01', pieces: 12 },
 }
 
+const SUPER_EXAMPLE: SuperProps = {
+  app_version: '2026-11-12 5c69b37',
+  after_update: true,
+}
+
 const ALLOWED_STRINGS = new Set<string>([
   ...STAGES,
   ...SCREENS,
@@ -61,6 +67,19 @@ describe('event props privacy', () => {
             (/^\d{4}-\d{2}-\d{2}$/.test(value) || ALLOWED_STRINGS.has(value)))
         expect(ok, `${name}.${key}`).toBe(true)
       }
+    }
+  })
+})
+
+describe('super props privacy', () => {
+  it('only carry booleans or a version stamp', () => {
+    for (const [key, value] of Object.entries(SUPER_EXAMPLE)) {
+      const ok =
+        typeof value === 'boolean' ||
+        (typeof value === 'string' &&
+          (/^\d{4}-\d{2}-\d{2} ([0-9a-f]{7}|dev)$/.test(value) ||
+            value === 'dev'))
+      expect(ok, key).toBe(true)
     }
   })
 })

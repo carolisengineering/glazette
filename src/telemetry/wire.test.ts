@@ -21,6 +21,7 @@ function fakeSink(): TelemetrySink {
     capture: (n, p) => calls.push(['capture', n, p]),
     identify: (e) => calls.push(['identify', e]),
     reset: () => calls.push(['reset']),
+    register: (p) => calls.push(['register', p]),
     captureException: (e) => calls.push(['captureException', e]),
   }
 }
@@ -45,6 +46,7 @@ beforeEach(async () => {
   await db.delete()
   await db.open()
   localStorage.clear()
+  sessionStorage.removeItem('glazette:update-reload')
   useAccount.setState(SIGNED_OUT)
   calls = []
   setSinkForTests(fakeSink())
@@ -62,6 +64,40 @@ afterEach(() => {
 })
 
 describe('startTelemetry', () => {
+  it('after an update Reload, every event from this load is marked', () => {
+    sessionStorage.setItem('glazette:update-reload', String(Date.now()))
+    start()
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: true },
+    ])
+    expect(sessionStorage.getItem('glazette:update-reload')).toBeNull()
+  })
+
+  it('a normal launch is not marked', () => {
+    start()
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
+  })
+
+  it('a launch with no note registers after_update false explicitly, so an old true cannot stick', () => {
+    start()
+    const props = calls[0][1] as Record<string, unknown>
+    expect('after_update' in props).toBe(true)
+    expect(props.after_update).toBe(false)
+  })
+
+  it('registers app_version before the first event', () => {
+    start()
+    expect(calls[0]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
+    expect(calls.findIndex((c) => c[0] === 'capture')).toBeGreaterThan(0)
+  })
+
   it('identifies a signed-in device at start', () => {
     useAccount.setState({ status: 'signed-in', email: 'a@x.com' })
     start()
@@ -73,7 +109,9 @@ describe('startTelemetry', () => {
     start()
     useAccount.setState(SIGNED_OUT)
     useAccount.setState({ status: 'signed-in', email: 'b@x.com' })
-    const identity = calls.filter((c) => c[0] !== 'capture')
+    const identity = calls.filter(
+      (c) => c[0] !== 'capture' && c[0] !== 'register',
+    )
     expect(identity).toEqual([
       ['identify', 'a@x.com'],
       ['reset'],
@@ -196,5 +234,56 @@ describe('startTelemetry', () => {
     const error = new Error('boom')
     window.dispatchEvent(new ErrorEvent('error', { error }))
     expect(calls).toContainEqual(['captureException', error])
+  })
+})
+
+describe('the update mark lasts until the first return to the foreground', () => {
+  const NOTE = 'glazette:update-reload'
+  const resume = () => {
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+  const clears = () => calls.filter((c) => c[0] === 'register').slice(1)
+
+  it('a marked load clears after_update before the first resume is reported', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    calls.length = 0
+    resume()
+    const clearAt = calls.findIndex(
+      (c) => c[0] === 'register' && c[1] && 'after_update' in (c[1] as object),
+    )
+    const openAt = calls.findIndex(
+      (c) => c[0] === 'capture' && c[1] === 'app_opened',
+    )
+    expect(calls[clearAt]).toEqual([
+      'register',
+      { app_version: 'dev', after_update: false },
+    ])
+    expect(openAt).toBeGreaterThan(clearAt)
+  })
+
+  it('going hidden alone does not clear it', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(clears()).toHaveLength(0)
+  })
+
+  it('a second resume registers nothing more', () => {
+    sessionStorage.setItem(NOTE, String(Date.now()))
+    start()
+    resume()
+    resume()
+    expect(clears()).toHaveLength(1)
+  })
+
+  it('an unmarked load registers nothing on a resume', () => {
+    start()
+    resume()
+    expect(clears()).toHaveLength(0)
   })
 })

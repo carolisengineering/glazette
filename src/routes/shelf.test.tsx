@@ -331,6 +331,7 @@ test('reports startup once', async () => {
     capture: (n, p) => events.push([n, p]),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   resetStartupForTests()
@@ -355,6 +356,7 @@ test('reports no startup when the page first loaded on another screen', async ()
     capture: (n, p) => events.push([n, p]),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   resetStartupForTests()

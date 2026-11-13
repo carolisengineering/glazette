@@ -226,6 +226,7 @@ function captureNames() {
     capture: (n) => names.push(n),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   return names

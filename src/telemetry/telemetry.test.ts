@@ -3,6 +3,7 @@ import {
   captureError,
   identify,
   initTelemetry,
+  registerSuperProps,
   resetIdentity,
   setSinkForTests,
   type TelemetrySink,
@@ -16,6 +17,7 @@ function fakeSink() {
     capture: (name, props) => calls.push(['capture', name, props]),
     identify: (email) => calls.push(['identify', email]),
     reset: () => calls.push(['reset']),
+    register: (p) => calls.push(['register', p]),
     captureException: (error) => calls.push(['exception', error]),
   }
   return { sink, calls }
@@ -26,6 +28,49 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 afterEach(() => {
   setSinkForTests(undefined)
   vi.restoreAllMocks()
+})
+
+describe('super props', () => {
+  it('registers super props in order with buffered captures', async () => {
+    track('signed_in', {})
+    registerSuperProps({ app_version: '2026-11-12 5c69b37' })
+    const { sink, calls } = fakeSink()
+    initTelemetry(async () => sink)
+    await tick()
+    expect(calls).toEqual([
+      ['capture', 'signed_in', {}],
+      ['register', { app_version: '2026-11-12 5c69b37' }],
+    ])
+  })
+
+  it('re-registers super props after an identity reset', async () => {
+    const { sink, calls } = fakeSink()
+    initTelemetry(async () => sink)
+    await tick()
+    registerSuperProps({ app_version: 'v1', after_update: true })
+    resetIdentity()
+    expect(calls.slice(-2)).toEqual([
+      ['reset'],
+      ['register', { app_version: 'v1', after_update: true }],
+    ])
+  })
+})
+
+describe('identity reset failures', () => {
+  it('still re-registers super props when the sink reset throws', async () => {
+    const { sink, calls } = fakeSink()
+    sink.reset = () => {
+      throw new Error('reset failed')
+    }
+    initTelemetry(async () => sink)
+    await tick()
+    registerSuperProps({ app_version: 'v1', after_update: false })
+    const before = calls.length
+    expect(() => resetIdentity()).not.toThrow()
+    expect(calls.slice(before)).toEqual([
+      ['register', { app_version: 'v1', after_update: false }],
+    ])
+  })
 })
 
 describe('telemetryEnabled', () => {
@@ -85,11 +130,13 @@ describe('telemetry sink', () => {
       capture: boom,
       identify: boom,
       reset: boom,
+      register: boom,
       captureException: boom,
     })
     expect(() => track('signed_in', {})).not.toThrow()
     expect(() => identify('a@b.c')).not.toThrow()
     expect(() => resetIdentity()).not.toThrow()
+    expect(() => registerSuperProps({ app_version: 'x' })).not.toThrow()
     expect(() => captureError(new Error('x'))).not.toThrow()
   })
 

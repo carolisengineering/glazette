@@ -34,6 +34,7 @@ function captureEvents() {
     capture: (n, p) => events.push([n, p]),
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   }
   setSinkForTests(sink)
@@ -577,6 +578,18 @@ test('createPiece reports piece_logged', async () => {
   expect(typeof events[0][1].ms).toBe('number')
 })
 
+test('createPiece with report: false sends no piece_logged', async () => {
+  await db.glazes.add({ id: 'g1', name: 'Oatmeal', color: '#D8C7A6' })
+  const events = captureEvents()
+  await createPiece({ photo: photo('t2'), report: false })
+  await createPiece({
+    stage: 'glazed',
+    glazes: [{ glazeId: 'g1' }],
+    report: false,
+  })
+  expect(events).toEqual([['glazes_added', { layers: 1 }]])
+})
+
 test('addStageEntry reports stage_added', async () => {
   const id = await createPiece({})
   const events = captureEvents()
@@ -692,6 +705,7 @@ test("a throwing sink doesn't break createPiece", async () => {
     },
     identify: () => {},
     reset: () => {},
+    register: () => {},
     captureException: () => {},
   })
   const id = await createPiece({ name: 'Mug' })

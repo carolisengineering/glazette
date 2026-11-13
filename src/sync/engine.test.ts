@@ -490,6 +490,7 @@ describe('stopping early keeps what is safe', () => {
       capture: () => {},
       identify: () => {},
       reset: () => {},
+      register: () => {},
       captureException: (e) => captured.push(e),
     })
     const boom = new Error('boom')

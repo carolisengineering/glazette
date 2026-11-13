@@ -10,6 +10,7 @@ import {
   processImage,
   UnsupportedImageError,
 } from '../photos/process'
+import { setSinkForTests, type TelemetrySink } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 import { useCaptureStore } from './store'
 
@@ -30,6 +31,9 @@ const processed: ProcessedImage = {
 const file = () => new File(['x'], 'pot.jpg', { type: 'image/jpeg' })
 
 let clickSpy: ReturnType<typeof vi.spyOn>
+let events: Array<[string, Record<string, unknown>]>
+
+const pieceLogged = () => events.filter(([n]) => n === 'piece_logged')
 
 beforeEach(async () => {
   await db.delete()
@@ -41,10 +45,20 @@ beforeEach(async () => {
   URL.createObjectURL = vi.fn(() => `blob:${crypto.randomUUID()}`)
   URL.revokeObjectURL = vi.fn()
   clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click')
+  events = []
+  const sink: TelemetrySink = {
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    register: () => {},
+    captureException: () => {},
+  }
+  setSinkForTests(sink)
 })
 
 afterEach(() => {
   clickSpy.mockRestore()
+  setSinkForTests(undefined)
 })
 
 async function chooseFile() {
@@ -421,7 +435,8 @@ test('Retake on the details sheet soft-deletes the new piece and returns to the 
 test('Retake on the details sheet shows a toast when the discard fails', async () => {
   renderRoute('/capture')
   await submitAsNewPiece()
-  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await screen.findByText('Saved to your shelf as Bisqued')
   vi.spyOn(ops, 'softDelete').mockRejectedValueOnce(new Error('boom'))
   await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
   expect(
@@ -429,6 +444,16 @@ test('Retake on the details sheet shows a toast when the discard fails', async (
       "Couldn't discard that piece. It's still on your shelf.",
     ),
   ).toBeVisible()
+  // The piece stayed, so it is reported once, with the stage the sheet showed.
+  expect(pieceLogged()).toEqual([
+    [
+      'piece_logged',
+      { has_photo: true, stage: 'bisqued', ms: expect.any(Number) },
+    ],
+  ])
+  cleanup()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toHaveLength(1)
 })
 
 test('Cancel goes back to the piece when capture came from one', async () => {
@@ -743,5 +768,137 @@ test('the stage picker is disabled while Done is saving, so glazes land on the s
   } finally {
     add.mockRestore()
     restage.mockRestore()
+  }
+})
+
+test('camera-first: Done reports piece_logged once, with the picked stage', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await screen.findByText('Saved to your shelf as Bisqued')
+  expect(pieceLogged()).toEqual([])
+  await clickDone()
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toEqual({
+    stage: 'bisqued',
+    has_photo: true,
+    ms: expect.any(Number),
+  })
+})
+
+test('camera-first: leaving without Done still reports it', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  act(() => {
+    void router.navigate({ to: '/' })
+  })
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toMatchObject({ stage: 'thrown' })
+})
+
+test('camera-first: Retake reports nothing for the discarded piece', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  await screen.findByRole('button', { name: 'Take photo' })
+  act(() => {
+    void router.navigate({ to: '/' })
+  })
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toEqual([])
+})
+
+test('Retake, then a new photo and New again, reports only the second piece', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  await screen.findByRole('button', { name: 'Take photo' })
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(await db.pieces.count()).toBe(2)
+  await clickDone()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toHaveLength(1)
+  expect(await db.pieces.filter((p) => !p.deletedAt).count()).toBe(1)
+})
+
+test('the no-photo new-piece path still reports at save', async () => {
+  renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await clickDone()
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toMatchObject({
+    stage: 'bisqued',
+    has_photo: false,
+  })
+})
+
+test('camera-first: leaving while the piece is still saving reports it once it lands', async () => {
+  const router = renderRoute('/capture')
+  const real = ops.createPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const create = vi
+    .spyOn(ops, 'createPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await submitAsNewPiece()
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    act(() => {
+      void router.navigate({ to: '/' })
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+    release()
+    await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(pieceLogged()).toHaveLength(1)
+    expect(pieceLogged()[0][1]).toMatchObject({ stage: 'thrown' })
+  } finally {
+    create.mockRestore()
+  }
+})
+
+test('on the pick sheet, Retake and New are disabled while "Save as a new piece" is saving', async () => {
+  await createPiece({ name: 'Mug' })
+  renderRoute('/capture')
+  await chooseFile()
+  await userEvent.click(await screen.findByRole('button', { name: 'Update' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+  const newBtn = await screen.findByRole('button', {
+    name: 'Not here? Save as a new piece',
+  })
+  const real = ops.createPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const create = vi
+    .spyOn(ops, 'createPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await userEvent.click(newBtn)
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    expect(newBtn).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retake' })).toBeDisabled()
+    release()
+    await screen.findByText('Saved to your shelf as Thrown')
+    expect(screen.getByPlaceholderText('Name it later')).toBeVisible()
+  } finally {
+    create.mockRestore()
   }
 })

@@ -11,34 +11,42 @@ Glazette sends a small set of events to PostHog. They hold numbers, yes/no value
 
 A local `pnpm build` or `pnpm deploy` has no key, so it ships no telemetry.
 
-## Who came back (retention)
+## The Glazette dashboard
 
-The menu names below come from memory and may differ slightly in PostHog. Carol: please check them when you set this up and fix any that are off.
+PostHog's home page for this project is a dashboard called Glazette. Start there. It has two sections. The menu names in PostHog may differ slightly from what this guide says, since they are written from memory.
 
-1. Open Product analytics and make a new Retention insight.
-2. Set both the starting event and the returning event to `app_opened`.
-3. Count by unique users. Pick weekly or daily periods.
+### Are they using it?
 
-Friends who used Glazette before telemetry will look brand new, because PostHog first sees them on their first telemetry day. To tell them apart, use `first_piece_date`. It is the date of their oldest piece, saved on the person the first time telemetry ran on their device. Break the insight down by this person property. An early date means an existing friend, not a new one. The date is the oldest piece's own date, and for a piece logged from a photo that is the date the photo was taken. A new friend who logs old photos can therefore look long-standing.
+- **Who's using it**: a table with one row per person. It shows their email, or "Anonymous phone" plus a short ID. The columns are last seen, days used, launches, pieces logged, stages added, other changes, oldest piece date, phone type and version. Version is the newest `app_version` that person has sent, so it shows who is on an old build.
+- **People who opened the app**: how many people launched the app each day. Coming back from the background doesn't count.
+- **Pieces and stages logged**: how many pieces and stages were saved each day.
+- **Who came back**: weekly retention on opening the app. Each row is a group of people who first showed up in the same week. Each column shows how many of them came back that many weeks later.
 
-## How fast it is (timings)
+Friends who used Glazette before telemetry will look brand new, because PostHog first sees them on their first telemetry day. The "oldest piece date" column helps tell them apart. An early date means an existing friend, not a new one. It is the date of their oldest piece, saved the first time telemetry ran on their device. For a piece logged from a photo, that is the date the photo was taken, so a new friend who logs old photos can look long-standing.
 
-1. Make a new Trends insight.
-2. Pick one of these events: `startup`, `piece_opened`, `photo_processed`, `piece_logged`, `stage_added` or `sync_records`.
-3. Change the math to "Median" of the property `ms`. Add a second series with "90th percentile".
-4. Break down by "Operating system".
+### How does it feel?
 
-The median shows the usual wait. The 90th percentile shows the slow ones.
+- **How long things take**: one row per step: opening the app, opening a piece, preparing a photo, saving a piece, saving a stage, syncing records, syncing photos and restoring a backup. It shows the usual time, a slow time and the slowest. The slow time means 1 run in 10 is slower than that.
+- **Page speed**: the browser's five speed measures: LCP, INP, CLS, FCP and TTFB. Each comes with the limit for a good score.
+- **Syncs by result**: record syncs per day, split by how they ended: done, offline, signed-out or error.
+
+## Updates and versions
+
+Every event carries `app_version`. It looks like `2026-11-12 5c69b37`: the build date in Chicago time, then the commit.
+
+`after_update` is true on events from the start of the page load right after someone taps Reload on "New version available", until the app first goes to the background. It is false otherwise. Events sent by app versions before this one don't have it at all. Leave the true ones out when counting launches or reading speed, because that load is not a real launch and its speed is not typical. When you leave them out, filter on "is not true" rather than "equals false", so the older events without the property stay in. The dashboard already does this.
 
 ## Leave yourself out
 
 Open the insight's filters and add a person filter. Set "Email" (the `email` property, which is set when someone signs in) to "doesn't equal" your own address. To do this everywhere, add the same rule under Settings, then Internal and test users.
 
+The project is set to Chicago time, so days and weeks on the dashboard follow Chicago time.
+
 ## The events
 
 - `app_opened`: the app was opened or came back to the screen. It says whether it runs as an installed app and whether it was resumed.
 - `screen_viewed`: a screen was shown: shelf, piece, glazes, capture, account or backup.
-- `piece_logged`: a new piece was saved. It says if it had a photo, its stage and how long saving took. A piece logged camera-first is saved as Thrown before the friend picks its stage, so its stage here is Thrown. A Retake from the details sheet also logs one extra piece.
+- `piece_logged`: a new piece was saved. It says if it had a photo, its stage and how long saving took. A piece logged from a photo is reported when its details sheet closes, with the stage chosen there. A piece whose sheet is still open when the app closes isn't counted.
 - `stage_added`: a stage was added to a piece. It says the stage, if it had a photo and how long it took.
 - `glazes_added`: glazes were added to a piece. It says how many layers.
 - `piece_edited`: a piece's details or notes were changed.
