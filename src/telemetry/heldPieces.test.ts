@@ -1,5 +1,5 @@
 import { db } from '../db/db'
-import { createPiece, restagePiece } from '../db/ops'
+import { createPiece, restagePiece, softDelete } from '../db/ops'
 import type { ProcessedImage } from '../photos/process'
 import {
   clearHeldPiecesForTests,
@@ -74,6 +74,14 @@ test("a piece whose stage can't be read is dropped silently", async () => {
   const events = captureEvents()
   holdPieceLogged('missing', { has_photo: true, ms: 5 })
   await expect(releaseHeldPieces()).resolves.toBeUndefined()
+  await releaseHeldPieces()
+  expect(events).toEqual([])
+})
+
+test('a held piece whose row is soft-deleted is not reported', async () => {
+  const events = captureEvents()
+  const id = await createPiece({ photo, holdReport: true })
+  await softDelete('pieces', id)
   await releaseHeldPieces()
   expect(events).toEqual([])
 })

@@ -15,24 +15,32 @@ export function holdPieceLogged(pieceId: string, props: HeldProps): void {
   held.set(pieceId, props)
 }
 
-/** A discarded piece (Retake) is never reported. */
-export function dropPieceLogged(pieceId: string): void {
+/**
+ * A discarded piece (Retake) is never reported. Returns the dropped report so a
+ * failed discard can hold it again.
+ */
+export function dropPieceLogged(pieceId: string): HeldProps | undefined {
+  const props = held.get(pieceId)
   held.delete(pieceId)
+  return props
 }
 
 /**
  * Sends every held report with the piece's stage as it stands now. A piece
- * whose stage can't be read is dropped without sending. Never throws.
+ * that was deleted, or whose stage can't be read, is dropped without sending. Never throws.
  */
 export async function releaseHeldPieces(): Promise<void> {
   const pending = [...held]
   held.clear()
   for (const [pieceId, props] of pending) {
     try {
-      const live = (
-        await db.entries.where('pieceId').equals(pieceId).toArray()
-      ).filter((e) => !e.deletedAt)
-      const stage = currentStage(live)
+      const piece = await db.pieces.get(pieceId)
+      if (!piece || piece.deletedAt) continue
+      const entries = await db.entries
+        .where('pieceId')
+        .equals(pieceId)
+        .toArray()
+      const stage = currentStage(entries)
       if (stage) track('piece_logged', { ...props, stage })
     } catch {
       // Telemetry failures only mean sending less.
