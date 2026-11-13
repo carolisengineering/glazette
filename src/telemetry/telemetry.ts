@@ -60,9 +60,10 @@ export function registerSuperProps(props: Partial<SuperProps>): void {
 }
 
 export function resetIdentity(): void {
-  // reset() clears registered properties, so they go back on right after.
+  send((s) => s.reset())
+  // reset() clears registered properties, so they go back on right after. This
+  // is its own call so a failing reset can't skip it.
   send((s) => {
-    s.reset()
     if (Object.keys(superProps).length > 0) s.register(superProps)
   })
 }

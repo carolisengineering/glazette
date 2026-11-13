@@ -30,7 +30,9 @@ export function consumeUpdateReload(
     store.removeItem(KEY)
     const wrote = Number(raw)
     if (!Number.isFinite(wrote)) return false
-    return now - wrote <= UPDATE_RELOAD_MAX_AGE_MS
+    // A note dated in the future (clock change) is not trusted either.
+    const age = now - wrote
+    return age >= 0 && age <= UPDATE_RELOAD_MAX_AGE_MS
   } catch {
     return false
   }

@@ -829,3 +829,33 @@ test('the no-photo new-piece path still reports at save', async () => {
     has_photo: false,
   })
 })
+
+test('camera-first: leaving while the piece is still saving reports it once it lands', async () => {
+  const router = renderRoute('/capture')
+  const real = ops.createPiece
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  const create = vi
+    .spyOn(ops, 'createPiece')
+    .mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+  try {
+    await submitAsNewPiece()
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    act(() => {
+      void router.navigate({ to: '/' })
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+    release()
+    await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(pieceLogged()).toHaveLength(1)
+    expect(pieceLogged()[0][1]).toMatchObject({ stage: 'thrown' })
+  } finally {
+    create.mockRestore()
+  }
+})

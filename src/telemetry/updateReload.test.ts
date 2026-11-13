@@ -53,3 +53,9 @@ test('blocked site data (sessionStorage getter throws) never throws', () => {
     spy.mockRestore()
   }
 })
+
+test('a mark dated in the future is false and is cleared', () => {
+  markUpdateReload(sessionStorage, 100_000)
+  expect(consumeUpdateReload(sessionStorage, 50_000)).toBe(false)
+  expect(sessionStorage.getItem(KEY)).toBeNull()
+})

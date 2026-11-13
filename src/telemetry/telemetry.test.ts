@@ -56,6 +56,23 @@ describe('super props', () => {
   })
 })
 
+describe('identity reset failures', () => {
+  it('still re-registers super props when the sink reset throws', async () => {
+    const { sink, calls } = fakeSink()
+    sink.reset = () => {
+      throw new Error('reset failed')
+    }
+    initTelemetry(async () => sink)
+    await tick()
+    registerSuperProps({ app_version: 'v1', after_update: false })
+    const before = calls.length
+    expect(() => resetIdentity()).not.toThrow()
+    expect(calls.slice(before)).toEqual([
+      ['register', { app_version: 'v1', after_update: false }],
+    ])
+  })
+})
+
 describe('telemetryEnabled', () => {
   it('is true only in production with a key', () => {
     expect(

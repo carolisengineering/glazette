@@ -107,6 +107,8 @@ export function CaptureScreen() {
         clayId: await liveDefaultClayId(),
         holdReport: true,
       })
+      // Left while saving: the unmount release already ran, so release now.
+      if (!mounted.current) void releaseHeldPieces()
       setStep({ name: 'details', pieceId: id })
     } catch {
       showToast(SAVE_ERROR)
