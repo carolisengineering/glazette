@@ -39,3 +39,17 @@ test('a throwing storage never throws', () => {
   expect(() => markUpdateReload(stub)).not.toThrow()
   expect(consumeUpdateReload(stub)).toBe(false)
 })
+
+test('blocked site data (sessionStorage getter throws) never throws', () => {
+  const spy = vi
+    .spyOn(window, 'sessionStorage', 'get')
+    .mockImplementation(() => {
+      throw new Error('blocked')
+    })
+  try {
+    expect(() => markUpdateReload()).not.toThrow()
+    expect(consumeUpdateReload()).toBe(false)
+  } finally {
+    spy.mockRestore()
+  }
+})

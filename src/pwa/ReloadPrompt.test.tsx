@@ -85,3 +85,21 @@ test('ReloadPrompt catches a failed update check (offline)', () => {
   expect(caught).toHaveBeenCalledWith(expect.any(Function))
   state.registration.update.mockReset()
 })
+
+test('Reload still reloads when sessionStorage is blocked', async () => {
+  state.needRefresh = true
+  state.update.mockReset()
+  const spy = vi
+    .spyOn(window, 'sessionStorage', 'get')
+    .mockImplementation(() => {
+      throw new Error('blocked')
+    })
+  try {
+    render(<ReloadPrompt />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(state.update).toHaveBeenCalledWith(true)
+  } finally {
+    spy.mockRestore()
+    state.needRefresh = false
+  }
+})
