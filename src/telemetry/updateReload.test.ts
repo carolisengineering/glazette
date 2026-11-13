@@ -1,4 +1,8 @@
-import { consumeUpdateReload, markUpdateReload } from './updateReload'
+import {
+  clearUpdateReload,
+  consumeUpdateReload,
+  markUpdateReload,
+} from './updateReload'
 
 const KEY = 'glazette:update-reload'
 
@@ -58,4 +62,29 @@ test('a mark dated in the future is false and is cleared', () => {
   markUpdateReload(sessionStorage, 100_000)
   expect(consumeUpdateReload(sessionStorage, 50_000)).toBe(false)
   expect(sessionStorage.getItem(KEY)).toBeNull()
+})
+
+test('clear removes the note', () => {
+  markUpdateReload(sessionStorage, 1000)
+  clearUpdateReload(sessionStorage)
+  expect(sessionStorage.getItem(KEY)).toBeNull()
+})
+
+test('clear never throws, with a throwing storage or blocked site data', () => {
+  const stub = {
+    removeItem: () => {
+      throw new Error('storage failed')
+    },
+  } as unknown as Storage
+  expect(() => clearUpdateReload(stub)).not.toThrow()
+  const spy = vi
+    .spyOn(window, 'sessionStorage', 'get')
+    .mockImplementation(() => {
+      throw new Error('blocked')
+    })
+  try {
+    expect(() => clearUpdateReload()).not.toThrow()
+  } finally {
+    spy.mockRestore()
+  }
 })

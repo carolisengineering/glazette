@@ -37,3 +37,13 @@ export function consumeUpdateReload(
     return false
   }
 }
+
+/** Removes the note, for a Reload that turned out not to reload. Never throws. */
+export function clearUpdateReload(storage?: Storage): void {
+  try {
+    const store = storage ?? sessionStorage
+    store.removeItem(KEY)
+  } catch {
+    // Nothing to clear, or storage is blocked. Either way, carry on.
+  }
+}

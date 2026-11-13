@@ -1,6 +1,6 @@
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { useEffect, useRef } from 'react'
-import { markUpdateReload } from '../telemetry/updateReload'
+import { clearUpdateReload, markUpdateReload } from '../telemetry/updateReload'
 
 /** Stays on screen until the user taps Reload, since a waiting update shouldn't be missed. */
 export function ReloadPrompt() {
@@ -37,7 +37,16 @@ export function ReloadPrompt() {
         type="button"
         onClick={() => {
           markUpdateReload()
-          updateServiceWorker(true)
+          // If the page reloads, this timer dies with it. If no reload follows,
+          // the note must not mark some later, unrelated load.
+          setTimeout(() => clearUpdateReload(), 10_000)
+          try {
+            Promise.resolve(updateServiceWorker(true)).catch(() =>
+              clearUpdateReload(),
+            )
+          } catch {
+            clearUpdateReload()
+          }
         }}
         className="min-h-11 rounded-xl bg-accent px-4 text-[15px] font-semibold text-white"
       >

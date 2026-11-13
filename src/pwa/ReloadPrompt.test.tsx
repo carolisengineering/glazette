@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ReloadPrompt } from './ReloadPrompt'
 
@@ -102,4 +102,36 @@ test('Reload still reloads when sessionStorage is blocked', async () => {
     spy.mockRestore()
     state.needRefresh = false
   }
+})
+
+describe('the update note when no reload follows', () => {
+  const KEY = 'glazette:update-reload'
+  afterEach(() => {
+    vi.useRealTimers()
+    sessionStorage.removeItem(KEY)
+    state.needRefresh = false
+  })
+
+  it('is removed after 10 seconds if the page did not reload', () => {
+    vi.useFakeTimers()
+    sessionStorage.removeItem(KEY)
+    state.needRefresh = true
+    state.update.mockReset().mockReturnValue(new Promise(() => {}))
+    render(<ReloadPrompt />)
+    act(() => screen.getByRole('button', { name: 'Reload' }).click())
+    expect(sessionStorage.getItem(KEY)).not.toBeNull()
+    vi.advanceTimersByTime(9_999)
+    expect(sessionStorage.getItem(KEY)).not.toBeNull()
+    vi.advanceTimersByTime(1)
+    expect(sessionStorage.getItem(KEY)).toBeNull()
+  })
+
+  it('is removed at once if the update call rejects', async () => {
+    sessionStorage.removeItem(KEY)
+    state.needRefresh = true
+    state.update.mockReset().mockRejectedValue(new Error('nope'))
+    render(<ReloadPrompt />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(sessionStorage.getItem(KEY)).toBeNull())
+  })
 })
