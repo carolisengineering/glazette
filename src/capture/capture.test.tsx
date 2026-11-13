@@ -10,6 +10,8 @@ import {
   processImage,
   UnsupportedImageError,
 } from '../photos/process'
+import { clearHeldPiecesForTests } from '../telemetry/heldPieces'
+import { setSinkForTests, type TelemetrySink } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
 import { useCaptureStore } from './store'
 
@@ -30,6 +32,9 @@ const processed: ProcessedImage = {
 const file = () => new File(['x'], 'pot.jpg', { type: 'image/jpeg' })
 
 let clickSpy: ReturnType<typeof vi.spyOn>
+let events: Array<[string, Record<string, unknown>]>
+
+const pieceLogged = () => events.filter(([n]) => n === 'piece_logged')
 
 beforeEach(async () => {
   await db.delete()
@@ -41,10 +46,21 @@ beforeEach(async () => {
   URL.createObjectURL = vi.fn(() => `blob:${crypto.randomUUID()}`)
   URL.revokeObjectURL = vi.fn()
   clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click')
+  events = []
+  const sink: TelemetrySink = {
+    capture: (n, p) => events.push([n, p]),
+    identify: () => {},
+    reset: () => {},
+    register: () => {},
+    captureException: () => {},
+  }
+  setSinkForTests(sink)
 })
 
 afterEach(() => {
   clickSpy.mockRestore()
+  clearHeldPiecesForTests()
+  setSinkForTests(undefined)
 })
 
 async function chooseFile() {
@@ -744,4 +760,72 @@ test('the stage picker is disabled while Done is saving, so glazes land on the s
     add.mockRestore()
     restage.mockRestore()
   }
+})
+
+test('camera-first: Done reports piece_logged once, with the picked stage', async () => {
+  renderRoute('/capture')
+  await submitAsNewPiece()
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await screen.findByText('Saved to your shelf as Bisqued')
+  expect(pieceLogged()).toEqual([])
+  await clickDone()
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toMatchObject({
+    stage: 'bisqued',
+    has_photo: true,
+  })
+})
+
+test('camera-first: leaving without Done still reports it', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  act(() => {
+    void router.navigate({ to: '/' })
+  })
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toMatchObject({ stage: 'thrown' })
+})
+
+test('camera-first: Retake reports nothing for the discarded piece', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  await screen.findByRole('button', { name: 'Take photo' })
+  act(() => {
+    void router.navigate({ to: '/' })
+  })
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toEqual([])
+})
+
+test('Retake, then a new photo and New again, reports only the second piece', async () => {
+  const router = renderRoute('/capture')
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  await userEvent.click(screen.getByRole('button', { name: 'Retake' }))
+  await screen.findByRole('button', { name: 'Take photo' })
+  await submitAsNewPiece()
+  await screen.findByText('Saved to your shelf as Thrown')
+  expect(await db.pieces.count()).toBe(2)
+  await clickDone()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(pieceLogged()).toHaveLength(1)
+  expect(await db.pieces.filter((p) => !p.deletedAt).count()).toBe(1)
+})
+
+test('the no-photo new-piece path still reports at save', async () => {
+  renderRoute('/capture')
+  await userEvent.click(await screen.findByRole('button', { name: 'No photo' }))
+  await userEvent.click(await screen.findByRole('button', { name: /^Bisqued/ }))
+  await clickDone()
+  await waitFor(() => expect(pieceLogged()).toHaveLength(1))
+  expect(pieceLogged()[0][1]).toMatchObject({
+    stage: 'bisqued',
+    has_photo: false,
+  })
 })

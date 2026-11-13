@@ -578,6 +578,12 @@ test('createPiece reports piece_logged', async () => {
   expect(typeof events[0][1].ms).toBe('number')
 })
 
+test('createPiece with holdReport sends nothing until released', async () => {
+  const events = captureEvents()
+  await createPiece({ photo: photo('t2'), holdReport: true })
+  expect(events).toEqual([])
+})
+
 test('addStageEntry reports stage_added', async () => {
   const id = await createPiece({})
   const events = captureEvents()

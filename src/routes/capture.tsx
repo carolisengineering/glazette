@@ -10,6 +10,7 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { createPiece, softDelete } from '../db/ops'
 import { liveDefaultClayId, usePiecesQuery } from '../db/queries'
 import { processPickedPhoto } from '../photos/processPickedPhoto'
+import { dropPieceLogged, releaseHeldPieces } from '../telemetry/heldPieces'
 
 const captureRoute = getRouteApi('/capture')
 
@@ -42,6 +43,8 @@ export function CaptureScreen() {
     return () => {
       mounted.current = false
       useCaptureStore.getState().reset()
+      // Camera-first pieces report once the details sheet ends, however it ends.
+      void releaseHeldPieces()
     }
   }, [])
 
@@ -84,6 +87,7 @@ export function CaptureScreen() {
     retaking.current = true
     // Open the camera in the tap itself: iOS drops the user activation after an await.
     retake()
+    dropPieceLogged(id)
     try {
       await softDelete('pieces', id)
     } catch {
@@ -101,6 +105,7 @@ export function CaptureScreen() {
       const id = await createPiece({
         photo,
         clayId: await liveDefaultClayId(),
+        holdReport: true,
       })
       setStep({ name: 'details', pieceId: id })
     } catch {
