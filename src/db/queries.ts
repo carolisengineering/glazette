@@ -1,5 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
+import { planMatches } from './glazePlan'
+import { layerDetails } from './layerDetails'
+import { DEFAULT_GLAZE_COLOR } from './seed'
 import { currentStage, glazeStep, latestEntry, STAGES } from './stage'
 import type {
   Clay,
@@ -11,6 +14,19 @@ import type {
 } from './types'
 
 export type ShelfChip = 'all' | Stage | 'lost'
+
+/** One planned glaze layer with its library glaze's name and swatch color. */
+export interface PlanLayerView {
+  glazeId: string
+  /** The library glaze's plain name. Blank when the glaze isn't on this device yet. */
+  name: string
+  /** The library glaze was deleted; the Glaze box shows a ` (retired)` suffix. */
+  retired?: boolean
+  color: string
+  dips?: number
+  method?: GlazeApplication['method']
+  note?: string
+}
 
 export interface PieceView {
   piece: Piece
@@ -27,7 +43,30 @@ export interface PieceView {
   /** Glaze names of the glaze step, in layering order. */
   glazeNames: string[]
   /** The same layers with their swatch colors, for showing each one on its own. */
-  glazeLayers: { name: string; color: string }[]
+  glazeLayers: {
+    name: string
+    color: string
+    dips?: number
+    method?: GlazeApplication['method']
+    note?: string
+  }[]
+  /**
+   * How many live layers the glaze step has, including ones whose library glaze
+   * hasn't synced yet (those aren't in `glazeLayers`).
+   */
+  glazeLayerCount: number
+  /**
+   * The one "plan comes first" rule: the piece has a plan and no live glaze
+   * layers yet, so glaze rows start from the plan and the Glaze box shows it.
+   */
+  startsFromPlan: boolean
+  /** Every planned layer in order, nameless ones included. Empty without a plan. */
+  planLayers: PlanLayerView[]
+  /**
+   * Whether the plan equals the glaze step's live layers. Undefined unless the
+   * piece has a plan and at least one live layer on its glaze step.
+   */
+  planMatches?: boolean
 }
 
 const FIRED_FADE_DAYS = 14
@@ -63,18 +102,30 @@ export function buildPieceViews(
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
     const glazedEntry = glazeStep(own, glazeApps)
-    const layers = glazedEntry
+    const liveApps = glazedEntry
       ? glazeApps
           .filter(
             (a) => a.entryId === glazedEntry.id && liveEntryIds.has(a.entryId),
           )
           .sort((a, b) => a.order - b.order)
-          .flatMap((a) => {
-            const glaze = glazeById.get(a.glazeId)
-            return glaze ? [glaze] : []
-          })
       : []
-    const glazeNames = layers.map(nameWithRetired)
+    const layers = liveApps.flatMap((a) => {
+      const glaze = glazeById.get(a.glazeId)
+      return glaze ? [{ glaze, app: a }] : []
+    })
+    const glazeNames = layers.map((l) => nameWithRetired(l.glaze))
+    const plan = piece.glazePlan ?? []
+    const planLayers: PlanLayerView[] = plan.map((p) => {
+      const glaze = glazeById.get(p.glazeId)
+      const out: PlanLayerView = {
+        glazeId: p.glazeId,
+        name: glaze?.name ?? '',
+        color: glaze?.color ?? DEFAULT_GLAZE_COLOR,
+        ...layerDetails(p),
+      }
+      if (glaze?.deletedAt) out.retired = true
+      return out
+    })
     const clay = piece.clayId ? clayById.get(piece.clayId) : undefined
     return {
       piece,
@@ -84,10 +135,18 @@ export function buildPieceViews(
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeStepId: glazedEntry?.id,
       glazeNames,
-      glazeLayers: layers.map((g, i) => ({
+      glazeLayers: layers.map(({ glaze, app }, i) => ({
         name: glazeNames[i],
-        color: g.color,
+        color: glaze.color,
+        ...layerDetails(app),
       })),
+      glazeLayerCount: liveApps.length,
+      startsFromPlan: planLayers.length > 0 && liveApps.length === 0,
+      planLayers,
+      planMatches:
+        plan.length > 0 && liveApps.length > 0
+          ? planMatches(plan, liveApps)
+          : undefined,
     }
   })
 }
@@ -175,9 +234,13 @@ export function usePiece(id: string): PieceDetail | null | undefined {
       piece.clayId ? db.clays.get(piece.clayId) : undefined,
       db.settings.get('app'),
     ])
-    const glazes = (
-      await db.glazes.bulkGet([...new Set(glazeApps.map((a) => a.glazeId))])
-    ).filter((g) => g !== undefined)
+    const glazeIds = new Set([
+      ...glazeApps.map((a) => a.glazeId),
+      ...(piece.glazePlan ?? []).map((l) => l.glazeId),
+    ])
+    const glazes = (await db.glazes.bulkGet([...glazeIds])).filter(
+      (g) => g !== undefined,
+    )
     const [view] = buildPieceViews(
       [piece],
       entries,

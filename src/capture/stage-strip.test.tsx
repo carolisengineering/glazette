@@ -1,6 +1,7 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
+import { setGlazePlan } from '../db/glazePlan'
 import * as ops from '../db/ops'
 import * as queries from '../db/queries'
 import { type ProcessedImage, processImage } from '../photos/process'
@@ -456,4 +457,91 @@ test('stage buttons are disabled while a save is in flight', async () => {
   await waitFor(() => expect(stageBtn('Thrown')).toBeDisabled())
   expect(stageBtn('Trimmed')).toBeDisabled()
   release()
+})
+
+const PLAN_LINE =
+  'Filled in from your plan. Change anything you did differently.'
+
+async function plannedBisqued(withLayers = false) {
+  const id = await createPiece({ name: 'Mug' })
+  const celadon = await upsertGlaze({ name: 'Celadon', color: '#9DBBAA' })
+  await addStageEntry({ pieceId: id, stage: 'bisqued' })
+  await setGlazePlan(id, [{ glazeId: celadon, dips: 2 }])
+  if (withLayers) {
+    await addStageEntry({
+      pieceId: id,
+      stage: 'glazed',
+      glazes: [{ glazeId: celadon, dips: 1 }],
+    })
+  }
+  return { id, celadon }
+}
+
+test('logging Glazed on a planned piece starts from the plan and saves what was changed', async () => {
+  const { id, celadon } = await plannedBisqued()
+  const router = await openStrip(id)
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('Celadon')
+  const dips = screen.getByLabelText('Dips for glaze 1')
+  await userEvent.clear(dips)
+  await userEvent.type(dips, '3')
+  await userEvent.click(screen.getByRole('button', { name: 'Save to Glazed' }))
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/piece/${id}`),
+  )
+  const entries = await db.entries.where('pieceId').equals(id).toArray()
+  const glazed = entries.find((e) => e.stage === 'glazed')
+  const layers = await db.glazeApps
+    .where('entryId')
+    .equals(glazed?.id ?? '')
+    .toArray()
+  expect(layers.map((l) => [l.glazeId, l.dips])).toEqual([[celadon, 3]])
+  expect((await db.pieces.get(id))?.glazePlan).toEqual([
+    { glazeId: celadon, dips: 2 },
+  ])
+})
+
+test('skipping to Fired on a planned piece also starts from the plan', async () => {
+  const { id } = await plannedBisqued()
+  await openNoPhotoStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Fired/ }))
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('Celadon')
+})
+
+test('a piece that already has used glazes does not prefill from its plan', async () => {
+  const { id } = await plannedBisqued(true)
+  await openStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Glazed/ }))
+  await screen.findByRole('button', { name: 'Save photo' })
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
+test('a used layer whose glaze has not synced still blocks the prefill', async () => {
+  const { id, celadon } = await plannedBisqued(true)
+  await db.glazes.delete(celadon)
+  await openStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Glazed/ }))
+  await screen.findByRole('button', { name: 'Save photo' })
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
+test('the plan note goes once every prefilled row is removed', async () => {
+  const { id } = await plannedBisqued()
+  await openStrip(id)
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
+test('a piece without a plan starts with one empty glaze row, as before', async () => {
+  const id = await createPiece({ name: 'Mug' })
+  await addStageEntry({ pieceId: id, stage: 'bisqued' })
+  await openStrip(id)
+  await screen.findByRole('button', { name: 'Save to Glazed' })
+  expect(screen.getAllByLabelText(/^Glaze \d+$/)).toHaveLength(1)
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
 })

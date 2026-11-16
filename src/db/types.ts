@@ -7,6 +7,7 @@ export interface Piece {
   clayId?: string
   lost?: boolean
   notes?: string
+  glazePlan?: PlannedLayer[] // planned glazes, first layer on top; absent when none, never []
   createdAt: string // ISO date
   updatedAt: string
   deletedAt?: string // soft delete (tombstone for v2 sync)
@@ -14,6 +15,14 @@ export interface Piece {
   dirty?: 1 // changed here since the last sync
 }
 // Current stage is derived: the stage of the piece's latest StageEntry.
+
+/** One planned glaze layer on a piece: what is meant to go on, not what did. */
+export interface PlannedLayer {
+  glazeId: string
+  dips?: number
+  method?: GlazeApplication['method']
+  note?: string
+}
 
 export interface StageEntry {
   id: string

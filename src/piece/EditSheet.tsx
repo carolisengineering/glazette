@@ -13,19 +13,26 @@ import { useModal } from '../components/useModal'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
+import type { PlanLayerView } from '../db/queries'
 import type { Piece } from '../db/types'
 import { track } from '../telemetry/telemetry'
+import { StartFromPlan } from './StartFromPlan'
 import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   piece: Piece
   /** The piece's glaze step (see `glazeStep`), once it has one; its glazes can be edited here. */
   glazedStepId?: string
+  /**
+   * The piece's planned glazes, offered as "Start from plan" when no glazes
+   * are used yet. Nothing fills in until the user taps it.
+   */
+  plan?: PlanLayerView[]
   onClose: () => void
 }
 
 /** Edit a piece's name, form, clay and (once Glazed) glazes. */
-export function EditSheet({ piece, glazedStepId, onClose }: Props) {
+export function EditSheet({ piece, glazedStepId, plan, onClose }: Props) {
   const titleId = useId()
   const nameRef = useRef<HTMLInputElement>(null)
   useModal(nameRef, onClose)
@@ -102,7 +109,14 @@ export function EditSheet({ piece, glazedStepId, onClose }: Props) {
           pick={clay}
         />
         {glazedStepId && glazes.rows ? (
-          <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          <div className="flex flex-col gap-1">
+            <StartFromPlan
+              plan={plan}
+              rows={glazes.rows}
+              setRows={glazes.setRows}
+            />
+            <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          </div>
         ) : null}
         <div className="flex gap-3">
           <button

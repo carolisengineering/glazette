@@ -13,6 +13,14 @@ export interface GlazeRow {
   note?: string
 }
 
+/** A row with no glaze picked and no name typed. */
+export const isBlankRow = (row: GlazeRow): boolean =>
+  !row.glazeId && !row.name.trim()
+
+/** Whether every row is blank, so a plan can replace them without losing anything. */
+export const rowsAreBlank = (rows: GlazeRow[]): boolean =>
+  rows.every(isBlankRow)
+
 interface Props {
   value: GlazeRow[]
   onChange: (rows: GlazeRow[]) => void

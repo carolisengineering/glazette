@@ -1,6 +1,6 @@
 import { db } from '../db/db'
 import { setStepGlazes } from '../db/stepEdits'
-import { loadGlazeRows, resolveGlazes } from './resolveGlazes'
+import { loadGlazeRows, resolveGlazes, rowsFromPlan } from './resolveGlazes'
 
 beforeEach(async () => {
   await db.delete()
@@ -84,4 +84,40 @@ test('a layer whose library glaze has not synced yet survives load, resolve and 
   expect(await db.glazeApps.toArray()).toEqual(before)
   // No library glaze is made up for the missing one.
   expect(await db.glazes.count()).toBe(1)
+})
+
+test('rowsFromPlan makes editable rows with stable keys', () => {
+  const rows = rowsFromPlan([
+    {
+      glazeId: 'g1',
+      name: 'Celadon',
+      color: '#000000',
+      dips: 2,
+      method: 'dip',
+      note: 'n',
+    },
+    { glazeId: 'gone', name: '', color: '#000000' },
+    { glazeId: 'g3', name: 'Shino', color: '#000000', retired: true },
+  ])
+  expect(rows).toEqual([
+    {
+      key: 'plan-0',
+      glazeId: 'g1',
+      name: 'Celadon',
+      dips: 2,
+      method: 'dip',
+      note: 'n',
+    },
+    { key: 'plan-1', glazeId: 'gone', name: '' },
+    // A retired glaze's row carries the plain name, so editing it can't mint "Shino (retired)".
+    { key: 'plan-2', glazeId: 'g3', name: 'Shino' },
+  ])
+})
+
+test('rows from a plan with an unsynced glaze resolve back to the same glazeId', async () => {
+  const out = await resolveGlazes(
+    rowsFromPlan([{ glazeId: 'gone', name: '', color: '#000000' }]),
+    '6',
+  )
+  expect(out).toMatchObject([{ glazeId: 'gone' }])
 })

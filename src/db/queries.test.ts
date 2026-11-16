@@ -7,6 +7,7 @@ import {
   notDeleted,
   type PieceView,
 } from './queries'
+import { DEFAULT_GLAZE_COLOR } from './seed'
 import type { Piece, Stage, StageEntry } from './types'
 
 const NOW = new Date('2026-11-20T12:00:00.000Z')
@@ -31,6 +32,9 @@ function view(
     stage: last,
     glazeNames: [],
     glazeLayers: [],
+    glazeLayerCount: 0,
+    startsFromPlan: false,
+    planLayers: [],
   }
 }
 
@@ -158,6 +162,103 @@ describe('buildPieceViews', () => {
     expect(v.piece.id).toBe(id)
     expect(v.glazeNames).toEqual(['Celadon'])
     expect(v.glazeLayers).toEqual([{ name: 'Celadon', color: '#9DBBAA' }])
+  })
+
+  test('a plan shows its layers in order with names and colors, and a missing glaze keeps a blank name', async () => {
+    await db.glazes.bulkAdd([
+      { id: 'g1', name: 'Celadon', color: '#88aa99' },
+      { id: 'g2', name: 'Shino', color: '#ccbbaa', deletedAt: '2026-11-02' },
+    ])
+    const id = await createPiece({ name: 'Mug' })
+    await db.pieces.update(id, {
+      glazePlan: [
+        { glazeId: 'g1', dips: 2 },
+        { glazeId: 'gone' },
+        { glazeId: 'g2', note: 'rim' },
+      ],
+    })
+    const [v] = await load()
+    expect(v.planLayers).toEqual([
+      { glazeId: 'g1', name: 'Celadon', color: '#88aa99', dips: 2 },
+      { glazeId: 'gone', name: '', color: DEFAULT_GLAZE_COLOR },
+      {
+        glazeId: 'g2',
+        name: 'Shino',
+        retired: true,
+        color: '#ccbbaa',
+        note: 'rim',
+      },
+    ])
+    expect(v.planMatches).toBeUndefined()
+  })
+
+  test('planMatches compares the plan with the glaze step’s live layers', async () => {
+    await db.glazes.bulkAdd([
+      { id: 'g1', name: 'Celadon', color: '#88aa99' },
+      { id: 'g2', name: 'Shino', color: '#ccbbaa' },
+    ])
+    const id = await createPiece({
+      name: 'Mug',
+      stage: 'glazed',
+      glazes: [{ glazeId: 'g1', dips: 2 }, { glazeId: 'g2' }],
+    })
+    await db.pieces.update(id, { glazePlan: [{ glazeId: 'g1', dips: 2 }] })
+    const g2App = await db.glazeApps.where('glazeId').equals('g2').first()
+    await db.glazeApps.update(g2App?.id as string, {
+      deletedAt: '2026-11-08T10:00:00.000Z',
+    })
+    const [v] = await load()
+    expect(v.planMatches).toBe(true)
+    const g1App = await db.glazeApps.where('glazeId').equals('g1').first()
+    await db.glazeApps.update(g1App?.id as string, { dips: 3 })
+    const [other] = await load()
+    expect(other.planMatches).toBe(false)
+  })
+
+  test('glaze layers carry dips, method and note, and the count includes layers whose glaze is missing', async () => {
+    await db.glazes.add({ id: 'g1', name: 'Celadon', color: '#88aa99' })
+    await createPiece({
+      name: 'Mug',
+      stage: 'glazed',
+      glazes: [
+        { glazeId: 'g1', dips: 3, method: 'dip', note: 'inside' },
+        { glazeId: 'gone', method: 'brush' },
+      ],
+    })
+    const [v] = await load()
+    expect(v.glazeLayers).toEqual([
+      {
+        name: 'Celadon',
+        color: '#88aa99',
+        dips: 3,
+        method: 'dip',
+        note: 'inside',
+      },
+    ])
+    expect(v.glazeLayerCount).toBe(2)
+  })
+
+  test('startsFromPlan is true only with a plan and no live glaze layers', async () => {
+    await db.glazes.add({ id: 'g1', name: 'Celadon', color: '#88aa99' })
+    const id = await createPiece({ name: 'Mug' })
+    expect((await load())[0].startsFromPlan).toBe(false)
+    await db.pieces.update(id, { glazePlan: [{ glazeId: 'g1' }] })
+    expect((await load())[0].startsFromPlan).toBe(true)
+    const glazed = await createPiece({
+      name: 'Bowl',
+      stage: 'glazed',
+      glazes: [{ glazeId: 'gone' }],
+    })
+    await db.pieces.update(glazed, { glazePlan: [{ glazeId: 'g1' }] })
+    const bowl = (await load()).find((v) => v.piece.id === glazed)
+    expect(bowl?.startsFromPlan).toBe(false)
+  })
+
+  test('a piece without a plan has no plan layers', async () => {
+    await createPiece({ name: 'Mug', stage: 'glazed', glazes: [] })
+    const [v] = await load()
+    expect(v.planLayers).toEqual([])
+    expect(v.planMatches).toBeUndefined()
   })
 
   test('latestPhotoId is the newest live entry that has a photo', async () => {

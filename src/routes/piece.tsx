@@ -13,6 +13,7 @@ import { BeforeAfter, type Side } from '../piece/BeforeAfter'
 import { EditSheet } from '../piece/EditSheet'
 import { FactCards } from '../piece/FactCards'
 import { Hero } from '../piece/Hero'
+import { PlanSheet } from '../piece/PlanSheet'
 import { StepSheet } from '../piece/StepSheet'
 import { Timeline } from '../piece/Timeline'
 import { elapsed, track } from '../telemetry/telemetry'
@@ -67,6 +68,7 @@ function PieceBoard({
   const name = displayName(piece)
   const [side, setSide] = useState<Side>('fired')
   const [editing, setEditing] = useState(false)
+  const [planning, setPlanning] = useState(false)
   const [pending, setPending] = useState<Pending>()
   const { show: showToast, toast } = useToast()
   const [notes, setNotes] = useState(piece.notes ?? '')
@@ -112,6 +114,7 @@ function PieceBoard({
   // The step whose details sheet is open, looked up live so the sheet closes
   // if the step goes away (deleted here or synced away).
   const [openId, setOpenId] = useState<string>()
+  const startPlan = view.startsFromPlan ? view.planLayers : undefined
   const openStep = entries.find((e) => e.id === openId)
   const openGone = openId !== undefined && !openStep
   useEffect(() => {
@@ -261,7 +264,7 @@ function PieceBoard({
           </h1>
         </div>
 
-        <FactCards view={view} />
+        <FactCards view={view} onPlan={() => setPlanning(true)} />
 
         <div className="flex flex-col gap-3">
           {!piece.lost && next ? (
@@ -352,6 +355,7 @@ function PieceBoard({
           key={openStep.id}
           entry={openStep}
           glazeStepId={view.glazeStepId}
+          plan={startPlan}
           onClose={() => closeStep(openStep.id)}
           onSaved={stepSaved}
         />
@@ -360,7 +364,15 @@ function PieceBoard({
         <EditSheet
           piece={piece}
           glazedStepId={view.glazeStepId}
+          plan={startPlan}
           onClose={() => setEditing(false)}
+        />
+      ) : null}
+      {planning ? (
+        <PlanSheet
+          piece={piece}
+          planLayers={view.planLayers}
+          onClose={() => setPlanning(false)}
         />
       ) : null}
       {pending ? (

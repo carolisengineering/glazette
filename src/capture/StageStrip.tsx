@@ -18,10 +18,15 @@ import {
 } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
-import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
+import {
+  type GlazeRow,
+  GlazeRows,
+  newGlazeRow,
+  rowsAreBlank,
+} from './GlazeRows'
 import { NoPhoto } from './NoPhoto'
 import type { ExitTarget } from './Review'
-import { resolveGlazes } from './resolveGlazes'
+import { resolveGlazes, rowsFromPlan } from './resolveGlazes'
 import { StagePicker } from './StagePicker'
 
 interface Props {
@@ -52,7 +57,9 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   const url = usePhotoUrl(photo?.blob)
   const [picked, setPicked] = useState<Stage>()
   const [note, setNote] = useState<string>()
-  const [rows, setRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
+  // Undefined until the user edits, so a plan (or a view that loads late) shows through.
+  const [edited, setEdited] = useState<GlazeRow[]>()
+  const [blankRows] = useState<GlazeRow[]>(() => [newGlazeRow()])
   const [dateValue, setDateValue] = useState('')
   const [saving, setSaving] = useState(false)
   const { show: showToast, toast } = useToast()
@@ -75,6 +82,11 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   }
 
   const current = view.stage
+  // A planned piece with nothing used yet starts its glaze rows from the plan.
+  const prefill = view.startsFromPlan
+  const rows = edited ?? (prefill ? rowsFromPlan(view.planLayers) : blankRows)
+  // The note goes once the user has cleared every row of what the plan filled in.
+  const showPlanLine = prefill && !(edited && rowsAreBlank(edited))
   // A lost piece doesn't advance from the arrow: preselect where it already is.
   const stage: Stage =
     picked ??
@@ -257,7 +269,12 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
         {showGlazes ? (
           <div className="flex flex-col gap-2.5">
             {skipsGlazed ? <span className={label}>Glazes</span> : null}
-            <GlazeRows value={rows} onChange={setRows} />
+            {showPlanLine ? (
+              <p className="rounded-[14px] bg-accent-tint px-3 py-2.5 text-[14px] leading-[1.4] text-accent">
+                Filled in from your plan. Change anything you did differently.
+              </p>
+            ) : null}
+            <GlazeRows value={rows} onChange={setEdited} />
           </div>
         ) : null}
 

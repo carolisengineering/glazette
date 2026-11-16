@@ -765,6 +765,40 @@ test('a glaze made on both devices becomes one glaze that the layers use', async
   expect((await db.glazeApps.get('ga1'))?.glazeId).toBe('local-gl')
 })
 
+test("a restored piece's plan points at the local glaze with the same name", async () => {
+  await db.glazes.add({ id: 'local-cel', name: 'Celadon', color: '#111111' })
+  const zip = zipOf(
+    backup({
+      glazes: [{ id: 'backup-cel', name: 'celadon ', color: '#222222' }],
+      pieces: [
+        {
+          id: 'p1',
+          createdAt: 'a',
+          updatedAt: 'a',
+          glazePlan: [{ glazeId: 'backup-cel', dips: 1 }],
+        },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.pieces.get('p1'))?.glazePlan).toEqual([
+    { glazeId: 'local-cel', dips: 1 },
+  ])
+})
+
+test('a backup without plans still restores', async () => {
+  const zip = zipOf(
+    backup({
+      pieces: [{ id: 'p1', createdAt: 'a', updatedAt: 'a' }],
+    }),
+  )
+
+  expect(await importZip(zip)).toMatchObject({ pieces: 1 })
+  expect((await db.pieces.get('p1'))?.glazePlan).toBeUndefined()
+})
+
 test("restored rows keep the backup's change time", async () => {
   const T = '2026-10-01T09:00:00.000Z'
   const zip = zipOf(

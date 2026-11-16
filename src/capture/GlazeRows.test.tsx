@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
-import { type GlazeRow, GlazeRows } from './GlazeRows'
+import { type GlazeRow, GlazeRows, isBlankRow, rowsAreBlank } from './GlazeRows'
 
 beforeEach(async () => {
   await db.delete()
@@ -10,6 +10,14 @@ beforeEach(async () => {
 
 const rows = (...names: string[]): GlazeRow[] =>
   names.map((name) => ({ key: name, name }))
+
+test('a row is blank with no glaze picked and no name typed', () => {
+  expect(isBlankRow({ key: 'a', name: '  ' })).toBe(true)
+  expect(isBlankRow({ key: 'a', name: 'Celadon' })).toBe(false)
+  expect(isBlankRow({ key: 'a', name: '', glazeId: 'g' })).toBe(false)
+  expect(rowsAreBlank(rows('', ' '))).toBe(true)
+  expect(rowsAreBlank(rows('', 'Shino'))).toBe(false)
+})
 
 describe('GlazeRows move buttons', () => {
   it('moving glaze 2 up swaps the first two rows', async () => {

@@ -383,6 +383,24 @@ describe('applyRecords follows the later-change rule', () => {
   })
 })
 
+test('a pulled newer piece brings its glaze plan whole', async () => {
+  await db.pieces.add(
+    piece('p1', { glazePlan: [{ glazeId: 'a' }, { glazeId: 'c' }] }),
+  )
+  await applyRecords(db, [
+    pieceRecord('p1', T2, { glazePlan: [{ glazeId: 'b' }] }),
+  ])
+  expect((await db.pieces.get('p1'))?.glazePlan).toEqual([{ glazeId: 'b' }])
+})
+
+test('a piece record with a malformed glaze plan is skipped', async () => {
+  const result = await applyRecords(db, [
+    pieceRecord('p1', T2, { glazePlan: 'x' }),
+  ])
+  expect(result.skippedKeys).toEqual(new Set(['piece/p1']))
+  expect(await db.pieces.count()).toBe(0)
+})
+
 test("applyRecords skips what it can't use and applies the rest", async () => {
   const result = await applyRecords(db, [
     { kind: 'sticker', id: 'x1', changedAt: T1, data: { id: 'x1' } },
@@ -805,5 +823,54 @@ describe('mergeByName', () => {
 
     expect(await db.glazes.get('ag')).toEqual(account)
     expect((await db.glazes.get('lg'))?.deletedAt).toBeTruthy()
+  })
+
+  test("a piece's plan moves to the account's glaze too", async () => {
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('lg', ' shino'),
+        glaze('ag', 'Shino', { updatedAt: T2 }),
+      ])
+      await db.pieces.add(
+        piece('p', {
+          glazePlan: [{ glazeId: 'lg', dips: 2 }, { glazeId: 'other' }],
+        }),
+      )
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    const row = await db.pieces.get('p')
+    expect(row?.glazePlan).toEqual([
+      { glazeId: 'ag', dips: 2 },
+      { glazeId: 'other' },
+    ])
+    expect(row?.updatedAt).toBe('2026-01-01T00:00:00.001Z')
+    expect(row?.dirty).toBe(1)
+  })
+
+  test('a piece needing both a clay and a plan rewrite keeps both', async () => {
+    await quietly(db, async () => {
+      await db.clays.bulkAdd([
+        { id: 'lc', name: 'Red', updatedAt: T1 },
+        { id: 'ac', name: 'Red', updatedAt: T2 },
+      ])
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino'),
+        glaze('ag', 'Shino', { updatedAt: T2 }),
+      ])
+      await db.pieces.add(
+        piece('p', { clayId: 'lc', glazePlan: [{ glazeId: 'lg' }] }),
+      )
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set(['ac']) })
+
+    expect(await db.pieces.get('p')).toMatchObject({
+      clayId: 'ac',
+      glazePlan: [{ glazeId: 'ag' }],
+      updatedAt: '2026-01-01T00:00:00.001Z',
+      dirty: 1,
+    })
   })
 })

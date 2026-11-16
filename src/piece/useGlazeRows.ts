@@ -1,6 +1,6 @@
 import Dexie from 'dexie'
 import { useEffect, useMemo, useState } from 'react'
-import type { GlazeRow } from '../capture/GlazeRows'
+import { type GlazeRow, isBlankRow } from '../capture/GlazeRows'
 import { loadGlazeRows, resolveGlazes } from '../capture/resolveGlazes'
 import { db } from '../db/db'
 import { setStepGlazes } from '../db/stepEdits'
@@ -9,7 +9,7 @@ import { setStepGlazes } from '../db/stepEdits'
 const saved = (rows: GlazeRow[] | undefined): string =>
   JSON.stringify(
     (rows ?? [])
-      .filter((r) => r.glazeId || r.name.trim())
+      .filter((r) => !isBlankRow(r))
       .map((r) => [
         r.glazeId ?? r.name.trim().toLowerCase(),
         r.dips,
