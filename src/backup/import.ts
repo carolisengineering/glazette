@@ -141,7 +141,15 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
   await mergePieces(
     json.pieces.map((p) => {
       const clayId = p.clayId && clays.idMap.get(p.clayId)
-      return clayId ? { ...p, clayId } : p
+      const mapped = clayId ? { ...p, clayId } : p
+      if (!mapped.glazePlan) return mapped
+      return {
+        ...mapped,
+        glazePlan: mapped.glazePlan.map((l) => ({
+          ...l,
+          glazeId: glazes.idMap.get(l.glazeId) ?? l.glazeId,
+        })),
+      }
     }),
     count,
   )

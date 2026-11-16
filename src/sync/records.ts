@@ -21,6 +21,7 @@ import {
   withValidColor,
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import type { Piece } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
 import {
   DEVICE_ONLY_FIELDS,
@@ -349,13 +350,26 @@ export function mergeByName(
             a.glazeId = glazes.get(a.glazeId) as string
           })
       }
+      // One write per piece, so a piece with both a joined clay and a joined
+      // glaze in its plan keeps both changes.
+      const usesJoined = (p: Piece) =>
+        (p.clayId !== undefined && clays.has(p.clayId)) ||
+        (p.glazePlan?.some((l) => glazes.has(l.glazeId)) ?? false)
+      if (clays.size > 0 || glazes.size > 0) {
+        await db.pieces.filter(usesJoined).modify((p) => {
+          if (p.clayId !== undefined && clays.has(p.clayId)) {
+            p.clayId = clays.get(p.clayId)
+          }
+          if (p.glazePlan) {
+            p.glazePlan = p.glazePlan.map((l) => ({
+              ...l,
+              glazeId: glazes.get(l.glazeId) ?? l.glazeId,
+            }))
+          }
+          p.updatedAt = justAfter(changedAt(p))
+        })
+      }
       if (clays.size > 0) {
-        await db.pieces
-          .filter((p) => p.clayId !== undefined && clays.has(p.clayId))
-          .modify((p) => {
-            p.clayId = clays.get(p.clayId as string)
-            p.updatedAt = justAfter(changedAt(p))
-          })
         const settings = await db.settings.get('app')
         const joined = settings?.defaultClayId
           ? clays.get(settings.defaultClayId)
