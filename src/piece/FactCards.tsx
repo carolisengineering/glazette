@@ -1,23 +1,25 @@
 import { type ReactNode, useState } from 'react'
 import type { PieceDetail, PlanLayerView } from '../db/queries'
-import type { Stage } from '../db/types'
+import type { GlazeApplication, Stage } from '../db/types'
 
 const valueText = 'text-[15px] leading-snug font-semibold wrap-anywhere'
 
 function Fact({
   label,
   className = '',
+  background = 'bg-surface',
   action,
   children,
 }: {
   label: string
   className?: string
+  background?: string
   action?: ReactNode
   children: ReactNode
 }) {
   return (
     <div
-      className={`flex min-w-0 flex-col gap-1 rounded-2xl bg-surface p-3 ${className}`}
+      className={`flex min-w-0 flex-col gap-1 rounded-2xl p-3 ${background} ${className}`}
     >
       {action ? (
         <div className="flex items-center justify-between text-[13px] text-muted">
@@ -32,7 +34,9 @@ function Fact({
   )
 }
 
-const link = 'min-h-8 text-[14px] font-semibold text-accent'
+// 44px to tap, pulled back with a negative margin so the box keeps its height.
+const link =
+  '-my-3 flex min-h-11 items-center text-[14px] font-semibold text-accent'
 const BEFORE_GLAZING: Array<Stage | undefined> = [
   undefined,
   'thrown',
@@ -41,6 +45,33 @@ const BEFORE_GLAZING: Array<Stage | undefined> = [
 ]
 
 const dipsText = (dips: number) => `${dips} ${dips === 1 ? 'dip' : 'dips'}`
+
+const METHOD_TEXT: Record<NonNullable<GlazeApplication['method']>, string> = {
+  dip: 'dipped',
+  brush: 'brushed',
+  pour: 'poured',
+  spray: 'sprayed',
+}
+
+/** Dips, method and note, each after a middle dot. A dip count already says dipped. */
+function detailText(layer: {
+  dips?: number
+  method?: GlazeApplication['method']
+  note?: string
+}): string {
+  const parts: string[] = []
+  if (layer.dips !== undefined) parts.push(dipsText(layer.dips))
+  if (layer.method && !(layer.method === 'dip' && layer.dips !== undefined))
+    parts.push(METHOD_TEXT[layer.method])
+  if (layer.note) parts.push(layer.note)
+  return parts.map((p) => ` · ${p}`).join('')
+}
+
+function Detail({ text }: { text: string }) {
+  return text ? (
+    <small className="text-[13px] font-medium text-muted">{text}</small>
+  ) : null
+}
 
 /** The planned glazes: hollow rings and lighter text, so a plan never reads as glazes used. */
 function PlanList({ layers }: { layers: PlanLayerView[] }) {
@@ -61,17 +92,13 @@ function PlanList({ layers }: { layers: PlanLayerView[] }) {
             <span
               aria-hidden="true"
               data-testid="plan-ring"
-              className="mt-[0.3em] size-3 flex-none rounded-full border-[2.5px] bg-transparent"
+              // The faint outline keeps white and very light glazes visible.
+              className="mt-[0.3em] size-3 flex-none rounded-full border-[2.5px] bg-transparent shadow-[0_0_0_1px_rgb(22_32_42/0.18)]"
               style={{ borderColor: layer.color }}
             />
             <span className="min-w-0 wrap-anywhere">
-              {layer.name}
-              {layer.dips !== undefined ? (
-                <small className="text-[13px] font-medium text-muted">{` · ${dipsText(layer.dips)}`}</small>
-              ) : null}
-              {layer.note ? (
-                <small className="text-[13px] font-medium text-muted">{` · ${layer.note}`}</small>
-              ) : null}
+              {layer.retired ? `${layer.name} (retired)` : layer.name}
+              <Detail text={detailText(layer)} />
             </span>
           </li>
         ))}
@@ -95,7 +122,8 @@ export function FactCards({
     <div className="grid grid-cols-2 gap-2">
       <Fact
         label={planning ? 'Glaze plan' : 'Glaze'}
-        className={`col-span-2 ${planning ? 'border-[1.5px] border-dashed border-[#9aa5b0] bg-transparent' : ''}`}
+        background={planning ? 'bg-transparent' : 'bg-surface'}
+        className={`col-span-2 ${planning ? 'border-[1.5px] border-dashed border-[#9aa5b0]' : ''}`}
         action={
           planning ? (
             <button
@@ -127,7 +155,10 @@ export function FactCards({
                     className="mt-[0.3em] size-3 flex-none rounded-full shadow-[inset_0_0_0_1px_rgb(22_32_42/0.18)]"
                     style={{ backgroundColor: layer.color }}
                   />
-                  <span className="min-w-0">{layer.name}</span>
+                  <span className="min-w-0 wrap-anywhere">
+                    {layer.name}
+                    <Detail text={detailText(layer)} />
+                  </span>
                 </li>
               ))}
             </ul>

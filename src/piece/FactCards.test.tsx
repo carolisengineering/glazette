@@ -10,6 +10,7 @@ function detail(over: Partial<PieceDetail> = {}): PieceDetail {
     clayName: 'White stoneware',
     glazeNames: [],
     glazeLayers: [],
+    glazeLayerCount: 0,
     planLayers: [],
     cone: '6',
     ...over,
@@ -59,6 +60,84 @@ test('glazes are a list, one item and one dot in its own color per layer, in ord
   expect(
     screen.getAllByTestId('glaze-dot').map((d) => d.style.backgroundColor),
   ).toEqual(['rgb(143, 179, 163)', 'rgb(63, 111, 154)', 'rgb(74, 47, 34)'])
+})
+
+test('used glazes show dips, method and note in muted detail text', () => {
+  render(
+    <FactCards
+      view={detail({
+        glazeLayers: [
+          { name: 'Rutile Blue', color: '#3d6b8c', dips: 3 },
+          { name: 'Tenmoku', color: '#4a2c1c', method: 'pour', note: 'inside' },
+          { name: 'Shino', color: '#c9b98d', dips: 1, method: 'brush' },
+        ],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  const items = within(
+    screen.getByRole('list', { name: 'Glazes' }),
+  ).getAllByRole('listitem')
+  expect(items.map((i) => i.textContent)).toEqual([
+    'Rutile Blue · 3 dips',
+    'Tenmoku · poured · inside',
+    'Shino · 1 dip · brushed',
+  ])
+})
+
+test('the method reads dipped only when there is no dip count to say it', () => {
+  render(
+    <FactCards
+      view={detail({
+        glazeLayers: [
+          { name: 'Celadon', color: '#8fb3a3', method: 'dip' },
+          { name: 'Rutile Blue', color: '#3d6b8c', dips: 2, method: 'dip' },
+          { name: 'Shino', color: '#c9b98d', method: 'spray', note: 'rim' },
+        ],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.getAllByRole('listitem').map((i) => i.textContent)).toEqual([
+    'Celadon · dipped',
+    'Rutile Blue · 2 dips',
+    'Shino · sprayed · rim',
+  ])
+})
+
+test('plan rows show the method too, with a retired glaze marked', () => {
+  render(
+    <FactCards
+      view={detail({
+        stage: 'bisqued',
+        planLayers: [
+          { glazeId: 'g1', name: 'Shino', color: '#c9b98d', method: 'pour' },
+          { glazeId: 'g2', name: 'Celadon', color: '#9dbbaa', retired: true },
+        ],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(
+    within(screen.getByRole('list', { name: 'Glaze plan' }))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent),
+  ).toEqual(['Shino · poured', 'Celadon (retired)'])
+})
+
+test('plan rings carry a faint outline so white glazes stay visible', () => {
+  render(
+    <FactCards
+      view={detail({
+        stage: 'bisqued',
+        planLayers: [{ glazeId: 'g1', name: 'White', color: '#ffffff' }],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.getByTestId('plan-ring').className).toContain(
+    'shadow-[0_0_0_1px',
+  )
 })
 
 test('two layers of the same glaze both show', () => {
