@@ -11,6 +11,7 @@ function detail(over: Partial<PieceDetail> = {}): PieceDetail {
     glazeNames: [],
     glazeLayers: [],
     glazeLayerCount: 0,
+    startsFromPlan: false,
     planLayers: [],
     cone: '6',
     ...over,
@@ -20,6 +21,7 @@ function detail(over: Partial<PieceDetail> = {}): PieceDetail {
 function layers(...pairs: Array<[string, string]>) {
   return {
     glazeNames: pairs.map(([name]) => name),
+    glazeLayerCount: pairs.length,
     glazeLayers: pairs.map(([name, color]) => ({ name, color })),
   }
 }
@@ -66,6 +68,7 @@ test('used glazes show dips, method and note in muted detail text', () => {
   render(
     <FactCards
       view={detail({
+        glazeLayerCount: 3,
         glazeLayers: [
           { name: 'Rutile Blue', color: '#3d6b8c', dips: 3 },
           { name: 'Tenmoku', color: '#4a2c1c', method: 'pour', note: 'inside' },
@@ -89,6 +92,7 @@ test('the method reads dipped only when there is no dip count to say it', () => 
   render(
     <FactCards
       view={detail({
+        glazeLayerCount: 3,
         glazeLayers: [
           { name: 'Celadon', color: '#8fb3a3', method: 'dip' },
           { name: 'Rutile Blue', color: '#3d6b8c', dips: 2, method: 'dip' },
@@ -110,6 +114,7 @@ test('plan rows show the method too, with a retired glaze marked', () => {
     <FactCards
       view={detail({
         stage: 'bisqued',
+        startsFromPlan: true,
         planLayers: [
           { glazeId: 'g1', name: 'Shino', color: '#c9b98d', method: 'pour' },
           { glazeId: 'g2', name: 'Celadon', color: '#9dbbaa', retired: true },
@@ -130,6 +135,7 @@ test('plan rings carry a faint outline so white glazes stay visible', () => {
     <FactCards
       view={detail({
         stage: 'bisqued',
+        startsFromPlan: true,
         planLayers: [{ glazeId: 'g1', name: 'White', color: '#ffffff' }],
       })}
       onPlan={() => {}}
@@ -195,6 +201,7 @@ test('a plan shows as a plan, with rings, dips and notes, and skips nameless lay
     <FactCards
       view={detail({
         stage: 'bisqued',
+        startsFromPlan: true,
         planLayers: [
           { glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c', dips: 2 },
           { glazeId: 'gone', name: '', color: '#cccccc' },
@@ -229,6 +236,7 @@ test('used glazes that match the plan say so, and Show reveals the plan', async 
     <FactCards
       view={detail({
         glazeLayers: [{ name: 'Rutile Blue', color: '#3d6b8c' }],
+        glazeLayerCount: 1,
         planLayers: [{ glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c' }],
         planMatches: true,
       })}
@@ -252,6 +260,7 @@ test('used glazes that differ from the plan say they changed in the glaze lab', 
     <FactCards
       view={detail({
         glazeLayers: [{ name: 'Tenmoku', color: '#4a2c1c' }],
+        glazeLayerCount: 1,
         planLayers: [{ glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c' }],
         planMatches: false,
       })}
@@ -269,4 +278,21 @@ test('used glazes without a plan show no Plan row', () => {
     />,
   )
   expect(screen.queryByText('Plan')).toBeNull()
+})
+
+test('a used layer whose glaze has not synced still gets the plan comparison, not the dashed plan box', () => {
+  render(
+    <FactCards
+      view={detail({
+        glazeLayers: [],
+        glazeLayerCount: 1,
+        planLayers: [{ glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c' }],
+        planMatches: false,
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.getByText('Plan')).toBeVisible()
+  expect(screen.getByText('Changed in the glaze lab')).toBeVisible()
+  expect(screen.queryByText('Glaze plan')).toBeNull()
 })

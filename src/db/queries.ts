@@ -54,6 +54,11 @@ export interface PieceView {
    * hasn't synced yet (those aren't in `glazeLayers`).
    */
   glazeLayerCount: number
+  /**
+   * The one "plan comes first" rule: the piece has a plan and no live glaze
+   * layers yet, so glaze rows start from the plan and the Glaze box shows it.
+   */
+  startsFromPlan: boolean
   /** Every planned layer in order, nameless ones included. Empty without a plan. */
   planLayers: PlanLayerView[]
   /**
@@ -147,6 +152,7 @@ export function buildPieceViews(
         return out
       }),
       glazeLayerCount: liveApps.length,
+      startsFromPlan: planLayers.length > 0 && liveApps.length === 0,
       planLayers,
       planMatches:
         plan.length > 0 && used.length > 0

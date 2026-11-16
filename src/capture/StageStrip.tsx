@@ -79,7 +79,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
 
   const current = view.stage
   // A planned piece with nothing used yet starts its glaze rows from the plan.
-  const prefill = view.planLayers.length > 0 && view.glazeLayerCount === 0
+  const prefill = view.startsFromPlan
   const rows = edited ?? (prefill ? rowsFromPlan(view.planLayers) : blankRows)
   // The note goes once the user has cleared every row of what the plan filled in.
   const showPlanLine = prefill && !(edited && rowsAreBlank(edited))

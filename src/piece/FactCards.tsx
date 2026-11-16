@@ -115,9 +115,9 @@ export function FactCards({
   onPlan: () => void
 }) {
   const [showPlan, setShowPlan] = useState(false)
-  const used = view.glazeLayers.length > 0
+  const used = view.glazeLayerCount > 0
   const hasPlan = view.planLayers.some((layer) => layer.name)
-  const planning = view.planLayers.length > 0 && !used
+  const planning = view.startsFromPlan
   return (
     <div className="grid grid-cols-2 gap-2">
       <Fact

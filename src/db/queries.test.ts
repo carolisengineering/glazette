@@ -33,6 +33,7 @@ function view(
     glazeNames: [],
     glazeLayers: [],
     glazeLayerCount: 0,
+    startsFromPlan: false,
     planLayers: [],
   }
 }
@@ -235,6 +236,22 @@ describe('buildPieceViews', () => {
       },
     ])
     expect(v.glazeLayerCount).toBe(2)
+  })
+
+  test('startsFromPlan is true only with a plan and no live glaze layers', async () => {
+    await db.glazes.add({ id: 'g1', name: 'Celadon', color: '#88aa99' })
+    const id = await createPiece({ name: 'Mug' })
+    expect((await load())[0].startsFromPlan).toBe(false)
+    await db.pieces.update(id, { glazePlan: [{ glazeId: 'g1' }] })
+    expect((await load())[0].startsFromPlan).toBe(true)
+    const glazed = await createPiece({
+      name: 'Bowl',
+      stage: 'glazed',
+      glazes: [{ glazeId: 'gone' }],
+    })
+    await db.pieces.update(glazed, { glazePlan: [{ glazeId: 'g1' }] })
+    const bowl = (await load()).find((v) => v.piece.id === glazed)
+    expect(bowl?.startsFromPlan).toBe(false)
   })
 
   test('a piece without a plan has no plan layers', async () => {
