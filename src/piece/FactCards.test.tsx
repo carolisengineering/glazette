@@ -9,6 +9,7 @@ function detail(over: Partial<PieceDetail> = {}): PieceDetail {
     clayName: 'White stoneware',
     glazeNames: [],
     glazeLayers: [],
+    planLayers: [],
     cone: '6',
     ...over,
   }

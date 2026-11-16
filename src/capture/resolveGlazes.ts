@@ -1,7 +1,7 @@
 import { db } from '../db/db'
 import type { addStageEntry } from '../db/ops'
 import { upsertGlaze } from '../db/ops'
-import { notDeleted } from '../db/queries'
+import { notDeleted, type PlanLayerView } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { type GlazeRow, newGlazeRow } from './GlazeRows'
 
@@ -54,4 +54,18 @@ export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
     method: a.method,
     note: a.note,
   }))
+}
+
+/**
+ * A plan as editable rows. Each row keeps its glazeId, so a name that is blank
+ * (glaze not synced yet) or has a retired suffix is only shown, never matched.
+ */
+export function rowsFromPlan(layers: PlanLayerView[]): GlazeRow[] {
+  return layers.map((l, i) => {
+    const row: GlazeRow = { key: `plan-${i}`, glazeId: l.glazeId, name: l.name }
+    if (l.dips !== undefined) row.dips = l.dips
+    if (l.method !== undefined) row.method = l.method
+    if (l.note !== undefined) row.note = l.note
+    return row
+  })
 }
