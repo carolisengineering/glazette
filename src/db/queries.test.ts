@@ -32,6 +32,7 @@ function view(
     stage: last,
     glazeNames: [],
     glazeLayers: [],
+    glazeLayerCount: 0,
     planLayers: [],
   }
 }
@@ -179,7 +180,13 @@ describe('buildPieceViews', () => {
     expect(v.planLayers).toEqual([
       { glazeId: 'g1', name: 'Celadon', color: '#88aa99', dips: 2 },
       { glazeId: 'gone', name: '', color: DEFAULT_GLAZE_COLOR },
-      { glazeId: 'g2', name: 'Shino (retired)', color: '#ccbbaa', note: 'rim' },
+      {
+        glazeId: 'g2',
+        name: 'Shino',
+        retired: true,
+        color: '#ccbbaa',
+        note: 'rim',
+      },
     ])
     expect(v.planMatches).toBeUndefined()
   })
@@ -205,6 +212,29 @@ describe('buildPieceViews', () => {
     await db.glazeApps.update(g1App?.id as string, { dips: 3 })
     const [other] = await load()
     expect(other.planMatches).toBe(false)
+  })
+
+  test('glaze layers carry dips, method and note, and the count includes layers whose glaze is missing', async () => {
+    await db.glazes.add({ id: 'g1', name: 'Celadon', color: '#88aa99' })
+    await createPiece({
+      name: 'Mug',
+      stage: 'glazed',
+      glazes: [
+        { glazeId: 'g1', dips: 3, method: 'dip', note: 'inside' },
+        { glazeId: 'gone', method: 'brush' },
+      ],
+    })
+    const [v] = await load()
+    expect(v.glazeLayers).toEqual([
+      {
+        name: 'Celadon',
+        color: '#88aa99',
+        dips: 3,
+        method: 'dip',
+        note: 'inside',
+      },
+    ])
+    expect(v.glazeLayerCount).toBe(2)
   })
 
   test('a piece without a plan has no plan layers', async () => {

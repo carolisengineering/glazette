@@ -17,8 +17,10 @@ export type ShelfChip = 'all' | Stage | 'lost'
 /** One planned glaze layer with its library glaze's name and swatch color. */
 export interface PlanLayerView {
   glazeId: string
-  /** Blank when the library glaze isn't on this device yet; ` (retired)` suffix when deleted. */
+  /** The library glaze's plain name. Blank when the glaze isn't on this device yet. */
   name: string
+  /** The library glaze was deleted; the Glaze box shows a ` (retired)` suffix. */
+  retired?: boolean
   color: string
   dips?: number
   method?: GlazeApplication['method']
@@ -40,7 +42,18 @@ export interface PieceView {
   /** Glaze names of the glaze step, in layering order. */
   glazeNames: string[]
   /** The same layers with their swatch colors, for showing each one on its own. */
-  glazeLayers: { name: string; color: string }[]
+  glazeLayers: {
+    name: string
+    color: string
+    dips?: number
+    method?: GlazeApplication['method']
+    note?: string
+  }[]
+  /**
+   * How many live layers the glaze step has, including ones whose library glaze
+   * hasn't synced yet (those aren't in `glazeLayers`).
+   */
+  glazeLayerCount: number
   /** Every planned layer in order, nameless ones included. Empty without a plan. */
   planLayers: PlanLayerView[]
   /**
@@ -83,26 +96,27 @@ export function buildPieceViews(
   return pieces.filter(notDeleted).map((piece) => {
     const own = entriesByPiece.get(piece.id) ?? []
     const glazedEntry = glazeStep(own, glazeApps)
-    const layers = glazedEntry
+    const liveApps = glazedEntry
       ? glazeApps
           .filter(
             (a) => a.entryId === glazedEntry.id && liveEntryIds.has(a.entryId),
           )
           .sort((a, b) => a.order - b.order)
-          .flatMap((a) => {
-            const glaze = glazeById.get(a.glazeId)
-            return glaze ? [glaze] : []
-          })
       : []
-    const glazeNames = layers.map(nameWithRetired)
+    const layers = liveApps.flatMap((a) => {
+      const glaze = glazeById.get(a.glazeId)
+      return glaze ? [{ glaze, app: a }] : []
+    })
+    const glazeNames = layers.map((l) => nameWithRetired(l.glaze))
     const plan = piece.glazePlan ?? []
     const planLayers: PlanLayerView[] = plan.map((p) => {
       const glaze = glazeById.get(p.glazeId)
       const out: PlanLayerView = {
         glazeId: p.glazeId,
-        name: glaze ? nameWithRetired(glaze) : '',
+        name: glaze?.name ?? '',
         color: glaze?.color ?? DEFAULT_GLAZE_COLOR,
       }
+      if (glaze?.deletedAt) out.retired = true
       if (p.dips !== undefined) out.dips = p.dips
       if (p.method !== undefined) out.method = p.method
       if (p.note !== undefined) out.note = p.note
@@ -122,10 +136,17 @@ export function buildPieceViews(
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeStepId: glazedEntry?.id,
       glazeNames,
-      glazeLayers: layers.map((g, i) => ({
-        name: glazeNames[i],
-        color: g.color,
-      })),
+      glazeLayers: layers.map(({ glaze, app }, i) => {
+        const out: PieceView['glazeLayers'][number] = {
+          name: glazeNames[i],
+          color: glaze.color,
+        }
+        if (app.dips !== undefined) out.dips = app.dips
+        if (app.method !== undefined) out.method = app.method
+        if (app.note !== undefined) out.note = app.note
+        return out
+      }),
+      glazeLayerCount: liveApps.length,
       planLayers,
       planMatches:
         plan.length > 0 && used.length > 0

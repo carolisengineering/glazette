@@ -518,6 +518,24 @@ test('a piece that already has used glazes does not prefill from its plan', asyn
   expect(screen.queryByText(PLAN_LINE)).toBeNull()
 })
 
+test('a used layer whose glaze has not synced still blocks the prefill', async () => {
+  const { id, celadon } = await plannedBisqued(true)
+  await db.glazes.delete(celadon)
+  await openStrip(id)
+  await userEvent.click(await screen.findByRole('button', { name: /^Glazed/ }))
+  await screen.findByRole('button', { name: 'Save photo' })
+  expect(screen.getByLabelText('Glaze 1')).toHaveValue('')
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
+test('the plan note goes once every prefilled row is removed', async () => {
+  const { id } = await plannedBisqued()
+  await openStrip(id)
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
 test('a piece without a plan starts with one empty glaze row, as before', async () => {
   const id = await createPiece({ name: 'Mug' })
   await addStageEntry({ pieceId: id, stage: 'bisqued' })

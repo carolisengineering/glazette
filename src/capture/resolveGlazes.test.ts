@@ -97,6 +97,7 @@ test('rowsFromPlan makes editable rows with stable keys', () => {
       note: 'n',
     },
     { glazeId: 'gone', name: '', color: '#000000' },
+    { glazeId: 'g3', name: 'Shino', color: '#000000', retired: true },
   ])
   expect(rows).toEqual([
     {
@@ -108,6 +109,8 @@ test('rowsFromPlan makes editable rows with stable keys', () => {
       note: 'n',
     },
     { key: 'plan-1', glazeId: 'gone', name: '' },
+    // A retired glaze's row carries the plain name, so editing it can't mint "Shino (retired)".
+    { key: 'plan-2', glazeId: 'g3', name: 'Shino' },
   ])
 })
 

@@ -115,7 +115,7 @@ function PieceBoard({
   // if the step goes away (deleted here or synced away).
   const [openId, setOpenId] = useState<string>()
   const startPlan =
-    view.glazeLayers.length === 0 && view.planLayers.length > 0
+    view.glazeLayerCount === 0 && view.planLayers.length > 0
       ? view.planLayers
       : undefined
   const openStep = entries.find((e) => e.id === openId)

@@ -58,7 +58,7 @@ export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
 
 /**
  * A plan as editable rows. Each row keeps its glazeId, so a name that is blank
- * (glaze not synced yet) or has a retired suffix is only shown, never matched.
+ * (glaze not synced yet) is only shown, never matched.
  */
 export function rowsFromPlan(layers: PlanLayerView[]): GlazeRow[] {
   return layers.map((l, i) => {

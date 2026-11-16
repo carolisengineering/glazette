@@ -18,6 +18,7 @@ import {
 } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
+import { rowsAreBlank } from '../piece/useGlazeRows'
 import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
 import { NoPhoto } from './NoPhoto'
 import type { ExitTarget } from './Review'
@@ -78,8 +79,10 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
 
   const current = view.stage
   // A planned piece with nothing used yet starts its glaze rows from the plan.
-  const prefill = view.planLayers.length > 0 && view.glazeLayers.length === 0
+  const prefill = view.planLayers.length > 0 && view.glazeLayerCount === 0
   const rows = edited ?? (prefill ? rowsFromPlan(view.planLayers) : blankRows)
+  // The note goes once the user has cleared every row of what the plan filled in.
+  const showPlanLine = prefill && !(edited && rowsAreBlank(edited))
   // A lost piece doesn't advance from the arrow: preselect where it already is.
   const stage: Stage =
     picked ??
@@ -262,7 +265,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
         {showGlazes ? (
           <div className="flex flex-col gap-2.5">
             {skipsGlazed ? <span className={label}>Glazes</span> : null}
-            {prefill ? (
+            {showPlanLine ? (
               <p className="rounded-[14px] bg-accent-tint px-3 py-2.5 text-[14px] leading-[1.4] text-accent">
                 Filled in from your plan. Change anything you did differently.
               </p>
