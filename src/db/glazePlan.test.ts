@@ -9,21 +9,27 @@ beforeEach(async () => {
   await db.open()
 })
 
+async function pieceOf(id: string) {
+  const piece = await db.pieces.get(id)
+  if (!piece) throw new Error('Piece not found')
+  return piece
+}
+
 test('setGlazePlan stores the layers in order and moves the piece up the shelf', async () => {
   const id = await createPiece({ name: 'Vase' })
-  const before = (await db.pieces.get(id))!.updatedAt
+  const before = (await pieceOf(id)).updatedAt
   const changed = await setGlazePlan(id, [
     { glazeId: 'g1', dips: 2 },
     { glazeId: 'g2', note: 'rim only' },
   ])
-  const piece = await db.pieces.get(id)
+  const piece = await pieceOf(id)
   expect(changed).toBe(true)
-  expect(piece?.glazePlan).toEqual([
+  expect(piece.glazePlan).toEqual([
     { glazeId: 'g1', dips: 2 },
     { glazeId: 'g2', note: 'rim only' },
   ])
-  expect(piece!.updatedAt > before).toBe(true)
-  expect(piece?.dirty).toBe(1)
+  expect(piece.updatedAt > before).toBe(true)
+  expect(piece.dirty).toBe(1)
 })
 
 test('setGlazePlan with no layers removes the plan', async () => {
@@ -36,15 +42,15 @@ test('setGlazePlan with no layers removes the plan', async () => {
 test('setGlazePlan returns false and writes nothing when the plan is the same', async () => {
   const id = await createPiece({ name: 'Vase' })
   await setGlazePlan(id, [{ glazeId: 'g1', dips: 2 }])
-  const stamp = (await db.pieces.get(id))!.updatedAt
+  const stamp = (await pieceOf(id)).updatedAt
   expect(await setGlazePlan(id, [{ glazeId: 'g1', dips: 2 }])).toBe(false)
-  expect((await db.pieces.get(id))!.updatedAt).toBe(stamp)
+  expect((await pieceOf(id)).updatedAt).toBe(stamp)
 })
 
 test('setGlazePlan stores no undefined-valued keys', async () => {
   const id = await createPiece({ name: 'Vase' })
   await setGlazePlan(id, [{ glazeId: 'g1', dips: undefined }])
-  expect(Object.keys((await db.pieces.get(id))!.glazePlan![0])).toEqual([
+  expect(Object.keys((await pieceOf(id)).glazePlan?.[0] ?? {})).toEqual([
     'glazeId',
   ])
 })
