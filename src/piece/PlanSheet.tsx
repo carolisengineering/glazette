@@ -35,6 +35,9 @@ export function PlanSheet({ piece, planLayers, onClose }: Props) {
         'rw',
         [db.pieces, db.glazes, db.settings],
         async () => {
+          // A piece deleted meanwhile gets no plan, and no library glazes either.
+          const current = await db.pieces.get(piece.id)
+          if (!current || current.deletedAt) return false
           const cone = (await db.settings.get('app'))?.defaultCone ?? '6'
           return setGlazePlan(piece.id, await resolveGlazes(rows, cone))
         },
