@@ -1,7 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useId, useRef, useState } from 'react'
 import { GlazeRows } from '../capture/GlazeRows'
-import { rowsFromPlan } from '../capture/resolveGlazes'
 import {
   ClayChips,
   type Form,
@@ -17,7 +16,8 @@ import { updatePiece } from '../db/ops'
 import type { PlanLayerView } from '../db/queries'
 import type { Piece } from '../db/types'
 import { track } from '../telemetry/telemetry'
-import { rowsAreBlank, saveGlazeRows, useGlazeRows } from './useGlazeRows'
+import { StartFromPlan } from './StartFromPlan'
+import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   piece: Piece
@@ -110,15 +110,11 @@ export function EditSheet({ piece, glazedStepId, plan, onClose }: Props) {
         />
         {glazedStepId && glazes.rows ? (
           <div className="flex flex-col gap-1">
-            {plan && rowsAreBlank(glazes.rows) ? (
-              <button
-                type="button"
-                onClick={() => glazes.setRows(rowsFromPlan(plan))}
-                className="flex h-11 items-center self-start text-[15px] font-semibold text-accent"
-              >
-                Start from plan
-              </button>
-            ) : null}
+            <StartFromPlan
+              plan={plan}
+              rows={glazes.rows}
+              setRows={glazes.setRows}
+            />
             <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
           </div>
         ) : null}

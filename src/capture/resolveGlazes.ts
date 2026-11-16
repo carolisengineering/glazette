@@ -1,10 +1,10 @@
 import { db } from '../db/db'
-import type { addStageEntry } from '../db/ops'
 import { layerDetails } from '../db/layerDetails'
+import type { addStageEntry } from '../db/ops'
 import { upsertGlaze } from '../db/ops'
 import { notDeleted, type PlanLayerView } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import { type GlazeRow, newGlazeRow } from './GlazeRows'
+import { type GlazeRow, isBlankRow, newGlazeRow } from './GlazeRows'
 
 /**
  * Match each row to a library glaze (by id, then name ignoring case) or create
@@ -16,9 +16,9 @@ export async function resolveGlazes(rows: GlazeRow[], cone: string) {
   const byName = new Map(live.map((g) => [g.name.trim().toLowerCase(), g.id]))
   const out: Parameters<typeof addStageEntry>[0]['glazes'] = []
   for (const row of rows) {
+    if (isBlankRow(row)) continue
     const name = row.name.trim()
     let glazeId = row.glazeId
-    if (!name && !glazeId) continue
     if (!glazeId) {
       const key = name.toLowerCase()
       glazeId = byName.get(key)

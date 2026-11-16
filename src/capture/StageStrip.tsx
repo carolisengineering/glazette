@@ -18,8 +18,12 @@ import {
 } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
-import { rowsAreBlank } from '../piece/useGlazeRows'
-import { type GlazeRow, GlazeRows, newGlazeRow } from './GlazeRows'
+import {
+  type GlazeRow,
+  GlazeRows,
+  newGlazeRow,
+  rowsAreBlank,
+} from './GlazeRows'
 import { NoPhoto } from './NoPhoto'
 import type { ExitTarget } from './Review'
 import { resolveGlazes, rowsFromPlan } from './resolveGlazes'

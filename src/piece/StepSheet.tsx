@@ -1,6 +1,5 @@
 import { useId, useRef, useState } from 'react'
 import { GlazeRows } from '../capture/GlazeRows'
-import { rowsFromPlan } from '../capture/resolveGlazes'
 import { PhotoImg } from '../components/PhotoImg'
 import { fieldLabel } from '../components/PieceFields'
 import { useModal } from '../components/useModal'
@@ -15,7 +14,8 @@ import type { StageEntry } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { usePhotoPicker } from '../photos/usePhotoPicker'
 import { track } from '../telemetry/telemetry'
-import { rowsAreBlank, saveGlazeRows, useGlazeRows } from './useGlazeRows'
+import { StartFromPlan } from './StartFromPlan'
+import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   entry: StageEntry
@@ -225,15 +225,11 @@ export function StepSheet({
         </div>
         {glazesOn && glazes.rows ? (
           <div className="flex flex-col gap-1">
-            {plan && rowsAreBlank(glazes.rows) ? (
-              <button
-                type="button"
-                onClick={() => glazes.setRows(rowsFromPlan(plan))}
-                className="flex h-11 items-center self-start text-[15px] font-semibold text-accent"
-              >
-                Start from plan
-              </button>
-            ) : null}
+            <StartFromPlan
+              plan={plan}
+              rows={glazes.rows}
+              setRows={glazes.setRows}
+            />
             <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
           </div>
         ) : null}

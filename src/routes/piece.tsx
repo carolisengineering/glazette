@@ -114,8 +114,7 @@ function PieceBoard({
   // The step whose details sheet is open, looked up live so the sheet closes
   // if the step goes away (deleted here or synced away).
   const [openId, setOpenId] = useState<string>()
-  const startPlan =
-    view.startsFromPlan ? view.planLayers : undefined
+  const startPlan = view.startsFromPlan ? view.planLayers : undefined
   const openStep = entries.find((e) => e.id === openId)
   const openGone = openId !== undefined && !openStep
   useEffect(() => {
