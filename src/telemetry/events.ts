@@ -32,6 +32,7 @@ export const EDIT_PARTS = [
   'step',
   'glazes',
   'photo',
+  'plan',
 ] as const
 export const PUT_BACK_KINDS = ['piece', 'photo'] as const
 export const VITAL_METRICS = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as const

@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { PieceDetail } from '../db/queries'
 import { FactCards } from './FactCards'
 
@@ -23,7 +24,7 @@ function layers(...pairs: Array<[string, string]>) {
 }
 
 test('the glaze box comes before clay and firing', () => {
-  render(<FactCards view={detail()} />)
+  render(<FactCards view={detail()} onPlan={() => {}} />)
   const [glaze, clay, firing] = ['Glaze', 'Clay', 'Firing'].map((l) =>
     screen.getByText(l),
   )
@@ -45,6 +46,7 @@ test('glazes are a list, one item and one dot in its own color per layer, in ord
           ['Tenmoku', '#4A2F22'],
         ),
       )}
+      onPlan={() => {}}
     />,
   )
   const list = screen.getByRole('list', { name: 'Glazes' })
@@ -63,13 +65,14 @@ test('two layers of the same glaze both show', () => {
   render(
     <FactCards
       view={detail(layers(['Celadon', '#8FB3A3'], ['Celadon', '#8FB3A3']))}
+      onPlan={() => {}}
     />,
   )
   expect(screen.getAllByRole('listitem')).toHaveLength(2)
 })
 
 test('an unglazed piece says so, with no list and no dot', () => {
-  render(<FactCards view={detail()} />)
+  render(<FactCards view={detail()} onPlan={() => {}} />)
   expect(screen.getByText('Not glazed yet')).toBeVisible()
   expect(screen.queryByRole('list')).toBeNull()
   expect(screen.queryByTestId('glaze-dot')).toBeNull()
@@ -82,6 +85,7 @@ test('nothing in the boxes clips long clay and glaze names', () => {
         clayName: 'Speckled buff stoneware',
         ...layers(['Floating Blue over Shino', '#3F6F9A']),
       })}
+      onPlan={() => {}}
     />,
   )
   const clipping =
@@ -91,4 +95,99 @@ test('nothing in the boxes clips long clay and glaze names', () => {
   }
   expect(screen.getByText('Speckled buff stoneware')).toBeVisible()
   expect(screen.getByText('Floating Blue over Shino')).toBeVisible()
+})
+
+test('an unglazed piece at Bisqued offers to plan glazes', async () => {
+  const onPlan = vi.fn()
+  render(<FactCards view={detail({ stage: 'bisqued' })} onPlan={onPlan} />)
+  expect(screen.getByText('Not glazed yet')).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: '+ Plan glazes' }))
+  expect(onPlan).toHaveBeenCalled()
+})
+
+test('a Fired piece without glazes or a plan offers no plan', () => {
+  render(<FactCards view={detail({ stage: 'fired' })} onPlan={() => {}} />)
+  expect(screen.queryByRole('button', { name: '+ Plan glazes' })).toBeNull()
+})
+
+test('a plan shows as a plan, with rings, dips and notes, and skips nameless layers', async () => {
+  const onPlan = vi.fn()
+  render(
+    <FactCards
+      view={detail({
+        stage: 'bisqued',
+        planLayers: [
+          { glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c', dips: 2 },
+          { glazeId: 'gone', name: '', color: '#cccccc' },
+          {
+            glazeId: 'g2',
+            name: 'Shino',
+            color: '#c9b98d',
+            dips: 1,
+            note: 'rim only',
+          },
+        ],
+      })}
+      onPlan={onPlan}
+    />,
+  )
+  const list = screen.getByRole('list', { name: 'Glaze plan' })
+  expect(
+    within(list)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent),
+  ).toEqual(['Rutile Blue · 2 dips', 'Shino · 1 dip · rim only'])
+  expect(screen.getAllByTestId('plan-ring')).toHaveLength(2)
+  expect(screen.queryByTestId('glaze-dot')).toBeNull()
+  expect(screen.queryByText('Not glazed yet')).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit glaze plan' }))
+  expect(onPlan).toHaveBeenCalled()
+})
+
+test('used glazes that match the plan say so, and Show reveals the plan', async () => {
+  const onPlan = vi.fn()
+  render(
+    <FactCards
+      view={detail({
+        glazeLayers: [{ name: 'Rutile Blue', color: '#3d6b8c' }],
+        planLayers: [{ glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c' }],
+        planMatches: true,
+      })}
+      onPlan={onPlan}
+    />,
+  )
+  expect(screen.getByText('Same as plan')).toBeVisible()
+  expect(screen.queryByRole('list', { name: 'Glaze plan' })).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Show' }))
+  expect(screen.getByRole('list', { name: 'Glaze plan' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Hide' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Edit plan' }))
+  expect(onPlan).toHaveBeenCalled()
+})
+
+test('used glazes that differ from the plan say they changed in the glaze lab', () => {
+  render(
+    <FactCards
+      view={detail({
+        glazeLayers: [{ name: 'Tenmoku', color: '#4a2c1c' }],
+        planLayers: [{ glazeId: 'g1', name: 'Rutile Blue', color: '#3d6b8c' }],
+        planMatches: false,
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.getByText('Changed in the glaze lab')).toBeVisible()
+})
+
+test('used glazes without a plan show no Plan row', () => {
+  render(
+    <FactCards
+      view={detail({ glazeLayers: [{ name: 'Tenmoku', color: '#4a2c1c' }] })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.queryByText('Plan')).toBeNull()
 })
