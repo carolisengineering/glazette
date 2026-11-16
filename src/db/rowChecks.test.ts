@@ -25,3 +25,9 @@ test('a piece row with a malformed glaze plan is rejected', () => {
     expect(isPieceRow({ ...piece, glazePlan })).toBe(false)
   }
 })
+
+test('a planned layer whose dips came back null (an infinite value in JSON) still reads', () => {
+  expect(
+    isPieceRow({ ...piece, glazePlan: [{ glazeId: 'g', dips: null }] }),
+  ).toBe(true)
+})

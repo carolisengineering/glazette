@@ -5,7 +5,9 @@ import type { GlazeApplication, PlannedLayer } from './types'
 /** The layer without keys whose value is undefined, so stored rows stay clean. */
 function clean(layer: PlannedLayer): PlannedLayer {
   const out: PlannedLayer = { glazeId: layer.glazeId }
-  if (layer.dips !== undefined) out.dips = layer.dips
+  if (Number.isFinite(layer.dips) && (layer.dips as number) > 0) {
+    out.dips = layer.dips
+  }
   if (layer.method !== undefined) out.method = layer.method
   if (layer.note !== undefined) out.note = layer.note
   return out

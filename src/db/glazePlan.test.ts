@@ -32,6 +32,24 @@ test('setGlazePlan stores the layers in order and moves the piece up the shelf',
   expect(piece.dirty).toBe(1)
 })
 
+test('setGlazePlan drops dips that are not a finite positive number', async () => {
+  const id = await createPiece({ name: 'Vase' })
+  await setGlazePlan(id, [
+    { glazeId: 'a', dips: Number.POSITIVE_INFINITY },
+    { glazeId: 'b', dips: Number.NaN },
+    { glazeId: 'c', dips: 0 },
+    { glazeId: 'd', dips: -1 },
+    { glazeId: 'e', dips: 2 },
+  ])
+  expect((await pieceOf(id)).glazePlan).toEqual([
+    { glazeId: 'a' },
+    { glazeId: 'b' },
+    { glazeId: 'c' },
+    { glazeId: 'd' },
+    { glazeId: 'e', dips: 2 },
+  ])
+})
+
 test('setGlazePlan with no layers removes the plan', async () => {
   const id = await createPiece({ name: 'Vase' })
   await setGlazePlan(id, [{ glazeId: 'g1' }])

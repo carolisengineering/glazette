@@ -34,7 +34,8 @@ export function isRow(
 const isPlannedLayer = (l: unknown) =>
   isObject(l) &&
   typeof l.glazeId === 'string' &&
-  (l.dips === undefined || typeof l.dips === 'number') &&
+  // null is what JSON makes of an infinite number; read it as absent.
+  (l.dips == null || typeof l.dips === 'number') &&
   isStringOrAbsent(l.method) &&
   isStringOrAbsent(l.note)
 
