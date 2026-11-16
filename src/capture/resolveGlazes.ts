@@ -1,5 +1,6 @@
 import { db } from '../db/db'
 import type { addStageEntry } from '../db/ops'
+import { layerDetails } from '../db/layerDetails'
 import { upsertGlaze } from '../db/ops'
 import { notDeleted, type PlanLayerView } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
@@ -61,11 +62,10 @@ export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
  * (glaze not synced yet) is only shown, never matched.
  */
 export function rowsFromPlan(layers: PlanLayerView[]): GlazeRow[] {
-  return layers.map((l, i) => {
-    const row: GlazeRow = { key: `plan-${i}`, glazeId: l.glazeId, name: l.name }
-    if (l.dips !== undefined) row.dips = l.dips
-    if (l.method !== undefined) row.method = l.method
-    if (l.note !== undefined) row.note = l.note
-    return row
-  })
+  return layers.map((l, i) => ({
+    key: `plan-${i}`,
+    glazeId: l.glazeId,
+    name: l.name,
+    ...layerDetails(l),
+  }))
 }

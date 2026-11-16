@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { planMatches } from './glazePlan'
+import { layerDetails } from './layerDetails'
 import { DEFAULT_GLAZE_COLOR } from './seed'
 import { currentStage, glazeStep, latestEntry, STAGES } from './stage'
 import type {
@@ -120,18 +121,11 @@ export function buildPieceViews(
         glazeId: p.glazeId,
         name: glaze?.name ?? '',
         color: glaze?.color ?? DEFAULT_GLAZE_COLOR,
+        ...layerDetails(p),
       }
       if (glaze?.deletedAt) out.retired = true
-      if (p.dips !== undefined) out.dips = p.dips
-      if (p.method !== undefined) out.method = p.method
-      if (p.note !== undefined) out.note = p.note
       return out
     })
-    const used = glazedEntry
-      ? glazeApps
-          .filter((a) => a.entryId === glazedEntry.id)
-          .sort((a, b) => a.order - b.order)
-      : []
     const clay = piece.clayId ? clayById.get(piece.clayId) : undefined
     return {
       piece,
@@ -141,22 +135,17 @@ export function buildPieceViews(
       clayName: clay ? nameWithRetired(clay) : undefined,
       glazeStepId: glazedEntry?.id,
       glazeNames,
-      glazeLayers: layers.map(({ glaze, app }, i) => {
-        const out: PieceView['glazeLayers'][number] = {
-          name: glazeNames[i],
-          color: glaze.color,
-        }
-        if (app.dips !== undefined) out.dips = app.dips
-        if (app.method !== undefined) out.method = app.method
-        if (app.note !== undefined) out.note = app.note
-        return out
-      }),
+      glazeLayers: layers.map(({ glaze, app }, i) => ({
+        name: glazeNames[i],
+        color: glaze.color,
+        ...layerDetails(app),
+      })),
       glazeLayerCount: liveApps.length,
       startsFromPlan: planLayers.length > 0 && liveApps.length === 0,
       planLayers,
       planMatches:
-        plan.length > 0 && used.length > 0
-          ? planMatches(plan, used)
+        plan.length > 0 && liveApps.length > 0
+          ? planMatches(plan, liveApps)
           : undefined,
     }
   })

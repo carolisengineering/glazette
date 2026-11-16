@@ -1,16 +1,15 @@
 import { changeTime } from '../sync/records'
 import { db } from './db'
+import { layerDetails } from './layerDetails'
 import type { GlazeApplication, PlannedLayer } from './types'
 
 /** The layer without keys whose value is undefined, so stored rows stay clean. */
 function clean(layer: PlannedLayer): PlannedLayer {
-  const out: PlannedLayer = { glazeId: layer.glazeId }
-  if (Number.isFinite(layer.dips) && (layer.dips as number) > 0) {
-    out.dips = layer.dips
-  }
-  if (layer.method !== undefined) out.method = layer.method
-  if (layer.note !== undefined) out.note = layer.note
-  return out
+  const dips =
+    Number.isFinite(layer.dips) && (layer.dips as number) > 0
+      ? layer.dips
+      : undefined
+  return { glazeId: layer.glazeId, ...layerDetails({ ...layer, dips }) }
 }
 
 const sameLayer = (a: PlannedLayer, b: PlannedLayer) =>
