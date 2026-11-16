@@ -31,8 +31,21 @@ export function isRow(
   )
 }
 
+const isPlannedLayer = (l: unknown) =>
+  isObject(l) &&
+  typeof l.glazeId === 'string' &&
+  (l.dips === undefined || typeof l.dips === 'number') &&
+  isStringOrAbsent(l.method) &&
+  isStringOrAbsent(l.note)
+
 export const isPieceRow = (row: unknown) =>
-  isRow(row, ['updatedAt', 'createdAt'])
+  isRow(
+    row,
+    ['updatedAt', 'createdAt'],
+    (r) =>
+      r.glazePlan === undefined ||
+      (Array.isArray(r.glazePlan) && r.glazePlan.every(isPlannedLayer)),
+  )
 
 export const isEntryRow = (row: unknown) =>
   isRow(
