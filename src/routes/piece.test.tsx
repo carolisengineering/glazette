@@ -1499,3 +1499,75 @@ test('deleting the Glazed step shows the plan again', async () => {
   expect(await screen.findByRole('list', { name: 'Glaze plan' })).toBeVisible()
   expect(screen.queryByText('Same as plan')).toBeNull()
 })
+
+/** A piece with a Celadon plan and a Glazed step with no layers (logged straight to Fired). */
+async function plannedUnglazedPiece() {
+  const celadonId = await addGlaze('Celadon', '6')
+  const id = await createPiece({ name: 'Plan Bowl' })
+  await db.pieces.update(id, { glazePlan: [{ glazeId: celadonId }] })
+  await addStageEntry({ pieceId: id, stage: 'glazed', photo: photo('glazed') })
+  await addStageEntry({ pieceId: id, stage: 'fired', photo: photo('fired') })
+  return { id, celadonId }
+}
+
+const usedGlazeIds = async (id: string) =>
+  (await db.glazeApps.where('pieceId').equals(id).toArray())
+    .filter((a) => !a.deletedAt)
+    .map((a) => a.glazeId)
+
+test('renaming a planned piece in Edit piece records no glazes', async () => {
+  const { id } = await plannedUnglazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  const name = within(dialog).getByRole('textbox', { name: 'Name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Plan Bowl two')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(async () =>
+    expect((await db.pieces.get(id))?.name).toBe('Plan Bowl two'),
+  )
+  expect(await db.glazeApps.where('pieceId').equals(id).count()).toBe(0)
+})
+
+test('Start from plan in Edit piece fills the glaze rows and Save records them', async () => {
+  const { id, celadonId } = await plannedUnglazedPiece()
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: 'Start from plan' }),
+  )
+  expect(screen.queryByRole('button', { name: 'Start from plan' })).toBeNull()
+  expect(within(dialog).getByRole('textbox', { name: 'Glaze 1' })).toHaveValue(
+    'Celadon',
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  expect(await screen.findByText('Same as plan')).toBeVisible()
+  expect(await usedGlazeIds(id)).toEqual([celadonId])
+})
+
+test("the Glazed step's details offer Start from plan too", async () => {
+  const { id, celadonId } = await plannedUnglazedPiece()
+  renderRoute(`/piece/${id}`)
+  await screen.findByRole('heading', { name: 'Plan Bowl' })
+  await userEvent.click(stepButton('Glazed'))
+  await userEvent.click(screen.getByRole('button', { name: 'Edit step' }))
+  const dialog = screen.getByRole('dialog', { name: 'Glazed step' })
+  await userEvent.click(
+    await within(dialog).findByRole('button', { name: 'Start from plan' }),
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(async () => expect(await usedGlazeIds(id)).toEqual([celadonId]))
+})
+
+test('Start from plan is not offered once glazes are used', async () => {
+  const id = await firedPiece()
+  const glazeId = (await db.glazes.toArray())[0]?.id
+  await db.pieces.update(id, { glazePlan: [{ glazeId: glazeId ?? '' }] })
+  renderRoute(`/piece/${id}`)
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  const dialog = screen.getByRole('dialog', { name: 'Edit piece' })
+  await within(dialog).findByRole('textbox', { name: 'Glaze 1' })
+  expect(screen.queryByRole('button', { name: 'Start from plan' })).toBeNull()
+})

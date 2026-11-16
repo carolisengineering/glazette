@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useId, useRef, useState } from 'react'
 import { GlazeRows } from '../capture/GlazeRows'
+import { rowsFromPlan } from '../capture/resolveGlazes'
 import {
   ClayChips,
   type Form,
@@ -13,19 +14,25 @@ import { useModal } from '../components/useModal'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { updatePiece } from '../db/ops'
+import type { PlanLayerView } from '../db/queries'
 import type { Piece } from '../db/types'
 import { track } from '../telemetry/telemetry'
-import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
+import { rowsAreBlank, saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   piece: Piece
   /** The piece's glaze step (see `glazeStep`), once it has one; its glazes can be edited here. */
   glazedStepId?: string
+  /**
+   * The piece's planned glazes, offered as "Start from plan" when no glazes
+   * are used yet. Nothing fills in until the user taps it.
+   */
+  plan?: PlanLayerView[]
   onClose: () => void
 }
 
 /** Edit a piece's name, form, clay and (once Glazed) glazes. */
-export function EditSheet({ piece, glazedStepId, onClose }: Props) {
+export function EditSheet({ piece, glazedStepId, plan, onClose }: Props) {
   const titleId = useId()
   const nameRef = useRef<HTMLInputElement>(null)
   useModal(nameRef, onClose)
@@ -102,7 +109,18 @@ export function EditSheet({ piece, glazedStepId, onClose }: Props) {
           pick={clay}
         />
         {glazedStepId && glazes.rows ? (
-          <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          <div className="flex flex-col gap-1">
+            {plan && rowsAreBlank(glazes.rows) ? (
+              <button
+                type="button"
+                onClick={() => glazes.setRows(rowsFromPlan(plan))}
+                className="flex h-11 items-center self-start text-[15px] font-semibold text-accent"
+              >
+                Start from plan
+              </button>
+            ) : null}
+            <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          </div>
         ) : null}
         <div className="flex gap-3">
           <button

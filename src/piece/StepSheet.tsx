@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { GlazeRows } from '../capture/GlazeRows'
+import { rowsFromPlan } from '../capture/resolveGlazes'
 import { PhotoImg } from '../components/PhotoImg'
 import { fieldLabel } from '../components/PieceFields'
 import { useModal } from '../components/useModal'
@@ -7,13 +8,14 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import { SAVE_ERROR, useToast } from '../components/useToast'
 import { fromDateInput, toDateInput } from '../db/dates'
 import { db } from '../db/db'
+import type { PlanLayerView } from '../db/queries'
 import { STAGE_LABEL } from '../db/stage'
 import { type PhotoSwap, saveStepDetails } from '../db/stepEdits'
 import type { StageEntry } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
 import { usePhotoPicker } from '../photos/usePhotoPicker'
 import { track } from '../telemetry/telemetry'
-import { saveGlazeRows, useGlazeRows } from './useGlazeRows'
+import { rowsAreBlank, saveGlazeRows, useGlazeRows } from './useGlazeRows'
 
 interface Props {
   entry: StageEntry
@@ -22,6 +24,11 @@ interface Props {
    * step's glazes, which may not be its own: a later Glazed photo has none.
    */
   glazeStepId?: string
+  /**
+   * The piece's planned glazes, offered as "Start from plan" when no glazes
+   * are used yet. Nothing fills in until the user taps it.
+   */
+  plan?: PlanLayerView[]
   onClose: () => void
   onSaved: (swap: PhotoSwap | undefined) => void
 }
@@ -32,7 +39,13 @@ const linkButton =
   'flex h-11 items-center text-[15px] font-semibold text-accent'
 
 /** Edit one step's photo, date, note and (Glazed steps) the piece's glazes. Nothing is written until Save. */
-export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
+export function StepSheet({
+  entry,
+  glazeStepId,
+  plan,
+  onClose,
+  onSaved,
+}: Props) {
   const titleId = useId()
   const photoRef = useRef<HTMLButtonElement>(null)
   useModal(photoRef, onClose)
@@ -211,7 +224,18 @@ export function StepSheet({ entry, glazeStepId, onClose, onSaved }: Props) {
           />
         </div>
         {glazesOn && glazes.rows ? (
-          <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          <div className="flex flex-col gap-1">
+            {plan && rowsAreBlank(glazes.rows) ? (
+              <button
+                type="button"
+                onClick={() => glazes.setRows(rowsFromPlan(plan))}
+                className="flex h-11 items-center self-start text-[15px] font-semibold text-accent"
+              >
+                Start from plan
+              </button>
+            ) : null}
+            <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+          </div>
         ) : null}
         <div className="flex gap-3">
           <button

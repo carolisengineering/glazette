@@ -18,6 +18,10 @@ const saved = (rows: GlazeRow[] | undefined): string =>
       ]),
   )
 
+/** Whether every row is blank, so the plan can replace them without losing anything. */
+export const rowsAreBlank = (rows: GlazeRow[]): boolean =>
+  rows.every((r) => !r.glazeId && !r.name.trim())
+
 /**
  * A glaze step's layers as editable rows, for Edit piece and the step sheet.
  * `rows` stays undefined until they load (and if loading fails, so the section

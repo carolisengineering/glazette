@@ -114,6 +114,10 @@ function PieceBoard({
   // The step whose details sheet is open, looked up live so the sheet closes
   // if the step goes away (deleted here or synced away).
   const [openId, setOpenId] = useState<string>()
+  const startPlan =
+    view.glazeLayers.length === 0 && view.planLayers.length > 0
+      ? view.planLayers
+      : undefined
   const openStep = entries.find((e) => e.id === openId)
   const openGone = openId !== undefined && !openStep
   useEffect(() => {
@@ -354,6 +358,7 @@ function PieceBoard({
           key={openStep.id}
           entry={openStep}
           glazeStepId={view.glazeStepId}
+          plan={startPlan}
           onClose={() => closeStep(openStep.id)}
           onSaved={stepSaved}
         />
@@ -362,6 +367,7 @@ function PieceBoard({
         <EditSheet
           piece={piece}
           glazedStepId={view.glazeStepId}
+          plan={startPlan}
           onClose={() => setEditing(false)}
         />
       ) : null}
