@@ -256,21 +256,15 @@ export function CaptureScreen() {
             {error}
           </p>
         ) : null}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={() => camera.current?.openCamera()}
-          className="h-14 w-full max-w-[320px] rounded-[28px] bg-accent text-[16px] font-semibold text-white disabled:opacity-50"
-        >
-          Take photo
-        </button>
+        {/* One button: iPhone answers it with its own Photo Library / Take
+            Photo menu, and a web page can't open the library without it. */}
         <button
           type="button"
           disabled={processing}
           onClick={() => camera.current?.openLibrary()}
-          className="h-14 w-full max-w-[320px] rounded-[28px] bg-white/12 text-[16px] font-semibold text-white disabled:opacity-50"
+          className="h-14 w-full max-w-[320px] rounded-[28px] bg-accent text-[16px] font-semibold text-white disabled:opacity-50"
         >
-          Choose from library
+          Add photo
         </button>
         {addPhoto ? null : (
           <button
