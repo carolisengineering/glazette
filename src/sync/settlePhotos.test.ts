@@ -1,5 +1,5 @@
 import { GlazetteDB } from '../db/db'
-import type { Photo, StageEntry } from '../db/types'
+import type { Glaze, Photo, StageEntry } from '../db/types'
 import { settlePhotos } from './settlePhotos'
 import { onLocalChange, quietly } from './track'
 
@@ -427,5 +427,90 @@ describe('steps that are purged, or on a purged piece', () => {
     await settlePhotos(db)
     expect(await db.photos.count()).toBe(1)
     expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  })
+})
+
+describe('swatch photos that glazes link', () => {
+  const PURGED = '2026-04-01T00:00:00.000Z'
+  const glaze = (id: string, extra: Partial<Glaze> = {}): Glaze => ({
+    id,
+    name: id,
+    color: '#aabbcc',
+    updatedAt: T1,
+    ...extra,
+  })
+  const seedGlazes = (glazes: Glaze[]) =>
+    quietly(db, () => db.glazes.bulkAdd(glazes))
+
+  test('settlePhotos brings back a deleted photo that a live glaze links', async () => {
+    await heldBytes()
+    await seed([
+      photo('sw1', { swatch: 1, deletedAt: T2 }),
+      photo('sw2', { swatch: 1, deletedAt: T2 }),
+    ])
+    await seedGlazes([
+      glaze('g1', { swatchPhotoId: 'sw1' }),
+      glaze('g2', { swatchPhotoId: 'sw2', deletedAt: T2 }),
+    ])
+    await settlePhotos(db)
+    const row = await db.photos.get('sw1')
+    expect(row?.deletedAt).toBeUndefined()
+    expect(row?.needsDownload).toBeUndefined()
+    expect(row?.dirty).toBe(1)
+    expect((row?.updatedAt ?? '') > T2).toBe(true)
+    // Only a live glaze brings one back.
+    expect((await db.photos.get('sw2'))?.deletedAt).toBe(T2)
+  })
+
+  test('settlePhotos leaves a live swatch photo alone though no step shows it', async () => {
+    await seed([photo('sw1', { swatch: 1 }), photo('sw2', { swatch: 1 })])
+    await seedGlazes([
+      glaze('g1', { swatchPhotoId: 'sw1' }),
+      glaze('g2', { swatchPhotoId: 'sw2', deletedAt: T2 }),
+    ])
+    const photos = await db.photos.toArray()
+    const glazes = await db.glazes.toArray()
+    const listener = vi.fn()
+    const stop = onLocalChange(db, listener)
+    await settlePhotos(db)
+    stop()
+    expect(listener).not.toHaveBeenCalled()
+    expect(await db.photos.toArray()).toEqual(photos)
+    expect(await db.glazes.toArray()).toEqual(glazes)
+  })
+
+  test("settlePhotos moves a glaze's link to the new photo when its swatch was purged and this device holds the bytes", async () => {
+    const FUTURE = '2099-01-01T00:00:00.000Z'
+    await heldBytes()
+    await seed([
+      photo('sw1', { swatch: 1, deletedAt: PURGED, purgedAt: PURGED }),
+    ])
+    await seedGlazes([
+      glaze('g1', { swatchPhotoId: 'sw1' }),
+      glaze('g2', { swatchPhotoId: 'sw1', updatedAt: FUTURE }),
+      glaze('g3', { swatchPhotoId: 'sw1', deletedAt: T2 }),
+    ])
+    const stub = await db.photos.get('sw1')
+    await settlePhotos(db)
+
+    const g1 = await db.glazes.get('g1')
+    const photoId = g1?.swatchPhotoId as string
+    expect(photoId).not.toBe('sw1')
+    expect(g1?.dirty).toBe(1)
+    expect((g1?.updatedAt ?? '') > T1).toBe(true)
+    // Dated past its last change, so it wins over the copy it changes.
+    const g2 = await db.glazes.get('g2')
+    expect(g2?.swatchPhotoId).toBe(photoId)
+    expect(g2?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
+    expect(await db.photos.get(photoId)).toMatchObject({
+      hash: HASH,
+      swatch: 1,
+      needsUpload: 1,
+      dirty: 1,
+    })
+    // A deleted glaze and the stub itself stay as they were.
+    expect((await db.glazes.get('g3'))?.swatchPhotoId).toBe('sw1')
+    expect(await db.photos.get('sw1')).toEqual(stub)
+    expect(await db.photos.count()).toBe(2)
   })
 })

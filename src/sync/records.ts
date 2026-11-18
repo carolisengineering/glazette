@@ -21,6 +21,7 @@ import {
   withValidColor,
 } from '../db/rowChecks'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
+import { releaseSwatch } from '../db/swatch'
 import type { Piece } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
 import {
@@ -327,7 +328,8 @@ function winningRow(
  * First sign-in: a live local glaze or clay that isn't the account's, whose
  * name matches a live one that is, becomes that one. Its details carry over to
  * the account's row (see carriedDetails), everything pointing at it moves to
- * the account's id, and the local duplicate is deleted. A normal
+ * the account's id, and the local duplicate is deleted. When both glazes had
+ * a swatch, the photo of the one that didn't stay is deleted. A normal
  * tracked write, so the changes sync. A piece that moves to the account's
  * clay changes 1 ms after it last did: past a server copy with the same
  * change time (left by an earlier full sync that stopped partway), still
@@ -339,10 +341,10 @@ export function mergeByName(
 ): Promise<void> {
   return db.transaction(
     'rw',
-    [db.glazes, db.clays, db.glazeApps, db.pieces, db.settings],
+    [db.glazes, db.clays, db.glazeApps, db.pieces, db.settings, db.photos],
     async () => {
-      const glazes = await joinByName(db.glazes, accountIds.glaze)
-      const clays = await joinByName(db.clays, accountIds.clay)
+      const glazes = await joinByName(db, db.glazes, accountIds.glaze)
+      const clays = await joinByName(db, db.clays, accountIds.clay)
       if (glazes.size > 0) {
         await db.glazeApps
           .filter((a) => glazes.has(a.glazeId))
@@ -399,9 +401,11 @@ export function changeTime(
 
 /**
  * Deletes the local duplicates in one table, first carrying their details onto
- * the account's rows; returns duplicate id -> account id.
+ * the account's rows; returns duplicate id -> account id. A glaze swatch that
+ * neither row keeps is released.
  */
 async function joinByName(
+  db: GlazetteDB,
   table: GlazetteDB['glazes'] | GlazetteDB['clays'],
   accountIds: Set<string>,
 ): Promise<Map<string, string>> {
@@ -421,6 +425,7 @@ async function joinByName(
     const target = accountByName.get(nameKey(row.name))
     if (accountIds.has(row.id) || !target) continue
     joined.set(row.id, target.id)
+    const swatches = [target.swatchPhotoId, row.swatchPhotoId]
     const details = carriedDetails(row, target)
     if (Object.keys(details).length > 0) {
       await rows.update(target.id, details)
@@ -428,6 +433,11 @@ async function joinByName(
       Object.assign(target, details, { updatedAt: new Date().toISOString() })
     }
     await rows.update(row.id, { deletedAt })
+    for (const photoId of swatches) {
+      if (typeof photoId === 'string' && photoId !== target.swatchPhotoId) {
+        await releaseSwatch(db, photoId, deletedAt)
+      }
+    }
   }
   return joined
 }
@@ -451,12 +461,20 @@ const isDefaultColor = (v: unknown) =>
  * What a local duplicate adds to the account's row it merges into: all its
  * details when it changed later; on a tie, only what the account's row lacks
  * (empty notes or cone, the default color); nothing when the account's row
- * changed later. The account's name always stays.
+ * changed later. The account's name always stays. A glaze swatch, with its
+ * color, carries onto an account glaze without one whatever the times.
  */
 function carriedDetails(local: Row, account: Row): Record<string, unknown> {
   const localTime = changedAt(local)
   const accountTime = changedAt(account)
   const details: Record<string, unknown> = {}
+  if (
+    local.swatchPhotoId !== undefined &&
+    account.swatchPhotoId === undefined
+  ) {
+    details.swatchPhotoId = local.swatchPhotoId
+    if (local.color !== undefined) details.color = local.color
+  }
   if (localTime > accountTime) {
     for (const [key, value] of Object.entries(local)) {
       if (
