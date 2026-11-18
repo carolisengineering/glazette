@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { CSSProperties } from 'react'
 import { db } from '../db/db'
 import { notDeleted, type PieceView, usePiecesQuery } from '../db/queries'
-import { glazedStepWithGlazes, latestEntry } from '../db/stage'
+import { compareEntries, glazedStepWithGlazes, latestEntry } from '../db/stage'
 import type { Glaze, GlazeApplication } from '../db/types'
 
 export interface GlazeView {
@@ -65,6 +65,18 @@ export function buildGlazeViews(
         swatchPhotoId: swatch?.photoId,
       }
     })
+}
+
+/**
+ * Photo ids of every live Fired step with a photo across these pieces, newest
+ * step first, each id once.
+ */
+export function firedPhotoIds(pieces: PieceView[]): string[] {
+  const fired = pieces
+    .flatMap((p) => p.entries)
+    .filter((e) => e.stage === 'fired' && !e.deletedAt && e.photoId)
+    .sort((a, b) => compareEntries(b, a))
+  return [...new Set(fired.map((e) => e.photoId as string))]
 }
 
 /** `undefined` until the first read resolves. */
