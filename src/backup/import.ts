@@ -165,6 +165,9 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
     glazeRows,
     (g) => g.swatchPhotoId,
   )
+  for (const id of await swatchesOfKeptGlazes(glazeRows)) {
+    if (!releases.has(id)) releases.set(id, new Date().toISOString())
+  }
   const addedGlazes = await mergeKeepingLocal(db.glazes, glazeRows, count)
   await reviveSwatches(addedGlazes, photos.matched, count)
   await carrySwatches(glazes.matches, photos, releases, count)
@@ -222,6 +225,22 @@ async function photosOfTombstoned<T extends { id: string; deletedAt?: string }>(
     }
   })
   return photos
+}
+
+/**
+ * Swatch photos of incoming glazes whose id is already here, where the glaze
+ * here (which the merge keeps) links another photo or none. Read before the
+ * glazes are written.
+ */
+async function swatchesOfKeptGlazes(incoming: Glaze[]): Promise<string[]> {
+  const rows = uniqueById(incoming)
+  const local = await db.glazes.bulkGet(rows.map((r) => r.id))
+  return rows.flatMap((row, i) => {
+    const mine = local[i]
+    return mine && row.swatchPhotoId && row.swatchPhotoId !== mine.swatchPhotoId
+      ? [row.swatchPhotoId]
+      : []
+  })
 }
 
 /**
