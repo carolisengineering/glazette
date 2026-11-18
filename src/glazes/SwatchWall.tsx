@@ -36,7 +36,7 @@ export function SwatchWall({ glazes, selectedId, onSelect }: Props) {
                 className="size-full"
               />
             </span>
-            <span className="truncate text-center text-[14px] font-semibold">
+            <span className="line-clamp-2 text-center text-[14px] leading-tight font-semibold break-words">
               {glaze.name}
             </span>
             <span className="-mt-1 truncate text-center text-[13px] text-muted">

@@ -193,7 +193,7 @@ export function GlazeRows({ value, onChange }: Props) {
                       photoId={g.swatchPhotoId}
                       className="aspect-square w-full overflow-hidden rounded-[14px]"
                     />
-                    <span className="truncate text-center text-[14px] font-semibold">
+                    <span className="line-clamp-2 text-center text-[14px] leading-tight font-semibold break-words">
                       {g.name}
                     </span>
                   </button>
