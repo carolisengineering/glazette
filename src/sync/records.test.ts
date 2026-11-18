@@ -867,6 +867,31 @@ describe('mergeByName', () => {
     expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
   })
 
+  test('mergeByName dates a carried swatch past an account glaze dated in the future', async () => {
+    const future = '2099-01-01T00:00:00.000Z'
+    await quietly(db, async () => {
+      await db.photos.add(swatchPhoto('sw1'))
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', {
+          ...details,
+          swatchPhotoId: 'sw1',
+          updatedAt: T2,
+        }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          cone: '6',
+          updatedAt: future,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    const merged = await db.glazes.get('ag')
+    expect(merged?.swatchPhotoId).toBe('sw1')
+    expect((merged?.updatedAt ?? '') > future).toBe(true)
+  })
+
   test("mergeByName keeps an account glaze's swatch and its color when the newer local glaze has none", async () => {
     await quietly(db, async () => {
       await db.photos.add(swatchPhoto('asw'))

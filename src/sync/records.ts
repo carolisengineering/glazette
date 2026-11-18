@@ -428,9 +428,11 @@ async function joinByName(
     const swatches = [target.swatchPhotoId, row.swatchPhotoId]
     const details = carriedDetails(row, target)
     if (Object.keys(details).length > 0) {
-      await rows.update(target.id, details)
+      // Dated past the account copy's last change so the carry wins.
+      const updatedAt = changeTime(target, new Date().toISOString())
+      await rows.update(target.id, { ...details, updatedAt })
       // As stored now, for a second duplicate of the same name.
-      Object.assign(target, details, { updatedAt: new Date().toISOString() })
+      Object.assign(target, details, { updatedAt })
     }
     await rows.update(row.id, { deletedAt })
     for (const photoId of swatches) {
