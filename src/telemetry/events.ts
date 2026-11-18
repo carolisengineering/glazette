@@ -35,6 +35,7 @@ export const EDIT_PARTS = [
   'plan',
 ] as const
 export const PUT_BACK_KINDS = ['piece', 'photo'] as const
+export const SWATCH_SOURCES = ['photo', 'piece'] as const
 export const VITAL_METRICS = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as const
 
 export type EventProps = {
@@ -68,6 +69,7 @@ export type EventProps = {
     downloaded: number
     bytes: number
   }
+  swatch_saved: { source: (typeof SWATCH_SOURCES)[number] }
   web_vital: { metric: (typeof VITAL_METRICS)[number]; value: number }
   telemetry_started: { first_piece_date?: string; pieces: number }
 }

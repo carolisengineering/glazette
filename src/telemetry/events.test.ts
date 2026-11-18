@@ -8,6 +8,7 @@ import {
   PUT_BACK_KINDS,
   SCREENS,
   type SuperProps,
+  SWATCH_SOURCES,
   VITAL_METRICS,
 } from './events'
 
@@ -38,6 +39,7 @@ const EXAMPLES: { [N in EventName]: EventProps[N] } = {
     downloaded: 0,
     bytes: 20480,
   },
+  swatch_saved: { source: 'piece' },
   web_vital: { metric: 'LCP', value: 1800 },
   telemetry_started: { first_piece_date: '2026-03-01', pieces: 12 },
 }
@@ -54,6 +56,7 @@ const ALLOWED_STRINGS = new Set<string>([
   ...EDIT_PARTS,
   ...PUT_BACK_KINDS,
   ...VITAL_METRICS,
+  ...SWATCH_SOURCES,
 ])
 
 describe('event props privacy', () => {

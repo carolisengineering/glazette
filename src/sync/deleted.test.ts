@@ -105,3 +105,14 @@ test("a photo whose piece was purged doesn't name it", () => {
   expect(row).toMatchObject({ kind: 'photo', photo: { id: 'ph' } })
   expect(row && 'piece' in row ? row.piece : undefined).toBeUndefined()
 })
+
+test('a deleted swatch photo is not listed', () => {
+  const photos = map([photo('sw', { deletedAt: T, swatch: 1 })])
+  expect(
+    deletedRows(
+      [{ kind: 'photo', id: 'sw', heardAt: HEARD }],
+      new Map(),
+      photos,
+    ),
+  ).toEqual([])
+})

@@ -58,6 +58,7 @@ export interface Glaze {
   cone?: string // "6", "10", "04"
   color: string // hex for the swatch fallback
   notes?: string
+  swatchPhotoId?: string // this glaze's own swatch photo
   deletedAt?: string
   updatedAt?: string // stamped on every local change
   dirty?: 1 // changed here since the last sync
@@ -89,6 +90,7 @@ export interface Photo {
   purgedAt?: string // removed for good by the server; only a stub is left there
   updatedAt?: string // stamped on every local change
   mergedInto?: string // id of the photo this duplicate was merged into
+  swatch?: 1 // a glaze swatch image; it syncs like any photo
   dirty?: 1 // changed here since the last sync
   needsUpload?: 1 // this device has the bytes and the server may not
   needsDownload?: 1 // the details are here but the bytes aren't

@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { notDeleted } from '../db/queries'
 import type { GlazeApplication } from '../db/types'
+import { GlazeSwatch } from '../glazes/GlazeSwatch'
 
 export interface GlazeRow {
   /** Stable React key; not saved. */
@@ -76,25 +77,40 @@ export function GlazeRows({ value, onChange }: Props) {
         const q = row.name.trim().toLowerCase()
         const suggestions = row.glazeId
           ? []
-          : (glazes ?? [])
-              .filter((g) => !q || g.name.toLowerCase().includes(q))
-              .slice(0, 6)
+          : (glazes ?? []).filter((g) => !q || g.name.toLowerCase().includes(q))
+        const picked = row.glazeId
+          ? (glazes ?? []).find((g) => g.id === row.glazeId)
+          : undefined
         return (
           <div
             key={row.key}
             className="flex flex-col gap-2 rounded-[20px] bg-surface p-3"
           >
             <div className="flex gap-2">
-              <input
-                type="text"
-                aria-label={`Glaze ${n}`}
-                value={row.name}
-                onChange={(e) =>
-                  update(i, { name: e.target.value, glazeId: undefined })
-                }
-                placeholder="Glaze name"
-                className={`${input} flex-1`}
-              />
+              <div className="relative flex min-w-0 flex-1">
+                {picked ? (
+                  <span
+                    data-testid="picked-swatch"
+                    className="pointer-events-none absolute top-1/2 left-2.5 size-[30px] -translate-y-1/2"
+                  >
+                    <GlazeSwatch
+                      color={picked.color}
+                      photoId={picked.swatchPhotoId}
+                      className="size-full overflow-hidden rounded-lg"
+                    />
+                  </span>
+                ) : null}
+                <input
+                  type="text"
+                  aria-label={`Glaze ${n}`}
+                  value={row.name}
+                  onChange={(e) =>
+                    update(i, { name: e.target.value, glazeId: undefined })
+                  }
+                  placeholder="Glaze name"
+                  className={`${input} w-full ${picked ? 'pl-12' : ''}`}
+                />
+              </div>
               {value.length > 1 ? (
                 <>
                   <button
@@ -164,20 +180,22 @@ export function GlazeRows({ value, onChange }: Props) {
               ) : null}
             </div>
             {suggestions.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 gap-x-2.5 gap-y-3.5">
                 {suggestions.map((g) => (
                   <button
                     key={g.id}
                     type="button"
                     onClick={() => update(i, { name: g.name, glazeId: g.id })}
-                    className="flex h-11 items-center gap-2 rounded-[22px] border border-border bg-surface pr-3.5 pl-2 text-[15px] font-medium text-ink"
+                    className="flex min-w-0 flex-col items-stretch gap-1.5 bg-transparent p-0 text-left text-ink"
                   >
-                    <span
-                      aria-hidden="true"
-                      className="size-6 rounded-full"
-                      style={{ background: g.color }}
+                    <GlazeSwatch
+                      color={g.color}
+                      photoId={g.swatchPhotoId}
+                      className="aspect-square w-full overflow-hidden rounded-[14px]"
                     />
-                    {g.name}
+                    <span className="line-clamp-2 text-center text-[14px] leading-tight font-semibold break-words">
+                      {g.name}
+                    </span>
                   </button>
                 ))}
               </div>

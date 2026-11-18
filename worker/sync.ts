@@ -161,11 +161,13 @@ export function syncRoutes() {
   })
 
   routes.get('/deleted', async (c) => {
+    // Merged duplicates and glaze swatches are never listed.
     const { results } = await c.env.DB.prepare(
       `SELECT kind, id, deleted_heard_at FROM records
        WHERE user_id = ? AND deleted_heard_at IS NOT NULL
          AND kind IN ('piece', 'photo')
          AND json_extract(data, '$.mergedInto') IS NULL
+         AND json_extract(data, '$.swatch') IS NULL
        ORDER BY deleted_heard_at DESC LIMIT ?`,
     )
       .bind(c.get('userId'), DELETED_LIMIT)

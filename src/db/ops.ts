@@ -385,9 +385,13 @@ export async function markLost(id: string, lost: boolean): Promise<void> {
   await db.pieces.update(id, { lost, updatedAt: nowIso() })
 }
 
-/** Photos are shared between entries (hash dedupe), so they are removed per entry with `removePhoto`. */
+/**
+ * Photos are shared between entries (hash dedupe), so they are removed per
+ * entry with `removePhoto`. A glaze is deleted with `deleteGlaze`, which also
+ * releases its swatch.
+ */
 export async function softDelete(
-  table: 'pieces' | 'entries' | 'glazes' | 'clays',
+  table: 'pieces' | 'entries' | 'clays',
   id: string,
 ): Promise<void> {
   await db.table(table).update(id, { deletedAt: nowIso() })

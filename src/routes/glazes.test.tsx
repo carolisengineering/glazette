@@ -3,7 +3,22 @@ import userEvent from '@testing-library/user-event'
 import { db, newId } from '../db/db'
 import { addStageEntry, createPiece, ensureDefaults } from '../db/ops'
 import type { ProcessedImage } from '../photos/process'
+import { processImage } from '../photos/process'
+import { storePhoto } from '../photos/store'
+import type { SwatchImage } from '../photos/swatchImage'
+import { makeSwatch } from '../photos/swatchImage'
+import { track } from '../telemetry/telemetry'
 import { renderRoute } from '../test/renderRoute'
+
+vi.mock('../photos/process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../photos/process')>()),
+  processImage: vi.fn(),
+}))
+vi.mock('../photos/swatchImage', () => ({ makeSwatch: vi.fn() }))
+vi.mock('../telemetry/telemetry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../telemetry/telemetry')>()),
+  track: vi.fn(),
+}))
 
 // Stored blobs don't survive fake-indexeddb as real Blobs, so expose which photo each image shows.
 vi.mock('../components/PhotoImg', () => ({
@@ -13,6 +28,8 @@ vi.mock('../components/PhotoImg', () => ({
 }))
 
 beforeEach(async () => {
+  URL.createObjectURL = vi.fn(() => 'blob:preview')
+  URL.revokeObjectURL = vi.fn()
   await db.delete()
   await db.open()
   await ensureDefaults()
@@ -113,7 +130,7 @@ test('swatch tile shows the newest fired photo, and falls back to the color with
   )
   const tenmokuTile = screen.getByRole('button', { name: /Tenmoku/ })
   expect(tenmokuTile.querySelector('img')).toBeNull()
-  expect(within(tenmokuTile).getByTestId('swatch-fill')).toHaveStyle({
+  expect(within(tenmokuTile).getByTestId('glaze-swatch')).toHaveStyle({
     backgroundColor: '#3A2A20',
   })
 })
@@ -267,4 +284,146 @@ test('the add sheet has no Delete button', async () => {
   )
   await screen.findByRole('dialog')
   expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+})
+
+const swatchImage = (tag: string): SwatchImage => ({
+  ...photo(tag),
+  color: '#aabbcc',
+})
+
+/** Adds a photo through the sheet, crops it, and uses it as the swatch. */
+async function cropNewPhoto(dialog: HTMLElement) {
+  vi.mocked(processImage).mockResolvedValue(photo('picked'))
+  vi.mocked(makeSwatch).mockResolvedValue(swatchImage('crop'))
+  fireEvent.change(within(dialog).getByTestId('library-input'), {
+    target: { files: [new File(['x'], 'pot.jpg', { type: 'image/jpeg' })] },
+  })
+  const crop = await screen.findByRole('dialog', { name: 'Crop swatch' })
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Crop swatch' })).toBeNull(),
+  )
+}
+
+async function openEdit() {
+  renderRoute('/glazes')
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  return screen.findByRole('dialog', { name: 'Edit glaze' })
+}
+
+async function glazeWithSwatch() {
+  const id = await addGlaze('Celadon', { color: '#112233' })
+  const photoId = await storePhoto(photo('saved'))
+  await db.photos.update(photoId, { swatch: 1 })
+  await db.glazes.update(id, { swatchPhotoId: photoId })
+  return { id, photoId }
+}
+
+test('a glaze without a swatch shows No swatch yet, Add photo and the color picker', async () => {
+  await addGlaze('Celadon')
+  const dialog = await openEdit()
+  expect(within(dialog).getByText('Swatch')).toBeVisible()
+  expect(within(dialog).getByText('No swatch yet')).toBeVisible()
+  expect(
+    within(dialog).getByRole('button', { name: 'Add photo' }),
+  ).toBeVisible()
+  expect(within(dialog).getByLabelText('Color')).toBeVisible()
+})
+
+test('From a piece is hidden when no piece wearing the glaze has a fired photo', async () => {
+  const g = await addGlaze('Celadon')
+  await glazedPiece('Mug', g)
+  const dialog = await openEdit()
+  expect(
+    within(dialog).queryByRole('button', { name: 'From a piece' }),
+  ).toBeNull()
+})
+
+test('From a piece shows when a piece wearing the glaze has a fired photo', async () => {
+  const g = await addGlaze('Celadon')
+  const mug = await glazedPiece('Mug', g)
+  await addStageEntry({ pieceId: mug, stage: 'fired', photo: photo('fired') })
+  const dialog = await openEdit()
+  expect(
+    await within(dialog).findByRole('button', { name: 'From a piece' }),
+  ).toBeVisible()
+})
+
+test('cropping then Save links the swatch and hides the color picker', async () => {
+  const id = await addGlaze('Celadon')
+  const dialog = await openEdit()
+  await cropNewPhoto(dialog)
+  expect(within(dialog).queryByLabelText('Color')).toBeNull()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(async () =>
+    expect((await db.glazes.get(id))?.swatchPhotoId).toBeTruthy(),
+  )
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  const again = await screen.findByRole('dialog', { name: 'Edit glaze' })
+  expect(within(again).getByRole('button', { name: 'Replace' })).toBeVisible()
+  expect(within(again).getByRole('button', { name: 'Remove' })).toBeVisible()
+  expect(within(again).queryByLabelText('Color')).toBeNull()
+})
+
+test('cropping then Cancel on the sheet stores nothing', async () => {
+  const id = await addGlaze('Celadon')
+  const dialog = await openEdit()
+  const photos = await db.photos.count()
+  const bytes = await db.photoBytes.count()
+  await cropNewPhoto(dialog)
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(await db.photos.count()).toBe(photos)
+  expect(await db.photoBytes.count()).toBe(bytes)
+  expect((await db.glazes.get(id))?.swatchPhotoId).toBeUndefined()
+})
+
+test('Remove then Save clears the swatch and brings the color picker back with the swatch color', async () => {
+  const { id } = await glazeWithSwatch()
+  const dialog = await openEdit()
+  expect(within(dialog).queryByLabelText('Color')).toBeNull()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+  expect(within(dialog).getByLabelText('Color')).toHaveValue('#112233')
+  expect(within(dialog).getByText('No swatch yet')).toBeVisible()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(async () =>
+    expect((await db.glazes.get(id))?.swatchPhotoId).toBeUndefined(),
+  )
+})
+
+test('Delete deletes the swatch photo too', async () => {
+  const { photoId } = await glazeWithSwatch()
+  const dialog = await openEdit()
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  const confirm = await screen.findByRole('dialog', { name: /Delete Celadon/ })
+  await userEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))
+  await waitFor(async () =>
+    expect((await db.photos.get(photoId))?.deletedAt).toBeTruthy(),
+  )
+})
+
+test('Save with a new swatch sends swatch_saved with its source', async () => {
+  await addGlaze('Celadon')
+  const dialog = await openEdit()
+  await cropNewPhoto(dialog)
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(track).toHaveBeenCalledWith('swatch_saved', { source: 'photo' }),
+  )
+})
+
+test('Escape while the crop screen is open leaves the sheet open', async () => {
+  await addGlaze('Celadon')
+  const dialog = await openEdit()
+  vi.mocked(processImage).mockResolvedValue(photo('picked'))
+  fireEvent.change(within(dialog).getByTestId('library-input'), {
+    target: { files: [new File(['x'], 'pot.jpg', { type: 'image/jpeg' })] },
+  })
+  await screen.findByRole('dialog', { name: 'Crop swatch' })
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog', { name: 'Crop swatch' })).toBeNull()
+  expect(screen.getByRole('dialog', { name: 'Edit glaze' })).toBeVisible()
 })

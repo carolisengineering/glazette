@@ -825,6 +825,155 @@ describe('mergeByName', () => {
     expect((await db.glazes.get('lg'))?.deletedAt).toBeTruthy()
   })
 
+  const swatchPhoto = (id: string): Photo => ({
+    id,
+    hash: id.padEnd(64, '0'),
+    width: 600,
+    height: 600,
+    takenAt: T1,
+    swatch: 1,
+    updatedAt: T1,
+  })
+
+  test('mergeByName carries a local swatch onto an account glaze that has none, even when the account glaze changed later', async () => {
+    await quietly(db, async () => {
+      await db.photos.add(swatchPhoto('sw1'))
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', {
+          ...details,
+          swatchPhotoId: 'sw1',
+          updatedAt: T2,
+        }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          cone: '6',
+          updatedAt: T3,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    // The swatch and its color come over; the account's other details stay.
+    const merged = await db.glazes.get('ag')
+    expect(merged).toMatchObject({
+      swatchPhotoId: 'sw1',
+      color: '#aa0000',
+      cone: '6',
+      dirty: 1,
+    })
+    expect(merged?.notes).toBeUndefined()
+    expect((await db.glazes.get('lg'))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
+  })
+
+  test('mergeByName dates a carried swatch past an account glaze dated in the future', async () => {
+    const future = '2099-01-01T00:00:00.000Z'
+    await quietly(db, async () => {
+      await db.photos.add(swatchPhoto('sw1'))
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', {
+          ...details,
+          swatchPhotoId: 'sw1',
+          updatedAt: T2,
+        }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          cone: '6',
+          updatedAt: future,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    const merged = await db.glazes.get('ag')
+    expect(merged?.swatchPhotoId).toBe('sw1')
+    expect((merged?.updatedAt ?? '') > future).toBe(true)
+  })
+
+  test("mergeByName keeps an account glaze's swatch and its color when the newer local glaze has none", async () => {
+    await quietly(db, async () => {
+      await db.photos.add(swatchPhoto('asw'))
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', { ...details, updatedAt: T3 }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          swatchPhotoId: 'asw',
+          updatedAt: T2,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    // Its other details still come from the newer local glaze.
+    expect(await db.glazes.get('ag')).toMatchObject({
+      swatchPhotoId: 'asw',
+      color: '#00aa00',
+      cone: '10',
+      notes: 'Runs on verticals',
+    })
+    expect((await db.photos.get('asw'))?.deletedAt).toBeUndefined()
+  })
+
+  test("mergeByName with swatches on both keeps the newer and deletes the other's photo", async () => {
+    await quietly(db, async () => {
+      await db.photos.bulkAdd([
+        swatchPhoto('lsw'),
+        swatchPhoto('asw'),
+        swatchPhoto('lsw2'),
+        swatchPhoto('asw2'),
+      ])
+      await db.glazes.bulkAdd([
+        // This device's changed later.
+        glaze('lg', 'Shino', {
+          color: '#aa0000',
+          swatchPhotoId: 'lsw',
+          updatedAt: T3,
+        }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          swatchPhotoId: 'asw',
+          updatedAt: T2,
+        }),
+        // The account's changed later.
+        glaze('lg2', 'Celadon', {
+          color: '#aa0000',
+          swatchPhotoId: 'lsw2',
+          updatedAt: T2,
+        }),
+        glaze('ag2', 'Celadon', {
+          color: '#00aa00',
+          swatchPhotoId: 'asw2',
+          updatedAt: T3,
+        }),
+      ])
+    })
+
+    await mergeByName(db, {
+      glaze: new Set(['ag', 'ag2']),
+      clay: new Set(),
+    })
+
+    expect(await db.glazes.get('ag')).toMatchObject({
+      swatchPhotoId: 'lsw',
+      color: '#aa0000',
+    })
+    expect(await db.glazes.get('ag2')).toMatchObject({
+      swatchPhotoId: 'asw2',
+      color: '#00aa00',
+    })
+    for (const id of ['lsw', 'asw2']) {
+      expect((await db.photos.get(id))?.deletedAt).toBeUndefined()
+    }
+    for (const id of ['asw', 'lsw2']) {
+      const row = await db.photos.get(id)
+      expect(row?.deletedAt).toBeTruthy()
+      expect(row?.dirty).toBe(1)
+    }
+  })
+
   test("a piece's plan moves to the account's glaze too", async () => {
     await quietly(db, async () => {
       await db.glazes.bulkAdd([

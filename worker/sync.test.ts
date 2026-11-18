@@ -435,6 +435,16 @@ describe('recently deleted', () => {
     expect((await listed()).items.map((i) => i.id)).toEqual(['ph3'])
   })
 
+  test('the deleted list leaves out swatch photos', async () => {
+    await push({
+      records: [
+        gone('ph1', T1, T1, 'photo', { swatch: 1 }),
+        gone('ph2', T1, T1, 'photo'),
+      ],
+    })
+    expect((await listed()).items.map((i) => i.id)).toEqual(['ph2'])
+  })
+
   test('the list leaves out stubs', async () => {
     await push({ records: [gone('p1', T1), gone('p2', T1)] })
     await env.DB.prepare(

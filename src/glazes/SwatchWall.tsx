@@ -1,5 +1,5 @@
-import { PhotoImg } from '../components/PhotoImg'
-import { centerCropStyle, type GlazeView } from './swatch'
+import { GlazeSwatch } from './GlazeSwatch'
+import type { GlazeView } from './swatch'
 
 const pieceCount = (n: number) => `${n} ${n === 1 ? 'piece' : 'pieces'}`
 
@@ -9,7 +9,7 @@ interface Props {
   onSelect: (id: string) => void
 }
 
-/** Three-column wall of glaze tiles: the newest fired photo, else the glaze color. */
+/** Three-column wall of glaze tiles: the glaze's swatch photo, else its color. */
 export function SwatchWall({ glazes, selectedId, onSelect }: Props) {
   return (
     <div className="grid grid-cols-3 gap-x-2.5 gap-y-3.5">
@@ -30,22 +30,13 @@ export function SwatchWall({ glazes, selectedId, onSelect }: Props) {
                   : ''
               }`}
             >
-              {swatchPhotoId ? (
-                <PhotoImg
-                  photoId={swatchPhotoId}
-                  thumb
-                  className="size-full"
-                  style={centerCropStyle(1, 1)}
-                />
-              ) : (
-                <span
-                  data-testid="swatch-fill"
-                  className="block size-full"
-                  style={{ backgroundColor: glaze.color }}
-                />
-              )}
+              <GlazeSwatch
+                color={glaze.color}
+                photoId={swatchPhotoId}
+                className="size-full"
+              />
             </span>
-            <span className="truncate text-center text-[14px] font-semibold">
+            <span className="line-clamp-2 text-center text-[14px] leading-tight font-semibold break-words">
               {glaze.name}
             </span>
             <span className="-mt-1 truncate text-center text-[13px] text-muted">

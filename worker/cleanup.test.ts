@@ -117,6 +117,17 @@ const photoRecord = (
   data: { id, hash, width: 10, height: 20, takenAt: T1, deletedAt, ...extra },
 })
 
+const glaze = (
+  id: string,
+  swatchPhotoId: string,
+  deletedAt?: string,
+): SyncRecord => ({
+  kind: 'glaze',
+  id,
+  changedAt: T1,
+  data: { id, name: `Glaze ${id}`, color: '#9dbbaa', swatchPhotoId, deletedAt },
+})
+
 // JSON drops the undefined deletedAt, so a live record has none.
 async function push(records: SyncRecord[], cookie = cookie1) {
   const res = await app.request(
@@ -522,6 +533,43 @@ test("a deleted photo that a live step still shows isn't purged", async () => {
   expect(await runCleanup(env, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
   // Still expired: unchanged, its clock and all.
   expect(await row('photo', 'ph1')).toEqual(photo)
+  await expectBytes(hash)
+})
+
+test("a deleted photo that a live glaze links as its swatch isn't purged", async () => {
+  const hash = await upload(1)
+  await push([glaze('g1', 'sw1'), photoRecord('sw1', hash, T1, { swatch: 1 })])
+  await age('photo', 'sw1', 30)
+  const photo = await row('photo', 'sw1')
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await row('photo', 'sw1')).toEqual(photo)
+  await expectBytes(hash)
+})
+
+test('a deleted photo that only a deleted glaze links is purged', async () => {
+  const hash = await upload(1)
+  await push([
+    glaze('g1', 'sw1', T1),
+    photoRecord('sw1', hash, T1, { swatch: 1 }),
+  ])
+  await age('photo', 'sw1', 30)
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 1, filesDeleted: 2 })
+  expect(await isStub('photo', 'sw1')).toBe(true)
+  await expectNoBytes(hash)
+})
+
+test('an expired piece leaves a photo that a live glaze links as its swatch', async () => {
+  const hash = await upload(1)
+  await push([
+    piece('p1', T1),
+    step('s1', 'p1', 'ph1'),
+    photoRecord('ph1', hash),
+    glaze('g1', 'ph1'),
+  ])
+  await age('piece', 'p1', 31)
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 2, filesDeleted: 0 })
+  expect(await isStub('entry', 's1')).toBe(true)
+  expect(await isStub('photo', 'ph1')).toBe(false)
   await expectBytes(hash)
 })
 
@@ -951,6 +999,19 @@ test('an expired photo that a step put back during the job shows stays', async (
   const job = midRun({ before: () => push([live(step('s1', 'p1', 'ph1'))]) })
   expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
   expect(await isStub('photo', 'ph1')).toBe(false)
+  await expectBytes(hash)
+})
+
+test('an expired photo that a glaze put back during the job links stays', async () => {
+  const hash = await upload(1)
+  await push([
+    glaze('g1', 'sw1', T1),
+    photoRecord('sw1', hash, T1, { swatch: 1 }),
+  ])
+  await age('photo', 'sw1', 30)
+  const job = midRun({ before: () => push([live(glaze('g1', 'sw1'))]) })
+  expect(await runCleanup(job, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await isStub('photo', 'sw1')).toBe(false)
   await expectBytes(hash)
 })
 

@@ -15,9 +15,10 @@ import {
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
-import type { Photo, PhotoBytes, Settings } from '../db/types'
+import { liveSwatchIds } from '../db/swatch'
+import type { Glaze, Photo, PhotoBytes, Settings } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
-import { changedAt } from '../sync/records'
+import { changedAt, changeTime } from '../sync/records'
 import { withoutDeviceFields } from '../sync/track'
 import type { ReadBytes } from './export'
 import {
@@ -136,7 +137,6 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
   const clays = await matchByName(db.clays, json.clays)
   await mergeKeepingLocal(db.clays, clays.rows, count)
   const glazes = await matchByName(db.glazes, json.glazes.map(withValidColor))
-  await mergeKeepingLocal(db.glazes, glazes.rows, count)
 
   await mergePieces(
     json.pieces.map((p) => {
@@ -154,12 +154,34 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
     count,
   )
   const photos = await mergePhotos(json.photos, files, count)
+  // Glazes go in once their swatch photos are matched, so each links the
+  // photo's id here.
+  const glazeRows = glazes.rows.map((g) => {
+    const swatchPhotoId = g.swatchPhotoId && photos.idMap.get(g.swatchPhotoId)
+    return swatchPhotoId ? { ...g, swatchPhotoId } : g
+  })
+  const releases = await photosOfTombstoned(
+    db.glazes,
+    glazeRows,
+    (g) => g.swatchPhotoId,
+  )
+  for (const id of await swatchesOfKeptGlazes(glazeRows)) {
+    if (!releases.has(id)) releases.set(id, new Date().toISOString())
+  }
+  const addedGlazes = await mergeKeepingLocal(db.glazes, glazeRows, count)
+  await reviveSwatches(addedGlazes, photos.matched, count)
+  await carrySwatches(glazes.matches, photos, releases, count)
 
   const entries = json.entries.map((e) => {
     const photoId = e.photoId && photos.idMap.get(e.photoId)
     return photoId ? { ...e, photoId } : e
   })
-  const releases = await photosOfTombstonedSteps(entries)
+  const stepPhotos = await photosOfTombstoned(
+    db.entries,
+    entries,
+    (e) => e.photoId,
+  )
+  for (const [id, deletedAt] of stepPhotos) releases.set(id, deletedAt)
   for (const [id, deletedAt] of photos.tombstones) releases.set(id, deletedAt)
   const addedEntries = await mergeKeepingLocal(db.entries, entries, count)
   await reviveReusedPhotos(addedEntries, photos.matched, count)
@@ -183,42 +205,107 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
 }
 
 /**
- * Photos of local live steps that an incoming tombstone is about to delete,
- * with the tombstone's date. Read before the steps are written.
+ * Photos of local live rows (a step's photo, a glaze's swatch) that an
+ * incoming tombstone is about to delete, with the tombstone's date. Read
+ * before the rows are written.
  */
-async function photosOfTombstonedSteps(
-  incoming: BackupJson['entries'],
+async function photosOfTombstoned<T extends { id: string; deletedAt?: string }>(
+  table: EntityTable<T, 'id'>,
+  incoming: T[],
+  photoOf: (row: T) => string | undefined,
 ): Promise<Map<string, string>> {
   const rows = uniqueById(incoming)
-  const local = await db.entries.bulkGet(rows.map((r) => r.id))
+  const local = await table.bulkGet(rows.map((r) => r.id) as IDType<T, 'id'>[])
   const photos = new Map<string, string>()
   rows.forEach((row, i) => {
     const mine = local[i]
-    if (row.deletedAt && mine && !mine.deletedAt && mine.photoId) {
-      photos.set(mine.photoId, row.deletedAt)
+    const photoId = mine && photoOf(mine)
+    if (row.deletedAt && mine && !mine.deletedAt && photoId) {
+      photos.set(photoId, row.deletedAt)
     }
   })
   return photos
 }
 
 /**
+ * Swatch photos of incoming glazes whose id is already here, where the glaze
+ * here (which the merge keeps) links another photo or none. Read before the
+ * glazes are written.
+ */
+async function swatchesOfKeptGlazes(incoming: Glaze[]): Promise<string[]> {
+  const rows = uniqueById(incoming)
+  const local = await db.glazes.bulkGet(rows.map((r) => r.id))
+  return rows.flatMap((row, i) => {
+    const mine = local[i]
+    return mine && row.swatchPhotoId && row.swatchPhotoId !== mine.swatchPhotoId
+      ? [row.swatchPhotoId]
+      : []
+  })
+}
+
+/**
+ * A backup glaze matched by name to a live glaze here brings its swatch, with
+ * its color, to that glaze when it has none, as the first sign-in's join
+ * does; the change is dated so it syncs and wins. Otherwise the backup's
+ * swatch photo becomes a candidate to release.
+ */
+async function carrySwatches(
+  matches: { row: Glaze; id: string }[],
+  photos: { idMap: Map<string, string>; matched: Set<string> },
+  releases: Map<string, string>,
+  count: ImportResult,
+) {
+  const now = new Date().toISOString()
+  const carried: string[] = []
+  for (const { row, id } of matches) {
+    if (!row.swatchPhotoId) continue
+    const photoId = photos.idMap.get(row.swatchPhotoId) ?? row.swatchPhotoId
+    const glaze = await db.glazes.get(id)
+    if (glaze && !glaze.deletedAt && !glaze.swatchPhotoId) {
+      await db.glazes.update(id, {
+        swatchPhotoId: photoId,
+        color: row.color,
+        updatedAt: changeTime(glaze, now),
+      })
+      count.updated++
+      carried.push(photoId)
+    } else {
+      releases.set(photoId, now)
+    }
+  }
+  await undeletePhotos(carried, photos.matched, count)
+}
+
+/**
  * As removePhoto does in the app: a photo is deleted only when no live step
- * shows it, because identical photos share one row. Runs after the steps are
- * written, so it sees the merged state.
+ * shows it and no live glaze has it as its swatch, because identical photos
+ * share one row. Runs after the steps are written and the swatch links fixed,
+ * so it sees the merged state.
  */
 async function releaseUnusedPhotos(candidates: Map<string, string>) {
   if (candidates.size === 0) return
-  const used = new Set<string>()
+  const used = await liveSwatchIds(db)
   await db.entries
     .filter((e) => !e.deletedAt && e.photoId !== undefined)
     .each((e) => used.add(e.photoId as string))
   const ids = [...candidates.keys()]
   const photos = await db.photos.bulkGet(ids)
-  const changes = ids.flatMap((id, i) =>
-    photos[i] && !photos[i].deletedAt && !used.has(id)
-      ? [{ key: id, changes: { deletedAt: candidates.get(id) } }]
-      : [],
-  )
+  const now = new Date().toISOString()
+  // Dated as releaseSwatch does, past the row's last change.
+  const changes = ids.flatMap((id, i) => {
+    const photo = photos[i]
+    return photo && !photo.deletedAt && !used.has(id)
+      ? [
+          {
+            key: id,
+            changes: {
+              deletedAt: candidates.get(id),
+              updatedAt: changeTime(photo, now),
+            },
+          },
+        ]
+      : []
+  })
   if (changes.length > 0) await db.photos.bulkUpdate(changes)
 }
 
@@ -230,12 +317,14 @@ const uniqueById = <T extends { id: string }>(rows: T[]): T[] => [
  * Clays and glazes match by id, then by live name ignoring case, as the app
  * does when one is typed in. A live incoming row with a new id whose name
  * matches a live row here (or one earlier in this import) isn't added: its id
- * maps to that row. Returns the id map and the rows left for the id merge.
+ * maps to that row. Returns the id map, the rows left for the id merge, and
+ * each row matched by name with the id it maps to.
  */
 async function matchByName<
   T extends { id: string; name: string; deletedAt?: string },
 >(table: EntityTable<T, 'id'>, incoming: T[]) {
   const idMap = new Map<string, string>()
+  const matches: { row: T; id: string }[] = []
   const rows = uniqueById(incoming)
   const known = new Set(
     (await table.bulkGet(rows.map((r) => r.id) as IDType<T, 'id'>[]))
@@ -258,12 +347,13 @@ async function matchByName<
     const match = byName.get(key)
     if (match) {
       idMap.set(row.id, match)
+      matches.push({ row, id: match })
       continue
     }
     byName.set(key, row.id)
     left.push(row)
   }
-  return { idMap, rows: left }
+  return { idMap, rows: left, matches }
 }
 
 /**
@@ -447,6 +537,22 @@ async function mergePhotos(
 }
 
 /**
+ * A live incoming glaze whose swatch is a photo deleted here brings that photo
+ * back, as a step does.
+ */
+async function reviveSwatches(
+  addedGlazes: Glaze[],
+  matched: Set<string>,
+  count: ImportResult,
+) {
+  await undeletePhotos(
+    addedGlazes.filter((g) => !g.deletedAt).map((g) => g.swatchPhotoId),
+    matched,
+    count,
+  )
+}
+
+/**
  * A live incoming step that now points at a photo deleted here brings that
  * photo back, as adding the same photo in the app does.
  */
@@ -455,10 +561,21 @@ async function reviveReusedPhotos(
   matched: Set<string>,
   count: ImportResult,
 ) {
+  await undeletePhotos(
+    addedEntries.filter((e) => !e.deletedAt).map((e) => e.photoId),
+    matched,
+    count,
+  )
+}
+
+/** Brings back those of `photoIds` stored here before this import that are deleted. */
+async function undeletePhotos(
+  photoIds: (string | undefined)[],
+  matched: Set<string>,
+  count: ImportResult,
+) {
   const ids = new Set(
-    addedEntries
-      .filter((e) => !e.deletedAt && e.photoId && matched.has(e.photoId))
-      .map((e) => e.photoId as string),
+    photoIds.filter((id): id is string => id !== undefined && matched.has(id)),
   )
   const deleted = (await db.photos.bulkGet([...ids])).filter(
     (p) => p?.deletedAt,

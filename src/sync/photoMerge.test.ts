@@ -1,5 +1,5 @@
 import { GlazetteDB } from '../db/db'
-import type { Photo, StageEntry } from '../db/types'
+import type { Glaze, Photo, StageEntry } from '../db/types'
 import { mergePhotosByHash } from './photoMerge'
 import { onLocalChange, quietly } from './track'
 
@@ -167,4 +167,34 @@ test('a row another device merged away keeps its bytes and its wait to upload he
   const gone = await db.photos.get('b-x')
   expect(gone?.blob).toBeDefined()
   expect(gone?.needsUpload).toBe(1)
+})
+
+const glaze = (id: string, extra: Partial<Glaze> = {}): Glaze => ({
+  id,
+  name: id,
+  color: '#aabbcc',
+  updatedAt: T1,
+  ...extra,
+})
+
+test("mergePhotosByHash moves a glaze's swatch link to the kept photo", async () => {
+  await seed([photo('b-x', { swatch: 1 }), photo('a-y', { swatch: 1 })])
+  await quietly(db, () =>
+    db.glazes.bulkAdd([
+      glaze('g1', { swatchPhotoId: 'b-x' }),
+      glaze('g2', { swatchPhotoId: 'b-x', deletedAt: T2 }),
+      glaze('g3', { swatchPhotoId: 'a-y' }),
+    ]),
+  )
+  await mergePhotosByHash(db)
+  const g1 = await db.glazes.get('g1')
+  expect(g1?.swatchPhotoId).toBe('a-y')
+  expect(g1?.updatedAt).toBe('2026-01-01T00:00:00.001Z')
+  expect(g1?.dirty).toBe(1)
+  const g2 = await db.glazes.get('g2')
+  expect(g2?.swatchPhotoId).toBe('a-y')
+  expect(g2?.updatedAt).toBe('2026-02-01T00:00:00.001Z')
+  const g3 = await db.glazes.get('g3')
+  expect(g3?.updatedAt).toBe(T1)
+  expect(g3?.dirty).toBeUndefined()
 })

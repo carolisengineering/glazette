@@ -60,7 +60,7 @@ test('glazes are a list, one item and one dot in its own color per layer, in ord
     'Tenmoku',
   ])
   expect(
-    screen.getAllByTestId('glaze-dot').map((d) => d.style.backgroundColor),
+    screen.getAllByTestId('glaze-swatch').map((d) => d.style.backgroundColor),
   ).toEqual(['rgb(143, 179, 163)', 'rgb(63, 111, 154)', 'rgb(74, 47, 34)'])
 })
 
@@ -160,7 +160,7 @@ test('an unglazed piece says so, with no list and no dot', () => {
   render(<FactCards view={detail()} onPlan={() => {}} />)
   expect(screen.getByText('Not glazed yet')).toBeVisible()
   expect(screen.queryByRole('list')).toBeNull()
-  expect(screen.queryByTestId('glaze-dot')).toBeNull()
+  expect(screen.queryByTestId('glaze-swatch')).toBeNull()
 })
 
 test('nothing in the boxes clips long clay and glaze names', () => {
@@ -224,10 +224,47 @@ test('a plan shows as a plan, with rings, dips and notes, and skips nameless lay
       .map((li) => li.textContent),
   ).toEqual(['Rutile Blue · 2 dips', 'Shino · 1 dip · rim only'])
   expect(screen.getAllByTestId('plan-ring')).toHaveLength(2)
-  expect(screen.queryByTestId('glaze-dot')).toBeNull()
+  expect(screen.queryByTestId('glaze-swatch')).toBeNull()
   expect(screen.queryByText('Not glazed yet')).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'Edit glaze plan' }))
   expect(onPlan).toHaveBeenCalled()
+})
+
+test('FactCards draws a used glaze with a swatch as a small photo', () => {
+  render(
+    <FactCards
+      view={detail({
+        glazeLayerCount: 1,
+        glazeNames: ['Celadon'],
+        glazeLayers: [
+          { name: 'Celadon', color: '#8fb3a3', swatchPhotoId: 'sw1' },
+        ],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  const dot = screen.getByTestId('glaze-swatch')
+  expect(dot).toHaveClass('rounded-full', 'size-3')
+  expect(dot.style.backgroundColor).toBe('rgb(143, 179, 163)')
+  // PhotoImg draws its placeholder (or the photo) inside the swatch.
+  expect(dot.children).toHaveLength(1)
+})
+
+test("FactCards keeps the plan ring in the glaze's color", () => {
+  render(
+    <FactCards
+      view={detail({
+        stage: 'bisqued',
+        startsFromPlan: true,
+        planLayers: [{ glazeId: 'g1', name: 'Celadon', color: '#8fb3a3' }],
+      })}
+      onPlan={() => {}}
+    />,
+  )
+  expect(screen.getByTestId('plan-ring').style.borderColor).toBe(
+    'rgb(143, 179, 163)',
+  )
+  expect(screen.queryByTestId('glaze-swatch')).toBeNull()
 })
 
 test('used glazes that match the plan say so, and Show reveals the plan', async () => {

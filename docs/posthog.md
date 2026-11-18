@@ -50,6 +50,7 @@ The project is set to Chicago time, so days and weeks on the dashboard follow Ch
 - `stage_added`: a stage was added to a piece. It says the stage, if it had a photo and how long it took.
 - `glazes_added`: glazes were added to a piece. It says how many layers.
 - `piece_edited`: part of a piece was changed. It says which part: details, notes, a step, glazes, a photo or the glaze plan.
+- `swatch_saved`: a glaze swatch was saved. It says where the photo came from: a new photo or a piece.
 - `piece_lost`: a piece was marked lost or found again.
 - `piece_deleted`: a piece was deleted.
 - `step_deleted`: a stage entry was deleted.

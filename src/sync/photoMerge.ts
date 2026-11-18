@@ -8,11 +8,14 @@ import { changedAt, justAfter } from './records'
  * so devices that merge separately agree. A normal tracked write, so the
  * changes sync. Returns how many rows were merged away.
  *
+ * Steps that show a merged-away photo, and glazes whose swatch it is, move to
+ * the kept one.
+ *
  * Bytes aren't touched: they're found by hash, so the kept row already has any
  * this device holds. It takes over the wait to upload from its duplicates.
  */
 export function mergePhotosByHash(db: GlazetteDB): Promise<number> {
-  return db.transaction('rw', [db.photos, db.entries], async () => {
+  return db.transaction('rw', [db.photos, db.entries, db.glazes], async () => {
     const groups = new Map<string, Photo[]>()
     const live = await db.photos.filter((p) => !p.deletedAt).toArray()
     for (const photo of live) {
@@ -62,6 +65,15 @@ export function mergePhotosByHash(db: GlazetteDB): Promise<number> {
       .modify((e) => {
         e.photoId = end(e.photoId as string)
         e.updatedAt = justAfter(changedAt(e))
+      })
+    // So do glaze swatch links, live or deleted.
+    await db.glazes
+      .filter(
+        (g) => g.swatchPhotoId !== undefined && movedTo.has(g.swatchPhotoId),
+      )
+      .modify((g) => {
+        g.swatchPhotoId = end(g.swatchPhotoId as string)
+        g.updatedAt = justAfter(changedAt(g))
       })
     return merged
   })

@@ -57,6 +57,8 @@ export interface StoredPhoto {
   hash: string
   size: number
   thumbSize: number
+  swatch?: 1
+  deletedAt?: string
 }
 
 /** Reads every stored photo and its bytes straight from IndexedDB, independent of the app's own code. */
@@ -79,6 +81,8 @@ export async function readPhotos(page: Page): Promise<StoredPhoto[]> {
                 hash: p.hash,
                 size: byHash.get(p.hash).blob.size,
                 thumbSize: byHash.get(p.hash).thumb.size,
+                swatch: p.swatch,
+                deletedAt: p.deletedAt,
               })),
             )
           }

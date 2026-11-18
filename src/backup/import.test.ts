@@ -1123,6 +1123,280 @@ test('an incoming photo tombstone does not delete a local photo a live step uses
   expect((await db.photos.get('local-ph'))?.deletedAt).toBeUndefined()
 })
 
+const swatchGlaze = (swatchPhotoId: string): Glaze => ({
+  id: 'gl1',
+  name: 'Celadon',
+  color: '#9dbbaa',
+  swatchPhotoId,
+})
+
+test('restoring a glaze with a swatch links the restored photo', async () => {
+  await db.glazes.add(swatchGlaze('sw1'))
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  const zip = await exportZip()
+  await clearAll()
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('sw1')
+  const photo = await db.photos.get('sw1')
+  expect(photo?.swatch).toBe(1)
+  expect(photo?.deletedAt).toBeUndefined()
+  expect(await db.photoBytes.get(H1)).toBeDefined()
+})
+
+test('a swatch matched by content to a local photo with another id follows that id', async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  const glaze = await db.glazes.get('gl1')
+  expect(glaze?.swatchPhotoId).toBe('local-sw')
+  // Repointing the link isn't a change of its own: the backup's time stays.
+  expect(glaze?.updatedAt).toBe(EPOCH)
+  expect(await db.photos.get('sw1')).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+})
+
+test('a swatch matched to a locally deleted photo brings it back', async () => {
+  await db.photos.add({
+    ...photoRow('local-sw', H1, '2026-11-03'),
+    swatch: 1,
+  })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  const result = await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('local-sw')
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+  expect(result).toMatchObject({ added: 1, updated: 1 })
+})
+
+test("an incoming tombstone for the same image doesn't delete a photo a live glaze links", async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  await db.glazes.add(swatchGlaze('local-sw'))
+  const zip = zipOf(
+    backup({
+      photos: [
+        { ...photoMeta('ph1', H1), deletedAt: '2026-11-04T09:00:00.000Z' },
+      ],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+})
+
+test("a backup that deleted a glaze releases that glaze's swatch here", async () => {
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  await db.glazes.add(swatchGlaze('sw1'))
+  const zip = zipOf(
+    backup({
+      glazes: [
+        { ...swatchGlaze('sw1'), deletedAt: '2026-11-10T09:00:00.000Z' },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.deletedAt).toBe(
+    '2026-11-10T09:00:00.000Z',
+  )
+  expect((await db.photos.get('sw1'))?.deletedAt).toBe(
+    '2026-11-10T09:00:00.000Z',
+  )
+})
+
+test('a deleted glaze in a backup keeps a swatch another live glaze here shares', async () => {
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  await db.glazes.bulkAdd([
+    swatchGlaze('sw1'),
+    { ...swatchGlaze('sw1'), id: 'gl2', name: 'Tenmoku' },
+  ])
+  const zip = zipOf(
+    backup({
+      glazes: [
+        { ...swatchGlaze('sw1'), deletedAt: '2026-11-10T09:00:00.000Z' },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.deletedAt).toBeDefined()
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
+})
+
+test('a backup glaze with a swatch gives it to the same-named glaze here that has none', async () => {
+  // Changed "later" by a clock ahead of ours: the carry must still win.
+  await db.glazes.add({
+    id: 'local-cel',
+    name: 'Celadon',
+    color: '#111111',
+    updatedAt: '2999-01-01T00:00:00.000Z',
+  })
+  const zip = zipOf(
+    backup({
+      glazes: [{ ...swatchGlaze('sw1'), name: 'celadon ' }],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect(await db.glazes.count()).toBe(1)
+  const glaze = await db.glazes.get('local-cel')
+  expect(glaze).toMatchObject({
+    swatchPhotoId: 'sw1',
+    color: '#9dbbaa',
+    updatedAt: '2999-01-01T00:00:00.001Z',
+    dirty: 1,
+  })
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
+})
+
+test('a backup glaze matched by name to a glaze here with a swatch releases its own swatch', async () => {
+  await db.photos.add({ ...photoRow('local-sw', H2), swatch: 1 })
+  await db.glazes.add({
+    id: 'local-cel',
+    name: 'Celadon',
+    color: '#111111',
+    swatchPhotoId: 'local-sw',
+  })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect(await db.glazes.get('local-cel')).toMatchObject({
+    swatchPhotoId: 'local-sw',
+    color: '#111111',
+  })
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeDefined()
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+})
+
+test('a backup copy of a glaze here releases its other swatch', async () => {
+  await db.photos.add({ ...photoRow('local-sw', H2), swatch: 1 })
+  await db.glazes.add(swatchGlaze('local-sw'))
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('local-sw')
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeDefined()
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+})
+
+test('a backup copy of a glaze here without a swatch releases the backup swatch, not carries it', async () => {
+  await db.glazes.add({ id: 'gl1', name: 'Celadon', color: '#111111' })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  const glaze = await db.glazes.get('gl1')
+  expect(glaze?.swatchPhotoId).toBeUndefined()
+  expect(glaze?.color).toBe('#111111')
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeDefined()
+})
+
+test('a released photo is dated past its last change', async () => {
+  await db.photos.add({
+    ...photoRow('local-sw', H2),
+    swatch: 1,
+    updatedAt: '2999-01-01T00:00:00.000Z',
+  })
+  await db.glazes.add(swatchGlaze('local-sw'))
+  const zip = zipOf(
+    backup({
+      glazes: [
+        { ...swatchGlaze('local-sw'), deletedAt: '2026-11-10T09:00:00.000Z' },
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect(await db.photos.get('local-sw')).toMatchObject({
+    deletedAt: '2026-11-10T09:00:00.000Z',
+    updatedAt: '2999-01-01T00:00:00.001Z',
+  })
+})
+
+test('a backup copy of a glaze here with the same swatch keeps it', async () => {
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  await db.glazes.add(swatchGlaze('sw1'))
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('sw1')
+  expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
+})
+
+test("a backup glaze matched by name keeps a swatch that is the same image as the local glaze's", async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  await db.glazes.add({
+    id: 'local-cel',
+    name: 'Celadon',
+    color: '#111111',
+    swatchPhotoId: 'local-sw',
+  })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('local-cel'))?.swatchPhotoId).toBe('local-sw')
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+})
+
 test('a backup from a newer database version is refused and writes nothing', async () => {
   await ensureDefaults()
   const before = await snapshot()

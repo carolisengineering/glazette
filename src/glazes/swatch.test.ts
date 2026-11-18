@@ -1,6 +1,6 @@
 import { buildPieceViews } from '../db/queries'
 import type { Glaze, GlazeApplication, Piece, StageEntry } from '../db/types'
-import { buildGlazeViews, centerCropStyle } from './swatch'
+import { buildGlazeViews, centerCropStyle, firedPhotoIds } from './swatch'
 
 const piece = (id: string, extra: Partial<Piece> = {}): Piece => ({
   id,
@@ -44,6 +44,26 @@ function views(
     glazes,
   )
 }
+
+test("buildGlazeViews prefers the glaze's own swatch over the newest fired photo", () => {
+  const glazes = [
+    glaze('g1', 'Celadon', { swatchPhotoId: 'own' }),
+    glaze('g2', 'Tenmoku'),
+  ]
+  const entries = [
+    entry('ag', 'a', 'glazed', '2026-10-02'),
+    entry('af', 'a', 'fired', '2026-10-10', { photoId: 'fired' }),
+  ]
+  const apps = [app('ag', 'a', 'g1'), app('ag', 'a', 'g2')]
+  const result = views([piece('a')], entries, apps, glazes)
+  expect(result.find((v) => v.glaze.id === 'g1')?.swatchPhotoId).toBe('own')
+  expect(result.find((v) => v.glaze.id === 'g2')?.swatchPhotoId).toBe('fired')
+})
+
+test("a glaze's own swatch shows even when no piece wears it", () => {
+  const glazes = [glaze('g1', 'Celadon', { swatchPhotoId: 'own' })]
+  expect(views([], [], [], glazes)[0].swatchPhotoId).toBe('own')
+})
 
 test('swatchPhotoId is the newest fired photo among pieces using the glaze, undefined when none fired', () => {
   const glazes = [glaze('g1', 'Celadon'), glaze('g2', 'Tenmoku')]
@@ -156,3 +176,45 @@ test.each([
     expect(result[0].pieceIds).toEqual(['a'])
   },
 )
+
+describe('firedPhotoIds', () => {
+  const setup = (entries: StageEntry[]) => {
+    const glazes = [glaze('g1', 'Celadon')]
+    const pieces = [piece('a'), piece('b')]
+    const apps = [app('ag', 'a', 'g1'), app('bg', 'b', 'g1')]
+    return views(
+      pieces,
+      [
+        entry('ag', 'a', 'glazed', '2026-10-02'),
+        entry('bg', 'b', 'glazed', '2026-10-03'),
+        ...entries,
+      ],
+      apps,
+      glazes,
+    )[0].pieces
+  }
+
+  test('firedPhotoIds skips Glazed and other stages, and deleted steps', () => {
+    const pieces = setup([
+      entry('x1', 'a', 'glazed', '2026-10-02', { photoId: 'glazedPhoto' }),
+      entry('x2', 'a', 'bisqued', '2026-10-01', { photoId: 'bisquePhoto' }),
+      entry('x3', 'a', 'fired', '2026-10-09', {
+        photoId: 'gone',
+        deletedAt: '2026-10-10T00:00:00Z',
+      }),
+      entry('x4', 'b', 'fired', '2026-10-09'),
+      entry('x5', 'b', 'fired', '2026-10-08', { photoId: 'kept' }),
+    ])
+    expect(firedPhotoIds(pieces)).toEqual(['kept'])
+  })
+
+  test('firedPhotoIds lists newest Fired step first and drops repeats', () => {
+    const pieces = setup([
+      entry('f1', 'a', 'fired', '2026-10-05', { photoId: 'mid' }),
+      entry('f2', 'b', 'fired', '2026-10-20', { photoId: 'new' }),
+      entry('f3', 'b', 'fired', '2026-10-01', { photoId: 'old' }),
+      entry('f4', 'a', 'fired', '2026-10-06', { photoId: 'new' }),
+    ])
+    expect(firedPhotoIds(pieces)).toEqual(['new', 'mid', 'old'])
+  })
+})
