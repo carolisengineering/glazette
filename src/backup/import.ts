@@ -290,11 +290,22 @@ async function releaseUnusedPhotos(candidates: Map<string, string>) {
     .each((e) => used.add(e.photoId as string))
   const ids = [...candidates.keys()]
   const photos = await db.photos.bulkGet(ids)
-  const changes = ids.flatMap((id, i) =>
-    photos[i] && !photos[i].deletedAt && !used.has(id)
-      ? [{ key: id, changes: { deletedAt: candidates.get(id) } }]
-      : [],
-  )
+  const now = new Date().toISOString()
+  // Dated as releaseSwatch does, past the row's last change.
+  const changes = ids.flatMap((id, i) => {
+    const photo = photos[i]
+    return photo && !photo.deletedAt && !used.has(id)
+      ? [
+          {
+            key: id,
+            changes: {
+              deletedAt: candidates.get(id),
+              updatedAt: changeTime(photo, now),
+            },
+          },
+        ]
+      : []
+  })
   if (changes.length > 0) await db.photos.bulkUpdate(changes)
 }
 

@@ -12,7 +12,7 @@ export type SwatchEdit =
   | { kind: 'remove' }
 
 /**
- * Sends a swatch photo to Recently Deleted once no live glaze links it. Does
+ * Releases (soft-deletes) a swatch photo once no live glaze links it. Does
  * nothing when the photo is missing, purged or already deleted. The caller has
  * already moved the link off the glaze. Call inside a transaction that
  * includes `db.glazes` and `db.photos`.
@@ -47,7 +47,7 @@ export async function liveSwatchIds(db: GlazetteDB): Promise<Set<string>> {
 
 /**
  * Adds or updates a glaze, and its swatch as `swatch` says. A replaced or
- * removed swatch photo goes to Recently Deleted. Returns the glaze id.
+ * removed swatch photo is released. Returns the glaze id.
  */
 export async function saveGlaze(
   input: Omit<Glaze, 'id' | 'deletedAt' | 'swatchPhotoId'> & { id?: string },
@@ -81,7 +81,7 @@ export async function saveGlaze(
   return id
 }
 
-/** Soft-deletes a glaze and sends its swatch photo to Recently Deleted. */
+/** Soft-deletes a glaze and releases its swatch photo. */
 export async function deleteGlaze(id: string): Promise<void> {
   await db.transaction('rw', db.glazes, db.photos, async () => {
     const glaze = await db.glazes.get(id)
