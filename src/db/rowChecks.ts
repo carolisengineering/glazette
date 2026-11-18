@@ -64,7 +64,8 @@ export const isLayerRow = (row: unknown) =>
     (r) => typeof r.order === 'number',
   )
 
-export const isGlazeRow = (row: unknown) => isRow(row, ['name'])
+export const isGlazeRow = (row: unknown) =>
+  isRow(row, ['name'], (r) => isStringOrAbsent(r.swatchPhotoId))
 
 export const isClayRow = (row: unknown) => isRow(row, ['name'])
 
@@ -82,7 +83,8 @@ export const isPhotoRow = (row: unknown) =>
       r.blob === undefined &&
       r.thumb === undefined &&
       isStringOrAbsent(r.updatedAt) &&
-      isStringOrAbsent(r.mergedInto),
+      isStringOrAbsent(r.mergedInto) &&
+      (r.swatch === undefined || r.swatch === 1),
   )
 
 export function isSettingsRow(row: unknown): boolean {
