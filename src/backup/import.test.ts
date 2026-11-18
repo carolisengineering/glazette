@@ -1123,6 +1123,85 @@ test('an incoming photo tombstone does not delete a local photo a live step uses
   expect((await db.photos.get('local-ph'))?.deletedAt).toBeUndefined()
 })
 
+const swatchGlaze = (swatchPhotoId: string): Glaze => ({
+  id: 'gl1',
+  name: 'Celadon',
+  color: '#9dbbaa',
+  swatchPhotoId,
+})
+
+test('restoring a glaze with a swatch links the restored photo', async () => {
+  await db.glazes.add(swatchGlaze('sw1'))
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  const zip = await exportZip()
+  await clearAll()
+
+  await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('sw1')
+  const photo = await db.photos.get('sw1')
+  expect(photo?.swatch).toBe(1)
+  expect(photo?.deletedAt).toBeUndefined()
+  expect(await db.photoBytes.get(H1)).toBeDefined()
+})
+
+test('a swatch matched by content to a local photo with another id follows that id', async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  const glaze = await db.glazes.get('gl1')
+  expect(glaze?.swatchPhotoId).toBe('local-sw')
+  // Repointing the link isn't a change of its own: the backup's time stays.
+  expect(glaze?.updatedAt).toBe(EPOCH)
+  expect(await db.photos.get('sw1')).toBeUndefined()
+  expect(await db.photos.count()).toBe(1)
+})
+
+test('a swatch matched to a locally deleted photo brings it back', async () => {
+  await db.photos.add({
+    ...photoRow('local-sw', H1, '2026-11-03'),
+    swatch: 1,
+  })
+  const zip = zipOf(
+    backup({
+      glazes: [swatchGlaze('sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  const result = await importZip(zip)
+
+  expect((await db.glazes.get('gl1'))?.swatchPhotoId).toBe('local-sw')
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+  expect(result).toMatchObject({ added: 1, updated: 1 })
+})
+
+test("an incoming tombstone for the same image doesn't delete a photo a live glaze links", async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  await db.glazes.add(swatchGlaze('local-sw'))
+  const zip = zipOf(
+    backup({
+      photos: [
+        { ...photoMeta('ph1', H1), deletedAt: '2026-11-04T09:00:00.000Z' },
+      ],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+})
+
 test('a backup from a newer database version is refused and writes nothing', async () => {
   await ensureDefaults()
   const before = await snapshot()

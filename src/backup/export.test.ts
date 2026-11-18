@@ -198,6 +198,40 @@ test('rows sharing a hash export its files once', async () => {
   expect(reads).toBe(2)
 })
 
+test("a backup includes a swatch photo's image and the glaze's link", async () => {
+  await db.photoBytes.add({
+    hash: 'h1',
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
+  })
+  await db.photos.add({
+    id: 'sw1',
+    hash: 'h1',
+    width: 600,
+    height: 600,
+    takenAt: 't',
+    swatch: 1,
+  })
+  await db.glazes.add({
+    id: 'gl1',
+    name: 'Celadon',
+    color: '#9dbbaa',
+    swatchPhotoId: 'sw1',
+  })
+
+  const { files, json } = await unpack(await exportZip())
+
+  expect(json.glazes[0].swatchPhotoId).toBe('sw1')
+  expect(json.photos).toEqual([
+    expect.objectContaining({ id: 'sw1', swatch: 1 }),
+  ])
+  expect(Object.keys(files).sort()).toEqual([
+    'glazette.json',
+    'photos/h1.jpg',
+    'thumbs/h1.jpg',
+  ])
+})
+
 test('an undated step exports with no date key', async () => {
   await db.entries.add({ id: 'e1', pieceId: 'p1', stage: 'bisqued' })
   const { json } = await unpack(await exportZip())

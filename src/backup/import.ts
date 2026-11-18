@@ -15,7 +15,8 @@ import {
   nameKey,
   withValidColor,
 } from '../db/rowChecks'
-import type { Photo, PhotoBytes, Settings } from '../db/types'
+import { liveSwatchIds } from '../db/swatch'
+import type { Glaze, Photo, PhotoBytes, Settings } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
 import { changedAt } from '../sync/records'
 import { withoutDeviceFields } from '../sync/track'
@@ -136,7 +137,6 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
   const clays = await matchByName(db.clays, json.clays)
   await mergeKeepingLocal(db.clays, clays.rows, count)
   const glazes = await matchByName(db.glazes, json.glazes.map(withValidColor))
-  await mergeKeepingLocal(db.glazes, glazes.rows, count)
 
   await mergePieces(
     json.pieces.map((p) => {
@@ -154,6 +154,17 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
     count,
   )
   const photos = await mergePhotos(json.photos, files, count)
+  // Glazes go in once their swatch photos are matched, so each links the
+  // photo's id here.
+  const addedGlazes = await mergeKeepingLocal(
+    db.glazes,
+    glazes.rows.map((g) => {
+      const swatchPhotoId = g.swatchPhotoId && photos.idMap.get(g.swatchPhotoId)
+      return swatchPhotoId ? { ...g, swatchPhotoId } : g
+    }),
+    count,
+  )
+  await reviveSwatches(addedGlazes, photos.matched, count)
 
   const entries = json.entries.map((e) => {
     const photoId = e.photoId && photos.idMap.get(e.photoId)
@@ -203,12 +214,13 @@ async function photosOfTombstonedSteps(
 
 /**
  * As removePhoto does in the app: a photo is deleted only when no live step
- * shows it, because identical photos share one row. Runs after the steps are
- * written, so it sees the merged state.
+ * shows it and no live glaze has it as its swatch, because identical photos
+ * share one row. Runs after the steps are written and the swatch links fixed,
+ * so it sees the merged state.
  */
 async function releaseUnusedPhotos(candidates: Map<string, string>) {
   if (candidates.size === 0) return
-  const used = new Set<string>()
+  const used = await liveSwatchIds(db)
   await db.entries
     .filter((e) => !e.deletedAt && e.photoId !== undefined)
     .each((e) => used.add(e.photoId as string))
@@ -447,6 +459,22 @@ async function mergePhotos(
 }
 
 /**
+ * A live incoming glaze whose swatch is a photo deleted here brings that photo
+ * back, as a step does.
+ */
+async function reviveSwatches(
+  addedGlazes: Glaze[],
+  matched: Set<string>,
+  count: ImportResult,
+) {
+  await undeletePhotos(
+    addedGlazes.filter((g) => !g.deletedAt).map((g) => g.swatchPhotoId),
+    matched,
+    count,
+  )
+}
+
+/**
  * A live incoming step that now points at a photo deleted here brings that
  * photo back, as adding the same photo in the app does.
  */
@@ -455,10 +483,21 @@ async function reviveReusedPhotos(
   matched: Set<string>,
   count: ImportResult,
 ) {
+  await undeletePhotos(
+    addedEntries.filter((e) => !e.deletedAt).map((e) => e.photoId),
+    matched,
+    count,
+  )
+}
+
+/** Brings back those of `photoIds` stored here before this import that are deleted. */
+async function undeletePhotos(
+  photoIds: (string | undefined)[],
+  matched: Set<string>,
+  count: ImportResult,
+) {
   const ids = new Set(
-    addedEntries
-      .filter((e) => !e.deletedAt && e.photoId && matched.has(e.photoId))
-      .map((e) => e.photoId as string),
+    photoIds.filter((id): id is string => id !== undefined && matched.has(id)),
   )
   const deleted = (await db.photos.bulkGet([...ids])).filter(
     (p) => p?.deletedAt,
