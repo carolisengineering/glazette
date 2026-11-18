@@ -46,6 +46,8 @@ export interface PieceView {
   glazeLayers: {
     name: string
     color: string
+    /** The glaze's own swatch photo, if it has one. */
+    swatchPhotoId?: string
     dips?: number
     method?: GlazeApplication['method']
     note?: string
@@ -138,6 +140,7 @@ export function buildPieceViews(
       glazeLayers: layers.map(({ glaze, app }, i) => ({
         name: glazeNames[i],
         color: glaze.color,
+        swatchPhotoId: glaze.swatchPhotoId,
         ...layerDetails(app),
       })),
       glazeLayerCount: liveApps.length,

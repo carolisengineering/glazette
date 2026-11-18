@@ -130,7 +130,7 @@ test('swatch tile shows the newest fired photo, and falls back to the color with
   )
   const tenmokuTile = screen.getByRole('button', { name: /Tenmoku/ })
   expect(tenmokuTile.querySelector('img')).toBeNull()
-  expect(within(tenmokuTile).getByTestId('swatch-fill')).toHaveStyle({
+  expect(within(tenmokuTile).getByTestId('glaze-swatch')).toHaveStyle({
     backgroundColor: '#3A2A20',
   })
 })

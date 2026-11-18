@@ -45,6 +45,26 @@ function views(
   )
 }
 
+test("buildGlazeViews prefers the glaze's own swatch over the newest fired photo", () => {
+  const glazes = [
+    glaze('g1', 'Celadon', { swatchPhotoId: 'own' }),
+    glaze('g2', 'Tenmoku'),
+  ]
+  const entries = [
+    entry('ag', 'a', 'glazed', '2026-10-02'),
+    entry('af', 'a', 'fired', '2026-10-10', { photoId: 'fired' }),
+  ]
+  const apps = [app('ag', 'a', 'g1'), app('ag', 'a', 'g2')]
+  const result = views([piece('a')], entries, apps, glazes)
+  expect(result.find((v) => v.glaze.id === 'g1')?.swatchPhotoId).toBe('own')
+  expect(result.find((v) => v.glaze.id === 'g2')?.swatchPhotoId).toBe('fired')
+})
+
+test("a glaze's own swatch shows even when no piece wears it", () => {
+  const glazes = [glaze('g1', 'Celadon', { swatchPhotoId: 'own' })]
+  expect(views([], [], [], glazes)[0].swatchPhotoId).toBe('own')
+})
+
 test('swatchPhotoId is the newest fired photo among pieces using the glaze, undefined when none fired', () => {
   const glazes = [glaze('g1', 'Celadon'), glaze('g2', 'Tenmoku')]
   const pieces = [piece('a'), piece('b'), piece('c')]

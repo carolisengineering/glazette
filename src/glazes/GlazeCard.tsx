@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { PhotoImg } from '../components/PhotoImg'
 import { displayName } from '../db/stage'
+import { GlazeSwatch } from './GlazeSwatch'
 import { centerCropStyle, type GlazeView } from './swatch'
 
 interface Props {
@@ -19,21 +20,11 @@ export function GlazeCard({ view, onEdit }: Props) {
       className="flex flex-col gap-3.5 rounded-card bg-surface p-4"
     >
       <div className="flex items-center gap-3.5">
-        <div className="size-16 flex-none overflow-hidden rounded-[18px]">
-          {swatchPhotoId ? (
-            <PhotoImg
-              photoId={swatchPhotoId}
-              thumb
-              className="size-full"
-              style={centerCropStyle(1, 1)}
-            />
-          ) : (
-            <div
-              className="size-full"
-              style={{ backgroundColor: glaze.color }}
-            />
-          )}
-        </div>
+        <GlazeSwatch
+          color={glaze.color}
+          photoId={swatchPhotoId}
+          className="size-16 flex-none rounded-[18px]"
+        />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h2 className="truncate font-serif text-[28px] leading-[1.05] font-normal">
             {glaze.name}

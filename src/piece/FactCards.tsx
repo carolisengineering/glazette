@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
 import type { PieceDetail, PlanLayerView } from '../db/queries'
 import type { GlazeApplication, Stage } from '../db/types'
+import { GlazeSwatch } from '../glazes/GlazeSwatch'
 
 const valueText = 'text-[15px] leading-snug font-semibold wrap-anywhere'
 
@@ -148,12 +149,11 @@ export function FactCards({
                 // list from the database, so an index key just re-renders each row.
                 // biome-ignore lint/suspicious/noArrayIndexKey: layers carry no id here
                 <li key={i} className={`flex items-start gap-1.5 ${valueText}`}>
-                  <span
-                    aria-hidden="true"
-                    data-testid="glaze-dot"
-                    // The faint ring keeps light glazes visible on the white card.
-                    className="mt-[0.3em] size-3 flex-none rounded-full shadow-[inset_0_0_0_1px_rgb(22_32_42/0.18)]"
-                    style={{ backgroundColor: layer.color }}
+                  {/* The faint ring (drawn over the photo) keeps light glazes visible on the white card. */}
+                  <GlazeSwatch
+                    color={layer.color}
+                    photoId={layer.swatchPhotoId}
+                    className="mt-[0.3em] size-3 flex-none rounded-full after:absolute after:inset-0 after:rounded-full after:shadow-[inset_0_0_0_1px_rgb(22_32_42/0.18)]"
                   />
                   <span className="min-w-0 wrap-anywhere">
                     {layer.name}
