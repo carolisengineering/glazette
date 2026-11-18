@@ -55,9 +55,8 @@ export async function saveGlaze(
 ): Promise<string> {
   const id = input.id ?? newId()
   await db.transaction('rw', db.glazes, db.photos, db.photoBytes, async () => {
-    const previous = input.id
-      ? (await db.glazes.get(id))?.swatchPhotoId
-      : undefined
+    const existing = input.id ? await db.glazes.get(id) : undefined
+    const previous = existing?.swatchPhotoId
     const now = new Date().toISOString()
     let fields: Partial<Glaze> = { ...input }
     let newPhotoId = previous
@@ -70,7 +69,7 @@ export async function saveGlaze(
       newPhotoId = undefined
       fields = { ...fields, swatchPhotoId: undefined }
     }
-    if (input.id && (await db.glazes.get(id))) {
+    if (existing) {
       await db.glazes.update(id, fields)
     } else {
       await db.glazes.add({ ...input, ...fields, id } as Glaze)

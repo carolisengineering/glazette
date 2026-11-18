@@ -58,7 +58,7 @@ export interface StoredPhoto {
   size: number
   thumbSize: number
   swatch?: 1
-  deletedAt?: number
+  deletedAt?: string
 }
 
 /** Reads every stored photo and its bytes straight from IndexedDB, independent of the app's own code. */

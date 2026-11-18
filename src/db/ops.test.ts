@@ -169,6 +169,12 @@ test('addStageEntry rejects a soft-deleted piece and writes nothing', async () =
   expect((await db.pieces.get(pieceId))?.updatedAt).toBe(deleted?.updatedAt)
 })
 
+test('the generic soft delete takes no glazes: deleteGlaze also releases the swatch', () => {
+  // @ts-expect-error A glaze is deleted with deleteGlaze.
+  const deleteAGlaze = () => softDelete('glazes', 'g1')
+  expect(deleteAGlaze).toBeTypeOf('function')
+})
+
 test('dates are stored as full ISO timestamps so a date-only value orders correctly', async () => {
   const pieceId = await createPiece({ date: '2026-11-02' })
   expect((await db.pieces.get(pieceId))?.createdAt).toBe(
