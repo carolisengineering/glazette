@@ -462,7 +462,8 @@ const isDefaultColor = (v: unknown) =>
  * details when it changed later; on a tie, only what the account's row lacks
  * (empty notes or cone, the default color); nothing when the account's row
  * changed later. The account's name always stays. A glaze swatch, with its
- * color, carries onto an account glaze without one whatever the times.
+ * color, carries onto an account glaze without one whatever the times; an
+ * account swatch that stays keeps its color.
  */
 function carriedDetails(local: Row, account: Row): Record<string, unknown> {
   const localTime = changedAt(local)
@@ -496,6 +497,13 @@ function carriedDetails(local: Row, account: Row): Record<string, unknown> {
     ) {
       details.color = local.color
     }
+  }
+  // An account swatch that stays keeps its own color.
+  if (
+    account.swatchPhotoId !== undefined &&
+    details.swatchPhotoId === undefined
+  ) {
+    delete details.color
   }
   return details
 }

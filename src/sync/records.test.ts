@@ -867,6 +867,31 @@ describe('mergeByName', () => {
     expect((await db.photos.get('sw1'))?.deletedAt).toBeUndefined()
   })
 
+  test("mergeByName keeps an account glaze's swatch and its color when the newer local glaze has none", async () => {
+    await quietly(db, async () => {
+      await db.photos.add(swatchPhoto('asw'))
+      await db.glazes.bulkAdd([
+        glaze('lg', 'Shino', { ...details, updatedAt: T3 }),
+        glaze('ag', 'Shino', {
+          color: '#00aa00',
+          swatchPhotoId: 'asw',
+          updatedAt: T2,
+        }),
+      ])
+    })
+
+    await mergeByName(db, { glaze: new Set(['ag']), clay: new Set() })
+
+    // Its other details still come from the newer local glaze.
+    expect(await db.glazes.get('ag')).toMatchObject({
+      swatchPhotoId: 'asw',
+      color: '#00aa00',
+      cone: '10',
+      notes: 'Runs on verticals',
+    })
+    expect((await db.photos.get('asw'))?.deletedAt).toBeUndefined()
+  })
+
   test("mergeByName with swatches on both keeps the newer and deletes the other's photo", async () => {
     await quietly(db, async () => {
       await db.photos.bulkAdd([
