@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useModal } from '../components/useModal'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { SAVE_ERROR, useToast } from '../components/useToast'
@@ -84,6 +84,20 @@ export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
     pointers.current.delete(e.pointerId)
     resetPinch()
   }
+
+  // Trackpad pinch and mouse wheels send wheel events. Attached by hand so it can be non-passive.
+  useEffect(() => {
+    const el = areaRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      setView((v) =>
+        zoomTo(v, v.zoom * Math.exp(-e.deltaY / 300), width, height),
+      )
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [width, height])
 
   const use = async () => {
     setBusy(true)

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SwatchImage } from '../photos/swatchImage'
@@ -44,6 +44,17 @@ describe('CropSwatch', () => {
       sourceSquare(startView(4000, 3000), 4000, 3000),
     )
     expect(onUse).toHaveBeenCalledWith(made)
+  })
+
+  it('a wheel scroll up zooms in', async () => {
+    setup()
+    const area = screen.getByRole('dialog').querySelector('.touch-none')
+    if (!area) throw new Error('no crop area')
+    fireEvent.wheel(area, { deltaY: -100 })
+    await userEvent.click(screen.getByRole('button', { name: 'Use swatch' }))
+    const start = sourceSquare(startView(4000, 3000), 4000, 3000)
+    const used = makeSwatch.mock.calls[0][1] as { size: number }
+    expect(used.size).toBeLessThan(start.size)
   })
 
   it('Cancel calls onCancel and makes nothing', async () => {
