@@ -38,7 +38,12 @@ export function deletedRows(
       }
     } else {
       const photo = photos.get(id)
-      if (photo?.deletedAt && !photo.purgedAt && !photo.mergedInto) {
+      if (
+        photo?.deletedAt &&
+        !photo.purgedAt &&
+        !photo.mergedInto &&
+        !photo.swatch
+      ) {
         // A purged piece keeps its name here, but Put back makes a new one.
         const home = photo.lastPieceId
           ? pieces.get(photo.lastPieceId)

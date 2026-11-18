@@ -1,6 +1,5 @@
 import { useId, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { PhotoImg } from '../components/PhotoImg'
 import { fieldLabel } from '../components/PieceFields'
 import { useModal } from '../components/useModal'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -12,6 +11,7 @@ import { usePhotoPicker } from '../photos/usePhotoPicker'
 import type { SWATCH_SOURCES } from '../telemetry/events'
 import { track } from '../telemetry/telemetry'
 import { CropSwatch } from './CropSwatch'
+import { GlazeSwatch } from './GlazeSwatch'
 import { PiecePhotoGrid, usePickablePhotoIds } from './PiecePhotoGrid'
 
 interface Props {
@@ -177,9 +177,9 @@ export function GlazeSheet({
                   className="size-full object-cover"
                 />
               ) : swatch.kind === 'keep' && glaze?.swatchPhotoId ? (
-                <PhotoImg
+                <GlazeSwatch
+                  color={color}
                   photoId={glaze.swatchPhotoId}
-                  thumb
                   className="size-full"
                 />
               ) : (

@@ -14,6 +14,7 @@ export function GlazeSwatch({ color, photoId, className = '' }: Props) {
   return (
     <span
       data-testid="glaze-swatch"
+      aria-hidden="true"
       className={`relative block ${className}`}
       style={{ backgroundColor: color }}
     >
