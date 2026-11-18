@@ -13,14 +13,19 @@ export const R2_DELETE_MAX_KEYS = 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 const KINDS = `(${EXPIRING_KINDS.map((k) => `'${k}'`).join(', ')})`
 
-// An expired photo tombstone that a live step still shows stays, and stays
-// expired, so the queries leave it out: otherwise it would come back first on
-// every run and fill the limits. It still goes with an expired piece whose live
-// step shows it (see cleanUser). `r` is the expired row.
-const KEPT_PHOTO = `(r.kind = 'photo' AND EXISTS (SELECT 1 FROM records s
+// An expired photo tombstone that a live step still shows, or that a live
+// glaze links as its swatch, stays, and stays expired, so the queries leave it
+// out: otherwise it would come back first on every run and fill the limits. It
+// still goes with an expired piece whose live step shows it (see cleanUser),
+// unless a live glaze links it. `r` is the expired row.
+const KEPT_PHOTO = `(r.kind = 'photo' AND (EXISTS (SELECT 1 FROM records s
     WHERE s.user_id = r.user_id AND s.kind = 'entry' AND s.purged_at IS NULL
       AND json_extract(s.data, '$.deletedAt') IS NULL
-      AND json_extract(s.data, '$.photoId') = r.id))`
+      AND json_extract(s.data, '$.photoId') = r.id)
+  OR EXISTS (SELECT 1 FROM records g
+    WHERE g.user_id = r.user_id AND g.kind = 'glaze' AND g.purged_at IS NULL
+      AND json_extract(g.data, '$.deletedAt') IS NULL
+      AND json_extract(g.data, '$.swatchPhotoId') = r.id)))`
 
 const USERS = `SELECT DISTINCT user_id FROM records r
   WHERE deleted_heard_at IS NOT NULL AND deleted_heard_at <= ?1
@@ -53,12 +58,19 @@ const PHOTOS_BY_ID = `SELECT kind, id, changed_at, json_extract(data, '$.hash') 
   WHERE user_id = ?1 AND kind = 'photo' AND purged_at IS NULL
     AND id IN (SELECT value FROM json_each(?2))`
 
-// Live steps that show any of the given photos (?2).
-const SHOWN_BY = `SELECT id, json_extract(data, '$.photoId') AS photo_id
+// Live steps that show any of the given photos (?2), and live glazes that
+// link any of them as their swatch.
+const SHOWN_BY = `SELECT kind, id, json_extract(data, '$.photoId') AS photo_id
   FROM records
   WHERE user_id = ?1 AND kind = 'entry' AND purged_at IS NULL
     AND json_extract(data, '$.deletedAt') IS NULL
-    AND json_extract(data, '$.photoId') IN (SELECT value FROM json_each(?2))`
+    AND json_extract(data, '$.photoId') IN (SELECT value FROM json_each(?2))
+  UNION ALL
+  SELECT kind, id, json_extract(data, '$.swatchPhotoId') AS photo_id
+  FROM records
+  WHERE user_id = ?1 AND kind = 'glaze' AND purged_at IS NULL
+    AND json_extract(data, '$.deletedAt') IS NULL
+    AND json_extract(data, '$.swatchPhotoId') IN (SELECT value FROM json_each(?2))`
 
 // Stubs the batch (?3 as JSON: [{k, i, c, pk, pi}]) in the form of the push's
 // upsert, each seq above every stored one, keeping each record's change time.
@@ -67,7 +79,8 @@ const SHOWN_BY = `SELECT id, json_extract(data, '$.photoId') AS photo_id
 // change time, not purged). An expired record must still be a delete the
 // server heard of; a put back clears that. A record that only came in with
 // another (pk, pi) goes only if that one is a stub now, so it runs in a later
-// statement of the same batch. A photo stays while a live step shows it.
+// statement of the same batch. A photo stays while a live step shows it or a
+// live glaze links it.
 // CROSS JOIN keeps the batch as the outer loop.
 const STUB = `INSERT INTO records (user_id, kind, id, changed_at, data, seq, purged_at, deleted_heard_at)
   SELECT ?1, r.kind, r.id, r.changed_at,
@@ -87,7 +100,12 @@ const STUB = `INSERT INTO records (user_id, kind, id, changed_at, data, seq, pur
       SELECT json_extract(s.data, '$.photoId') FROM records s
       WHERE s.user_id = ?1 AND s.kind = 'entry' AND s.purged_at IS NULL
         AND json_extract(s.data, '$.deletedAt') IS NULL
-        AND json_extract(s.data, '$.photoId') IS NOT NULL))
+        AND json_extract(s.data, '$.photoId') IS NOT NULL
+      UNION ALL
+      SELECT json_extract(g.data, '$.swatchPhotoId') FROM records g
+      WHERE g.user_id = ?1 AND g.kind = 'glaze' AND g.purged_at IS NULL
+        AND json_extract(g.data, '$.deletedAt') IS NULL
+        AND json_extract(g.data, '$.swatchPhotoId') IS NOT NULL))
   ON CONFLICT (user_id, kind, id) DO UPDATE SET
     data = excluded.data, purged_at = excluded.purged_at,
     deleted_heard_at = NULL, seq = excluded.seq`
@@ -238,15 +256,15 @@ async function cleanUser(
       })
     }
   }
-  // A candidate survives while a live step outside this purge shows it.
+  // A candidate survives while a live step outside this purge shows it, or a
+  // live glaze (never purged) links it.
   if (candidates.size > 0) {
     const { results: shown } = await db
       .prepare(SHOWN_BY)
       .bind(userId, JSON.stringify([...candidates.keys()]))
-      .all<{ id: string; photo_id: string }>()
+      .all<{ kind: string; id: string; photo_id: string }>()
     for (const r of shown) {
-      if (!purge.has(keyOf({ kind: 'entry', id: r.id })))
-        candidates.delete(r.photo_id)
+      if (!purge.has(keyOf(r))) candidates.delete(r.photo_id)
     }
   }
   if (purge.size === 0 && candidates.size === 0) {
