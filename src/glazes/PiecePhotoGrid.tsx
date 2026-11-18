@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useId, useRef } from 'react'
+import { useId, useRef, useState } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
 import { useModal } from '../components/useModal'
 import { db } from '../db/db'
@@ -8,6 +8,7 @@ import { centerCropStyle } from './swatch'
 
 interface Props {
   glazeName: string
+  /** The photos to offer, as usePickablePhotoIds gives them. */
   photoIds: string[]
   /** Called with the full photo (not the thumbnail) and its upright size. */
   onPick: (picked: { blob: Blob; width: number; height: number }) => void
@@ -32,6 +33,9 @@ export function usePickablePhotoIds(photoIds: string[]): string[] | undefined {
   }, [key])
 }
 
+const NOT_HERE = "That photo isn't on this device yet."
+const READ_FAILED = "Couldn't open this photo. Try again."
+
 /** Pick one of the fired photos of pieces wearing the glaze, to crop into its swatch. */
 export function PiecePhotoGrid({
   glazeName,
@@ -42,13 +46,28 @@ export function PiecePhotoGrid({
   const titleId = useId()
   const cancelRef = useRef<HTMLButtonElement>(null)
   useModal(cancelRef, onCancel)
-  const ids = usePickablePhotoIds(photoIds)
+
+  // A tap while a photo is being read is ignored.
+  const reading = useRef(false)
+  const [problem, setProblem] = useState<string>()
 
   const pick = async (id: string) => {
-    const photo = await db.photos.get(id)
-    const bytes = photo && (await bytesOf(db, photo))
-    if (!photo || !bytes) return
-    onPick({ blob: bytes.blob, width: photo.width, height: photo.height })
+    if (reading.current) return
+    reading.current = true
+    setProblem(undefined)
+    try {
+      const photo = await db.photos.get(id)
+      const bytes = photo && (await bytesOf(db, photo))
+      if (!photo || !bytes) {
+        setProblem(NOT_HERE)
+        return
+      }
+      onPick({ blob: bytes.blob, width: photo.width, height: photo.height })
+    } catch {
+      setProblem(READ_FAILED)
+    } finally {
+      reading.current = false
+    }
   }
 
   return (
@@ -63,7 +82,7 @@ export function PiecePhotoGrid({
           {`Pieces in ${glazeName}`}
         </h2>
         <ul className="grid grid-cols-3 gap-2">
-          {(ids ?? []).map((id, i) => (
+          {photoIds.map((id, i) => (
             <li key={id}>
               <button
                 type="button"
@@ -81,6 +100,11 @@ export function PiecePhotoGrid({
             </li>
           ))}
         </ul>
+        {problem ? (
+          <p role="alert" className="text-[14px] text-ink">
+            {problem}
+          </p>
+        ) : null}
         <button
           ref={cancelRef}
           type="button"

@@ -323,7 +323,7 @@ export function GlazeSheet({
       {choosingPiece && glaze ? (
         <PiecePhotoGrid
           glazeName={glaze.name}
-          photoIds={firedPhotoIds}
+          photoIds={pickable ?? []}
           onPick={(picked) => {
             setChoosingPiece(false)
             setCropping({ ...picked, source: 'piece' })
