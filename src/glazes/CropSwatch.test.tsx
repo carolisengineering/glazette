@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SwatchImage } from '../photos/swatchImage'
@@ -58,6 +58,18 @@ describe('CropSwatch', () => {
     const { onCancel } = setup()
     await userEvent.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('Escape does nothing while the swatch is being made', async () => {
+    let finish: (image: SwatchImage) => void = () => {}
+    makeSwatch.mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    const { onCancel, onUse } = setup()
+    await userEvent.click(screen.getByRole('button', { name: 'Use swatch' }))
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).not.toHaveBeenCalled()
+    finish(made)
+    await waitFor(() => expect(onUse).toHaveBeenCalledWith(made))
+    expect(onCancel).not.toHaveBeenCalled()
   })
 
   it('stays open with an error when making the swatch fails', async () => {

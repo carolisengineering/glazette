@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS } from '../db/seed'
 import { GlazeCard } from '../glazes/GlazeCard'
 import { GlazeSheet } from '../glazes/GlazeSheet'
 import { SwatchWall } from '../glazes/SwatchWall'
-import { useGlazeViews } from '../glazes/swatch'
+import { firedPhotoIds, useGlazeViews } from '../glazes/swatch'
 
 type Sheet = { glazeId?: string } | undefined
 
@@ -21,9 +21,10 @@ export function GlazesScreen() {
 
   const list = views ?? []
   const selected = list.find((v) => v.glaze.id === pickedId) ?? list[0]
-  const editing = sheet?.glazeId
-    ? list.find((v) => v.glaze.id === sheet.glazeId)?.glaze
+  const editingView = sheet?.glazeId
+    ? list.find((v) => v.glaze.id === sheet.glazeId)
     : undefined
+  const editing = editingView?.glaze
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col gap-5 px-5 pt-14 pb-32">
@@ -76,6 +77,7 @@ export function GlazesScreen() {
       {sheet ? (
         <GlazeSheet
           glaze={editing}
+          firedPhotoIds={editingView ? firedPhotoIds(editingView.pieces) : []}
           liveGlazes={list.map((v) => v.glaze)}
           defaultCone={settings?.defaultCone ?? DEFAULT_SETTINGS.defaultCone}
           onClose={(savedId) => {

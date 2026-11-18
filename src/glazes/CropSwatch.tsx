@@ -24,10 +24,13 @@ const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
   const url = usePhotoUrl(source)
   const cancelRef = useRef<HTMLButtonElement>(null)
-  useModal(cancelRef, onCancel)
   const { show: showToast, toast } = useToast()
   const [view, setView] = useState<CropView>(() => startView(width, height))
   const [busy, setBusy] = useState(false)
+  // Escape does nothing while the swatch is being made, like the Cancel button.
+  useModal(cancelRef, () => {
+    if (!busy) onCancel()
+  })
 
   const areaRef = useRef<HTMLDivElement>(null)
   const [area, setArea] = useState({ w: 0, h: 0 })
