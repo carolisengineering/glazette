@@ -546,6 +546,24 @@ test("a deleted photo that a live glaze links as its swatch isn't purged", async
   await expectBytes(hash)
 })
 
+test("a deleted photo that a live combo links as its swatch isn't purged", async () => {
+  const hash = await upload(1)
+  await push([
+    {
+      kind: 'combo',
+      id: 'c1',
+      changedAt: T1,
+      data: { id: 'c1', layers: ['g1', 'g2'], swatchPhotoId: 'sw1' },
+    },
+    photoRecord('sw1', hash, T1, { swatch: 1 }),
+  ])
+  await age('photo', 'sw1', 30)
+  const photo = await row('photo', 'sw1')
+  expect(await runCleanup(env, NOW)).toEqual({ purged: 0, filesDeleted: 0 })
+  expect(await row('photo', 'sw1')).toEqual(photo)
+  await expectBytes(hash)
+})
+
 test('a deleted photo that only a deleted glaze links is purged', async () => {
   const hash = await upload(1)
   await push([

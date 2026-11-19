@@ -8,9 +8,11 @@ import {
   type RecordKind,
   type SyncRecord,
 } from '../../shared/syncProtocol'
+import { comboId } from '../db/combos'
 import type { GlazetteDB } from '../db/db'
 import {
   isClayRow,
+  isComboRow,
   isEntryRow,
   isGlazeRow,
   isLayerRow,
@@ -38,6 +40,7 @@ const TABLE_OF: Record<RecordKind, TableName> = {
   entry: 'entries',
   glazeApp: 'glazeApps',
   glaze: 'glazes',
+  combo: 'combos',
   clay: 'clays',
   settings: 'settings',
   // Last, so a push sends a step's change before its photo's.
@@ -51,6 +54,7 @@ const ROW_CHECK: Record<RecordKind, (row: unknown) => boolean> = {
   entry: isEntryRow,
   glazeApp: isLayerRow,
   glaze: isGlazeRow,
+  combo: isComboRow,
   clay: isClayRow,
   photo: isPhotoRow,
   settings: (row) =>
@@ -353,6 +357,7 @@ export function mergeByName(
     async () => {
       const glazes = await joinByName(db, db.glazes, accountIds.glaze)
       const clays = await joinByName(db, db.clays, accountIds.clay)
+      if (glazes.size > 0) await moveCombos(db, glazes)
       if (glazes.size > 0) {
         await db.glazeApps
           .filter((a) => glazes.has(a.glazeId))
@@ -388,6 +393,37 @@ export function mergeByName(
       }
     },
   )
+}
+
+/**
+ * Points live combos at the account's glazes. A combo whose new stack the
+ * account already has is deleted, and its photo released; otherwise it
+ * becomes the combo of the new stack, keeping its photo.
+ */
+async function moveCombos(
+  db: GlazetteDB,
+  glazes: Map<string, string>,
+): Promise<void> {
+  const moving = await db.combos
+    .filter((c) => !c.deletedAt && c.layers.some((l) => glazes.has(l)))
+    .toArray()
+  const now = new Date().toISOString()
+  for (const combo of moving) {
+    const layers = combo.layers.map((l) => glazes.get(l) ?? l)
+    const id = comboId(layers)
+    const existing = await db.combos.get(id)
+    await db.combos.update(combo.id, { deletedAt: now })
+    if (existing && !existing.deletedAt) {
+      await releaseSwatch(db, combo.swatchPhotoId, now)
+    } else {
+      await db.combos.put({
+        id,
+        layers,
+        swatchPhotoId: combo.swatchPhotoId,
+        createdAt: combo.createdAt ?? now,
+      })
+    }
+  }
 }
 
 /** The ISO time 1 ms after `time`, a valid change time. */

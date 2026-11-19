@@ -3,6 +3,7 @@ import {
   MAX_DATA_CHARS,
   type SyncRecord,
 } from '../../shared/syncProtocol'
+import { comboId } from '../db/combos'
 import { GlazetteDB } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Photo, Piece } from '../db/types'
@@ -1021,5 +1022,98 @@ describe('mergeByName', () => {
       updatedAt: '2026-01-01T00:00:00.001Z',
       dirty: 1,
     })
+  })
+})
+
+describe('combos', () => {
+  const comboRecord = (id: string, changed: string): SyncRecord => ({
+    kind: 'combo',
+    id,
+    changedAt: changed,
+    data: {
+      id,
+      layers: ['g1', 'g2'],
+      swatchPhotoId: 'ph1',
+      updatedAt: changed,
+    },
+  })
+
+  test('a combo pushes and pulls like a glaze', async () => {
+    const id = comboId(['g1', 'g2'])
+    await db.combos.add({ id, layers: ['g1', 'g2'], swatchPhotoId: 'ph1' })
+    expect(await db.combos.get(id)).toMatchObject({ dirty: 1 })
+    expect(
+      (await readDirty(db)).filter((r) => r.kind === 'combo').map((r) => r.id),
+    ).toEqual([id])
+    await clearDirty(db, await readDirty(db))
+    await db.combos.update(id, { deletedAt: T2 })
+    expect((await readDirty(db)).map((r) => r.kind)).toEqual(['combo'])
+
+    await applyRecords(db, [comboRecord('combo-x', T2)])
+    expect(await db.combos.get('combo-x')).toMatchObject({
+      layers: ['g1', 'g2'],
+      swatchPhotoId: 'ph1',
+      updatedAt: T2,
+    })
+    expect((await db.combos.get('combo-x'))?.dirty).toBeUndefined()
+  })
+
+  const stored = (id: string, layers: string[], photo: string) => ({
+    id,
+    layers,
+    swatchPhotoId: photo,
+    createdAt: T1,
+    updatedAt: T1,
+  })
+
+  test("first sign-in moves combos onto the account's glazes", async () => {
+    const old = comboId(['X', 'L'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.add(photoRow('ph1', { swatch: 1 }))
+      await db.combos.add(stored(old, ['X', 'L'], 'ph1'))
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    expect(await db.combos.get(comboId(['X', 'A']))).toMatchObject({
+      layers: ['X', 'A'],
+      swatchPhotoId: 'ph1',
+      dirty: 1,
+    })
+    expect(
+      (await db.combos.get(comboId(['X', 'A'])))?.deletedAt,
+    ).toBeUndefined()
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+  })
+
+  test("first sign-in keeps the account's combo when both have the stack", async () => {
+    const old = comboId(['X', 'L'])
+    const kept = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1 }),
+      ])
+      await db.combos.bulkAdd([
+        stored(old, ['X', 'L'], 'ph1'),
+        stored(kept, ['X', 'A'], 'ph2'),
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    expect(await db.combos.get(kept)).toMatchObject({
+      swatchPhotoId: 'ph2',
+      updatedAt: T1,
+    })
+    expect((await db.combos.get(kept))?.deletedAt).toBeUndefined()
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph2'))?.deletedAt).toBeUndefined()
   })
 })

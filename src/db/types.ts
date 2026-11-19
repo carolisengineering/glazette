@@ -67,7 +67,7 @@ export interface Glaze {
 /** A saved swatch photo for an ordered stack of 2-3 glazes. */
 export interface Combo {
   id: string // comboId(layers)
-  layers: string[] // glaze ids, bottom layer first
+  layers: string[] // glaze ids, top layer first
   swatchPhotoId: string
   createdAt?: string
   deletedAt?: string

@@ -109,6 +109,24 @@ test('a photo record is accepted', async () => {
   expect((await pulled()).records).toEqual([record])
 })
 
+test('a combo record is accepted and pulled', async () => {
+  const record: SyncRecord = {
+    kind: 'combo',
+    id: 'combo-1',
+    changedAt: T1,
+    data: {
+      id: 'combo-1',
+      layers: ['g1', 'g2'],
+      swatchPhotoId: 'ph1',
+      updatedAt: T1,
+    },
+  }
+  const res = await push({ records: [record] })
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ rejected: [] })
+  expect((await pulled()).records).toEqual([record])
+})
+
 test('push and pull need a session', async () => {
   for (const cookie of [null, '__Host-session_token=unknown']) {
     const a = await push({ records: [] }, { cookie })

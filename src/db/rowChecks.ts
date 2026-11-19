@@ -1,4 +1,5 @@
 import { PHOTO_HASH } from '../../shared/photoProtocol'
+import { isValidStack } from './combos'
 import { DEFAULT_GLAZE_COLOR } from './seed'
 import { STAGES } from './stage'
 
@@ -66,6 +67,17 @@ export const isLayerRow = (row: unknown) =>
 
 export const isGlazeRow = (row: unknown) =>
   isRow(row, ['name'], (r) => isStringOrAbsent(r.swatchPhotoId))
+
+/** A combo: 2-3 glaze ids, top layer first, and its swatch photo. */
+export const isComboRow = (row: unknown) =>
+  isRow(
+    row,
+    ['swatchPhotoId'],
+    (r) =>
+      Array.isArray(r.layers) &&
+      r.layers.every((l) => typeof l === 'string') &&
+      isValidStack(r.layers as string[]),
+  )
 
 export const isClayRow = (row: unknown) => isRow(row, ['name'])
 

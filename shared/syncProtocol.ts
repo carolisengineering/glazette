@@ -6,9 +6,10 @@ export const RECORD_KINDS = [
   'entry',
   'glazeApp',
   'glaze',
+  'combo',
   'clay',
   'settings',
-  // Last, so a push sends a step's change before its photo's.
+  // Last, so a push sends a step's or combo's change before its photo's.
   'photo',
 ] as const
 
