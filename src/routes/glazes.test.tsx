@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { comboId } from '../db/combos'
 import { db, newId } from '../db/db'
 import { addStageEntry, createPiece, ensureDefaults } from '../db/ops'
 import type { ProcessedImage } from '../photos/process'
@@ -457,4 +458,112 @@ test('Escape while the crop screen is open leaves the sheet open', async () => {
   await userEvent.keyboard('{Escape}')
   expect(screen.queryByRole('dialog', { name: 'Crop swatch' })).toBeNull()
   expect(screen.getByRole('dialog', { name: 'Edit glaze' })).toBeVisible()
+})
+
+async function addCombo(layers: string[]) {
+  const id = comboId(layers)
+  await db.combos.add({ id, layers, swatchPhotoId: `swatch-${id}` })
+  return id
+}
+
+async function comboPiece(name: string, layers: string[]) {
+  const id = await createPiece({ name })
+  await addStageEntry({
+    pieceId: id,
+    stage: 'glazed',
+    glazes: layers.map((glazeId) => ({ glazeId })),
+  })
+  return id
+}
+
+async function comboSetup() {
+  const tenmoku = await addGlaze('Tenmoku')
+  const celadon = await addGlaze('Celadon')
+  const oatmeal = await addGlaze('Oatmeal')
+  await addCombo([oatmeal, tenmoku])
+  await addCombo([celadon, tenmoku])
+  await addCombo([oatmeal, celadon])
+  return { tenmoku, celadon, oatmeal }
+}
+
+test('the switch shows combos grouped by bucket', async () => {
+  await comboSetup()
+  renderRoute('/glazes')
+  const combosTab = await screen.findByRole('button', { name: 'Combos' })
+  expect(combosTab).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('button', { name: 'Glazes' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await userEvent.click(combosTab)
+  expect(combosTab).toHaveAttribute('aria-pressed', 'true')
+  const headings = await screen.findAllByRole('heading', { name: /^Over / })
+  expect(headings.map((h) => h.textContent)).toEqual([
+    'Over Celadon',
+    'Over Tenmoku',
+  ])
+  expect(
+    screen.getByRole('button', { name: 'Oatmeal over Celadon' }),
+  ).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Celadon over Tenmoku' }),
+  ).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Oatmeal over Tenmoku' }),
+  ).toBeVisible()
+})
+
+test('the header button says Add combos on the Combos side', async () => {
+  await comboSetup()
+  renderRoute('/glazes')
+  expect(await screen.findByRole('button', { name: 'Add glaze' })).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Combos' }))
+  expect(screen.getByRole('button', { name: 'Add combos' })).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Add glaze' })).toBeNull()
+})
+
+test('tapping a combo shows its card with the pieces that wore it', async () => {
+  const { tenmoku, celadon, oatmeal } = await comboSetup()
+  const mug = await comboPiece('Mug', [celadon, tenmoku])
+  await comboPiece('Bowl', [oatmeal, tenmoku])
+  renderRoute('/glazes')
+  await userEvent.click(await screen.findByRole('button', { name: 'Combos' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+  )
+  const card = screen.getByRole('region', { name: 'Celadon over Tenmoku' })
+  expect(within(card).getByText('used on 1 piece')).toBeVisible()
+  expect(within(card).getByRole('link', { name: 'Mug' })).toHaveAttribute(
+    'href',
+    `/piece/${mug}`,
+  )
+  expect(within(card).queryByRole('link', { name: 'Bowl' })).toBeNull()
+  expect(within(card).getByRole('button', { name: 'Edit' })).toBeVisible()
+})
+
+test('no combos yet shows the empty message', async () => {
+  await addGlaze('Celadon')
+  renderRoute('/glazes')
+  await userEvent.click(await screen.findByRole('button', { name: 'Combos' }))
+  expect(
+    await screen.findByText(
+      "No combos yet. Add them from a photo of your studio's test tiles, or from a fired piece.",
+    ),
+  ).toBeVisible()
+  expect(
+    screen.getAllByRole('button', { name: 'Add combos' }),
+  ).not.toHaveLength(0)
+})
+
+test('the Glazes side is unchanged with the switch present', async () => {
+  await addGlaze('Celadon', { cone: '6' })
+  renderRoute('/glazes')
+  expect(await screen.findByText('Cone 6 · used on 0 pieces')).toBeVisible()
+  expect(screen.getByRole('button', { name: /Celadon/ })).toBeVisible()
+})
+
+test('no switch before any glaze exists', async () => {
+  renderRoute('/glazes')
+  await screen.findByText(/No glazes yet/)
+  expect(screen.queryByRole('button', { name: 'Combos' })).toBeNull()
 })
