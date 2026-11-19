@@ -1,4 +1,5 @@
 import type { SwatchImage } from '../photos/swatchImage'
+import { saveCombo } from './combos'
 import { db } from './db'
 import { deleteGlaze, liveSwatchIds, releaseSwatch, saveGlaze } from './swatch'
 
@@ -98,4 +99,15 @@ test('liveSwatchIds skips deleted glazes', async () => {
   await deleteGlaze(a)
   expect(await liveSwatchIds(db)).toEqual(new Set([bPhoto]))
   expect((await liveSwatchIds(db)).has(aPhoto)).toBe(false)
+})
+
+test("liveSwatchIds includes live combos' swatches, not deleted ones'", async () => {
+  const live = await saveCombo(['g1', 'g2'], swatch('h1'))
+  const gone = await saveCombo(['g1', 'g3'], swatch('h2'))
+  const livePhoto = (await db.combos.get(live))?.swatchPhotoId as string
+  const gonePhoto = (await db.combos.get(gone))?.swatchPhotoId as string
+  await db.combos.update(gone, { deletedAt: '2026-11-19T00:00:00.000Z' })
+  const ids = await liveSwatchIds(db)
+  expect(ids.has(livePhoto)).toBe(true)
+  expect(ids.has(gonePhoto)).toBe(false)
 })

@@ -64,6 +64,18 @@ export interface Glaze {
   dirty?: 1 // changed here since the last sync
 }
 
+/** A saved swatch photo for an ordered stack of 2-3 glazes. */
+export interface Combo {
+  id: string // comboId(layers)
+  layers: string[] // glaze ids, bottom layer first
+  swatchPhotoId: string
+  createdAt?: string
+  deletedAt?: string
+  purgedAt?: string
+  updatedAt?: string // stamped on every local change
+  dirty?: 1 // changed here since the last sync
+}
+
 export interface Clay {
   id: string
   name: string // "Speckled buff", "Porcelain"

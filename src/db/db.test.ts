@@ -8,17 +8,17 @@ beforeEach(async () => {
 
 const SYNCED = ['pieces', 'entries', 'glazeApps', 'glazes', 'clays', 'settings']
 
-test('schema has the nine tables and compound index entries.[pieceId+date]', () => {
+test('schema has the ten tables and compound index entries.[pieceId+date]', () => {
   expect(db.tables.map((t) => t.name).sort()).toEqual(
-    [...SYNCED, 'photos', 'photoBytes', 'syncState'].sort(),
+    [...SYNCED, 'combos', 'photos', 'photoBytes', 'syncState'].sort(),
   )
   const indexes = db.table('entries').schema.indexes.map((i) => i.name)
   expect(indexes).toContain('[pieceId+date]')
 })
 
-test('version 4 indexes dirty on the six synced tables and the photo flags', () => {
-  expect(db.verno).toBe(4)
-  for (const name of SYNCED) {
+test('version 5 indexes dirty on the synced tables and the photo flags', () => {
+  expect(db.verno).toBe(5)
+  for (const name of [...SYNCED, 'combos']) {
     const indexes = db.table(name).schema.indexes.map((i) => i.name)
     expect(indexes, name).toContain('dirty')
   }
@@ -30,7 +30,7 @@ test('version 4 indexes dirty on the six synced tables and the photo flags', () 
 })
 
 test('the photoBytes table exists at version 4, keyed by hash', () => {
-  expect(db.verno).toBe(4)
+  expect(db.verno).toBeGreaterThanOrEqual(4)
   expect(db.table('photoBytes').schema.primKey.name).toBe('hash')
   expect(db.table('photoBytes').schema.indexes).toEqual([])
 })
@@ -71,6 +71,37 @@ test('opening version 4 forgets the last sync', async () => {
     glazes: 'id, name, deletedAt, dirty',
     clays: 'id, name, deletedAt, dirty',
     photos: 'id, hash',
+    settings: 'id, dirty',
+    syncState: 'id',
+  })
+  await old.open()
+  await old.table('syncState').add({
+    id: 'state',
+    account: 'me',
+    cursor: 5,
+    lastSyncedAt: '2026-11-08T10:00:00.000Z',
+  })
+  old.close()
+  const upgraded = new GlazetteDB(name)
+  try {
+    await upgraded.open()
+    expect(await upgraded.syncState.count()).toBe(0)
+  } finally {
+    await upgraded.delete()
+  }
+})
+
+test('opening version 5 forgets the last sync', async () => {
+  const name = `upgrade5-${crypto.randomUUID()}`
+  const old = new Dexie(name)
+  old.version(4).stores({
+    pieces: 'id, updatedAt, deletedAt, dirty',
+    entries: 'id, pieceId, [pieceId+date], stage, deletedAt, dirty',
+    glazeApps: 'id, entryId, pieceId, glazeId, dirty',
+    glazes: 'id, name, deletedAt, dirty',
+    clays: 'id, name, deletedAt, dirty',
+    photos: 'id, hash, dirty, needsUpload, needsDownload',
+    photoBytes: 'hash',
     settings: 'id, dirty',
     syncState: 'id',
   })

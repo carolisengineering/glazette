@@ -75,6 +75,7 @@ export async function importZip(
       db.entries,
       db.glazeApps,
       db.glazes,
+      db.combos,
       db.clays,
       db.settings,
       db.photos,

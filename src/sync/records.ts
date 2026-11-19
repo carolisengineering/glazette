@@ -341,7 +341,15 @@ export function mergeByName(
 ): Promise<void> {
   return db.transaction(
     'rw',
-    [db.glazes, db.clays, db.glazeApps, db.pieces, db.settings, db.photos],
+    [
+      db.glazes,
+      db.combos,
+      db.clays,
+      db.glazeApps,
+      db.pieces,
+      db.settings,
+      db.photos,
+    ],
     async () => {
       const glazes = await joinByName(db, db.glazes, accountIds.glaze)
       const clays = await joinByName(db, db.clays, accountIds.clay)
