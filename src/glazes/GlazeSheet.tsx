@@ -1,9 +1,11 @@
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useId, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { fieldLabel } from '../components/PieceFields'
 import { useModal } from '../components/useModal'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { SAVE_ERROR, useToast } from '../components/useToast'
+import { db } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { deleteGlaze, type SwatchEdit, saveGlaze } from '../db/swatch'
 import type { Glaze } from '../db/types'
@@ -11,6 +13,7 @@ import { usePhotoPicker } from '../photos/usePhotoPicker'
 import type { SWATCH_SOURCES } from '../telemetry/events'
 import { track } from '../telemetry/telemetry'
 import { CropSwatch } from './CropSwatch'
+import { comboCountWith } from './combos'
 import { GlazeSwatch } from './GlazeSwatch'
 import { PiecePhotoGrid, usePickablePhotoIds } from './PiecePhotoGrid'
 
@@ -45,6 +48,12 @@ export function GlazeSheet({
   const titleId = useId()
   const nameRef = useRef<HTMLInputElement>(null)
   const [confirming, setConfirming] = useState(false)
+  const comboCount =
+    useLiveQuery(
+      async () =>
+        glaze ? comboCountWith(glaze.id, await db.combos.toArray()) : 0,
+      [glaze?.id],
+    ) ?? 0
   // A photo waiting to be cropped, and where it came from.
   const [cropping, setCropping] = useState<{
     blob: Blob
@@ -314,7 +323,11 @@ export function GlazeSheet({
       {confirming && glaze ? (
         <ConfirmDialog
           title={`Delete ${glaze.name}?`}
-          body="Pieces that used it keep the name, marked (retired)."
+          body={`Pieces that used it keep the name, marked (retired).${
+            comboCount
+              ? ` Its ${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} won't show any more.`
+              : ''
+          }`}
           confirmLabel="Delete"
           onConfirm={remove}
           onCancel={() => setConfirming(false)}

@@ -266,6 +266,37 @@ test('deleting asks first, removes the glaze from the wall, and pieces show (ret
   expect(await screen.findByText('Celadon (retired)')).toBeVisible()
 })
 
+test("deleting a glaze with combos says they'll stop showing", async () => {
+  const celadon = await addGlaze('Celadon')
+  const tenmoku = await addGlaze('Tenmoku')
+  const chun = await addGlaze('Chun')
+  const ids = ['combo-a', 'combo-b']
+  await db.combos.bulkAdd([
+    { id: ids[0], layers: [celadon, tenmoku], swatchPhotoId: 'p1' },
+    { id: ids[1], layers: [chun, celadon], swatchPhotoId: 'p2' },
+  ])
+  renderRoute('/glazes')
+  await userEvent.click(
+    (await screen.findAllByRole('button', { name: 'Edit' }))[0],
+  )
+  await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+  const confirm = await screen.findByRole('dialog', { name: /Delete Celadon/ })
+  expect(
+    within(confirm).getByText(
+      "Pieces that used it keep the name, marked (retired). Its 2 combos won't show any more.",
+    ),
+  ).toBeVisible()
+  await userEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))
+  await waitFor(async () =>
+    expect((await db.glazes.get(celadon))?.deletedAt).toBeTruthy(),
+  )
+  for (const id of ids) {
+    const row = await db.combos.get(id)
+    expect(row).toBeDefined()
+    expect(row?.deletedAt).toBeUndefined()
+  }
+})
+
 test('Escape in the delete confirm closes only the confirm', async () => {
   await addGlaze('Celadon')
   renderRoute('/glazes')
