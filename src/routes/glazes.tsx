@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { BottomBar } from '../components/BottomBar'
 import { db } from '../db/db'
 import { DEFAULT_SETTINGS } from '../db/seed'
+import { AddCombos } from '../glazes/AddCombos'
 import { ComboCard } from '../glazes/ComboCard'
 import { ComboStrips } from '../glazes/ComboStrips'
 import { comboStrips, useComboViews } from '../glazes/combos'
@@ -17,7 +18,7 @@ const addButton =
   'h-11 rounded-3xl bg-accent px-5 text-[16px] font-semibold text-white'
 
 const segment = (active: boolean) =>
-  `h-9 flex-1 rounded-[10px] text-[15px] font-semibold ${
+  `h-11 flex-1 rounded-[10px] text-[15px] font-semibold ${
     active ? 'bg-surface text-ink shadow-sm' : 'bg-transparent text-muted'
   }`
 
@@ -26,8 +27,8 @@ export function GlazesScreen() {
   const comboViews = useComboViews()
   const [tab, setTab] = useState<'glazes' | 'combos'>('glazes')
   const [pickedComboId, setPickedComboId] = useState<string>()
-  // Tasks 6-7 fill these in: adding combos and editing one.
-  const [, setComboSheet] = useState<{ comboId?: string }>()
+  // Adding combos; with `comboId` set, editing one (not built yet).
+  const [comboSheet, setComboSheet] = useState<{ comboId?: string }>()
   const settings = useLiveQuery(() => db.settings.get('app'), [])
   const [pickedId, setPickedId] = useState<string>()
   const [sheet, setSheet] = useState<Sheet>()
@@ -44,6 +45,9 @@ export function GlazesScreen() {
   const selectedCombo =
     comboList.find((v) => v.combo.id === pickedComboId) ?? strips[0]?.combos[0]
   const onCombos = tab === 'combos' && !!selected
+  // Like Add glaze, the header's Add combos waits until there's a combo; the
+  // empty card offers it before then.
+  const showHeaderAdd = onCombos ? !!selectedCombo : !!selected
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[430px] flex-col gap-5 px-5 pt-14 pb-32">
@@ -56,7 +60,7 @@ export function GlazesScreen() {
             Glazes
           </h1>
         </div>
-        {selected ? (
+        {showHeaderAdd ? (
           <button
             type="button"
             onClick={() => (onCombos ? setComboSheet({}) : setSheet({}))}
@@ -150,6 +154,15 @@ export function GlazesScreen() {
           onClose={(savedId) => {
             if (savedId) setPickedId(savedId)
             setSheet(undefined)
+          }}
+        />
+      ) : null}
+      {comboSheet && !comboSheet.comboId ? (
+        <AddCombos
+          onClose={() => setComboSheet(undefined)}
+          onSaved={(id) => {
+            setTab('combos')
+            setPickedComboId(id)
           }}
         />
       ) : null}

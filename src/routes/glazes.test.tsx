@@ -550,9 +550,56 @@ test('no combos yet shows the empty message', async () => {
       "No combos yet. Add them from a photo of your studio's test tiles, or from a fired piece.",
     ),
   ).toBeVisible()
+  expect(screen.getAllByRole('button', { name: 'Add combos' })).toHaveLength(1)
+})
+
+test('Add combos runs the test tile flow and selects the last combo saved', async () => {
+  const { tenmoku } = await comboSetup()
+  const shino = await addGlaze('Shino')
+  vi.mocked(processImage).mockResolvedValue(photo('tiles'))
+  vi.mocked(makeSwatch).mockResolvedValue(swatchImage('tile'))
+  renderRoute('/glazes')
+  await userEvent.click(await screen.findByRole('button', { name: 'Combos' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Add combos' }))
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  await userEvent.click(
+    within(choose).getByRole('button', { name: /Test tile photo/ }),
+  )
+  fireEvent.change(screen.getByTestId('library-input'), {
+    target: { files: [new File(['x'], 'tiles.jpg', { type: 'image/jpeg' })] },
+  })
+  const bucket = await screen.findByRole('dialog', {
+    name: 'Which bucket is this?',
+  })
+  await userEvent.click(within(bucket).getByRole('button', { name: 'Tenmoku' }))
+  const crop = await screen.findByRole('dialog', { name: 'Crop swatch' })
+  await userEvent.click(within(crop).getByRole('button', { name: 'Next' }))
+  const top = await screen.findByRole('dialog', {
+    name: 'Which glaze is on top?',
+  })
+  // Celadon is already over Tenmoku in the setup, so it shows as saved.
+  expect(within(top).getByRole('button', { name: /Celadon/ })).toHaveAttribute(
+    'data-saved',
+  )
+  await userEvent.click(within(top).getByRole('button', { name: 'Shino' }))
+  await screen.findByText('Over Tenmoku · 1 saved')
+  await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(
-    screen.getAllByRole('button', { name: 'Add combos' }),
-  ).not.toHaveLength(0)
+    await screen.findByRole('region', { name: 'Shino over Tenmoku' }),
+  ).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Shino over Tenmoku' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  expect(await db.combos.get(comboId([shino, tenmoku]))).toBeTruthy()
+})
+
+test('the Glazes and Combos switch buttons are full tap height', async () => {
+  await addGlaze('Celadon')
+  renderRoute('/glazes')
+  for (const name of ['Glazes', 'Combos']) {
+    expect(await screen.findByRole('button', { name })).toHaveClass('h-11')
+  }
 })
 
 test('the Glazes side is unchanged with the switch present', async () => {

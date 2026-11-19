@@ -46,11 +46,11 @@ export function ComboStrips({ strips, selectedId, onSelect }: Props) {
                         className="size-full"
                       />
                     </span>
-                    <span className="line-clamp-2 text-[13px] leading-tight font-semibold break-words">
+                    <span className="line-clamp-2 text-center text-[13px] leading-tight font-semibold break-words">
                       {view.label.top}
                     </span>
                     {view.label.over ? (
-                      <span className="-mt-0.5 line-clamp-2 text-[12px] leading-tight break-words text-muted">
+                      <span className="-mt-0.5 line-clamp-2 text-center text-[12px] leading-tight break-words text-muted">
                         {view.label.over}
                       </span>
                     ) : null}
