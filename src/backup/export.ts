@@ -34,7 +34,7 @@ export async function exportZip(
   readBytes: ReadBytes = readBlobBytes,
 ): Promise<Blob> {
   const [
-    [pieces, entries, glazeApps, glazes, clays, settings, photos],
+    [pieces, entries, glazeApps, glazes, combos, clays, settings, photos],
     images,
   ] = await db.transaction(
     'r',
@@ -43,6 +43,7 @@ export async function exportZip(
       db.entries,
       db.glazeApps,
       db.glazes,
+      db.combos,
       db.clays,
       db.settings,
       db.photos,
@@ -56,6 +57,7 @@ export async function exportZip(
         db.entries.toArray(),
         db.glazeApps.toArray(),
         db.glazes.toArray(),
+        db.combos.toArray(),
         db.clays.toArray(),
         db.settings.get('app'),
         db.photos.toArray(),
@@ -63,7 +65,7 @@ export async function exportZip(
       // By hash, so rows sharing an image share its files. A photo whose
       // bytes haven't downloaded yet has details only.
       const images = new Map<string, { blob: Blob; thumb?: Blob }>()
-      for (const photo of rows[6]) {
+      for (const photo of rows[7]) {
         if (images.has(photo.hash)) continue
         const bytes = await bytesOf(db, photo)
         if (bytes) images.set(photo.hash, bytes)
@@ -89,6 +91,7 @@ export async function exportZip(
     entries,
     glazeApps,
     glazes,
+    combos,
     clays,
     settings: settings ?? null,
     photos: photoMeta,

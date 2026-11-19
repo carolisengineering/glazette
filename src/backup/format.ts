@@ -1,5 +1,6 @@
 import type {
   Clay,
+  Combo,
   Glaze,
   GlazeApplication,
   Photo,
@@ -24,6 +25,8 @@ export interface BackupJson {
   entries: StageEntry[]
   glazeApps: GlazeApplication[]
   glazes: Glaze[]
+  /** Older backups lack it. */
+  combos?: Combo[]
   clays: Clay[]
   settings: Settings | null
   photos: PhotoMeta[]

@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { unzipSync } from 'fflate'
 import { beforeEach, expect, test } from 'vitest'
+import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { lenientBytes } from '../test/bytes'
 import {
@@ -269,4 +270,36 @@ test('the default reader rejects a non-Blob instead of exporting nothing', async
   })
   // fake-indexeddb hands back plain objects, so the strict default must fail.
   await expect(exportStrict()).rejects.toThrow(/not a Blob/)
+})
+
+test('a backup holds combos and their swatch photos', async () => {
+  await db.photoBytes.add({
+    hash: 'h1',
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
+  })
+  await db.photos.add({
+    id: 'sw1',
+    hash: 'h1',
+    width: 600,
+    height: 600,
+    takenAt: 't',
+    swatch: 1,
+  })
+  await db.combos.add({
+    id: comboId(['gl1', 'gl2']),
+    layers: ['gl1', 'gl2'],
+    swatchPhotoId: 'sw1',
+  })
+
+  const { files, json } = await unpack(await exportZip())
+
+  expect(json.combos).toEqual([
+    expect.objectContaining({
+      id: comboId(['gl1', 'gl2']),
+      layers: ['gl1', 'gl2'],
+      swatchPhotoId: 'sw1',
+    }),
+  ])
+  expect(Object.keys(files)).toContain('photos/h1.jpg')
 })
