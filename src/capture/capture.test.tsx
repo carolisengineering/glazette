@@ -228,7 +228,8 @@ test('a repeat failure with the same message restarts the toast timer', async ()
     renderRoute('/capture')
     await submitAsNewPiece()
     await screen.findByText("Couldn't save. Free up space and try again.")
-    expect(toastTimers()).toBe(1)
+    // The toast starts its timer just after it shows, so wait for it.
+    await waitFor(() => expect(toastTimers()).toBe(1))
     await userEvent.click(screen.getByRole('button', { name: 'Use photo' }))
     await waitFor(() => expect(toastTimers()).toBe(2))
   } finally {
