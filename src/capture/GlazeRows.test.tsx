@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useModal } from '../components/useModal'
 import { comboId } from '../db/combos'
 import { db } from '../db/db'
+import { realBlobs } from '../test/realBlobs'
 import { type GlazeRow, GlazeRows, isBlankRow, rowsAreBlank } from './GlazeRows'
 
 beforeEach(async () => {
@@ -266,4 +267,154 @@ it('Escape on the Combos sheet closes only that sheet, not the host sheet', asyn
   expect(hostClose).not.toHaveBeenCalled()
   await userEvent.keyboard('{Escape}')
   expect(hostClose).toHaveBeenCalledTimes(1)
+})
+
+describe('GlazeRows past pieces', () => {
+  realBlobs().watch(db)
+
+  /** Soup bowl: Celadon (2 dips, dip) over Tenmoku (thin at rim), fired with a photo. */
+  async function seedBowl(id = 'bowl', name = 'Soup bowl') {
+    await db.pieces.add({
+      id,
+      name,
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+    })
+    await db.entries.bulkAdd([
+      {
+        id: `g-${id}`,
+        pieceId: id,
+        stage: 'glazed',
+        date: '2026-10-01T12:00:00Z',
+      },
+      {
+        id: `f-${id}`,
+        pieceId: id,
+        stage: 'fired',
+        date: '2026-10-22T12:00:00Z',
+        photoId: `ph-${id}`,
+      },
+    ])
+    await db.glazeApps.bulkAdd([
+      {
+        id: `a1-${id}`,
+        entryId: `g-${id}`,
+        pieceId: id,
+        glazeId: 'c',
+        order: 0,
+        dips: 2,
+        method: 'dip',
+      },
+      {
+        id: `a2-${id}`,
+        entryId: `g-${id}`,
+        pieceId: id,
+        glazeId: 't',
+        order: 1,
+        note: 'thin at rim',
+      },
+    ])
+    await db.photos.add({
+      id: `ph-${id}`,
+      hash: `h-${id}`,
+      width: 3000,
+      height: 4000,
+      takenAt: '2026-10-22T00:00:00.000Z',
+    })
+    await db.photoBytes.add({
+      hash: `h-${id}`,
+      blob: new Blob(['full']),
+      thumb: new Blob(['th']),
+    })
+  }
+
+  beforeEach(async () => {
+    URL.createObjectURL = vi.fn(() => `blob:${crypto.randomUUID()}`)
+    URL.revokeObjectURL = vi.fn()
+    await db.glazes.bulkAdd([
+      { id: 'c', name: 'Celadon', color: '#aabbcc' },
+      { id: 't', name: 'Tenmoku', color: '#aabbcc' },
+    ])
+  })
+
+  const fromPast = () =>
+    screen.findByRole('button', { name: 'From a past piece' })
+
+  async function useBowl() {
+    await userEvent.click(await fromPast())
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Soup bowl: Celadon over Tenmoku',
+      }),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use these glazes' }),
+    )
+  }
+
+  it('shows the button only once a past piece qualifies', async () => {
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await screen.findByRole('button', { name: 'Tenmoku' })
+    expect(
+      screen.queryByRole('button', { name: 'From a past piece' }),
+    ).toBeNull()
+    await seedBowl()
+    expect(await fromPast()).toBeInTheDocument()
+  })
+
+  it('leaves out the piece the rows are for', async () => {
+    await seedBowl()
+    render(<GlazeRows value={rows('')} onChange={() => {}} pieceId="bowl" />)
+    await screen.findByRole('button', { name: 'Tenmoku' })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(
+      screen.queryByRole('button', { name: 'From a past piece' }),
+    ).toBeNull()
+  })
+
+  it('copies the recipe top first and closes both sheets', async () => {
+    await seedBowl()
+    const onChange = vi.fn()
+    render(<GlazeRows value={rows('')} onChange={onChange} />)
+    await useBowl()
+    const next = onChange.mock.calls[0][0] as GlazeRow[]
+    expect(next.map(({ key, ...r }) => r)).toEqual([
+      { glazeId: 'c', name: 'Celadon', dips: 2, method: 'dip' },
+      { glazeId: 't', name: 'Tenmoku', note: 'thin at rim' },
+    ])
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('filling blank rows shows no toast', async () => {
+    await seedBowl()
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await useBowl()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('undo puts the old rows back', async () => {
+    await seedBowl()
+    const original: GlazeRow[] = [
+      { key: 'k1', glazeId: 't', name: 'Tenmoku', dips: 3 },
+    ]
+    const onChange = vi.fn()
+    render(<GlazeRows value={original} onChange={onChange} />)
+    await useBowl()
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Glazes copied from Soup bowl',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onChange).toHaveBeenLastCalledWith(original)
+  })
+
+  it('copies a deleted glaze by name only', async () => {
+    await seedBowl()
+    await db.glazes.update('t', { deletedAt: '2026-11-01T00:00:00Z' })
+    const onChange = vi.fn()
+    render(<GlazeRows value={rows('')} onChange={onChange} />)
+    await useBowl()
+    const next = onChange.mock.calls[0][0] as GlazeRow[]
+    expect(next[1]).toMatchObject({ name: 'Tenmoku', note: 'thin at rim' })
+    expect(next[1].glazeId).toBeUndefined()
+  })
 })

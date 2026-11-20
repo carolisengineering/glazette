@@ -63,7 +63,7 @@ export function PlanSheet({ piece, planLayers, onClose }: Props) {
         <h2 id={titleId} className="font-serif text-[24px] leading-tight">
           Glaze plan
         </h2>
-        <GlazeRows value={rows} onChange={setRows} />
+        <GlazeRows value={rows} onChange={setRows} pieceId={piece.id} />
         <div className="flex gap-3">
           <button
             type="button"

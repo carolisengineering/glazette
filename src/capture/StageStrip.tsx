@@ -274,7 +274,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
                 Filled in from your plan. Change anything you did differently.
               </p>
             ) : null}
-            <GlazeRows value={rows} onChange={setEdited} />
+            <GlazeRows value={rows} onChange={setEdited} pieceId={pieceId} />
           </div>
         ) : null}
 

@@ -251,7 +251,9 @@ export function NewPieceSheet({
         <FormChips form={form} onChange={setForm} />
         <ClayChips clays={ready ? clays : undefined} pick={clay} />
 
-        {showGlazes ? <GlazeRows value={rows} onChange={setRows} /> : null}
+        {showGlazes ? (
+          <GlazeRows value={rows} onChange={setRows} pieceId={pieceId} />
+        ) : null}
 
         <button
           type="button"

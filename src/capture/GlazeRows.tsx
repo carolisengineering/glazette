@@ -1,10 +1,18 @@
 import { useMemo, useState } from 'react'
+import { PhotoImg } from '../components/PhotoImg'
 import { useToast } from '../components/useToast'
 import { useLiveGlazes } from '../db/queries'
 import type { GlazeApplication } from '../db/types'
 import { type ComboView, comboStrips, useShownCombos } from '../glazes/combos'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
+import {
+  type PastPiece,
+  rowsFromPastPiece,
+  usePastPieces,
+} from '../glazes/pastPieces'
+import { centerCropStyle } from '../glazes/swatch'
 import { ComboBrowseSheet } from './ComboBrowseSheet'
+import { PastPiecesSheet } from './PastPiecesSheet'
 
 export interface GlazeRow {
   /** Stable React key; not saved. */
@@ -27,6 +35,8 @@ export const rowsAreBlank = (rows: GlazeRow[]): boolean =>
 interface Props {
   value: GlazeRow[]
   onChange: (rows: GlazeRow[]) => void
+  /** The piece these rows are for; it's left out of past pieces. */
+  pieceId?: string
 }
 
 const METHODS: NonNullable<GlazeApplication['method']>[] = [
@@ -36,6 +46,8 @@ const METHODS: NonNullable<GlazeApplication['method']>[] = [
   'spray',
 ]
 
+const pill =
+  'flex h-11 items-center gap-2 rounded-full border border-border bg-surface px-3.5 text-[15px] font-semibold text-ink'
 const label = 'text-[13px] font-semibold tracking-[0.08em] text-muted uppercase'
 const input =
   'h-12 min-w-0 rounded-2xl border border-border bg-surface px-4 text-[16px] text-ink placeholder:text-[#6b7580]'
@@ -46,7 +58,7 @@ export const newGlazeRow = (): GlazeRow => ({
 })
 
 /** The ordered glaze list for a Glazed photo: first layer on top. */
-export function GlazeRows({ value, onChange }: Props) {
+export function GlazeRows({ value, onChange, pieceId }: Props) {
   const glazes = useLiveGlazes()
 
   const combos = useShownCombos()
@@ -54,25 +66,38 @@ export function GlazeRows({ value, onChange }: Props) {
   // The button shows the first tile the Combos sheet shows.
   const firstTile = strips[0]?.combos[0]
   const [browsing, setBrowsing] = useState(false)
+  const pastPieces = usePastPieces(pieceId)
+  const newestPast = pastPieces?.[0]
+  const [pickingPast, setPickingPast] = useState(false)
   const { show: showToast, toast } = useToast()
 
-  // Replace the rows with the combo's layers, top first. Rows with anything in
-  // them can be brought back with Undo.
-  const pickCombo = (view: ComboView) => {
+  // Replace the rows, top first. Rows with anything in them can be brought
+  // back with Undo.
+  const replaceRows = (next: GlazeRow[], message: string) => {
     const previous = value
+    onChange(next)
+    if (!rowsAreBlank(previous)) {
+      showToast(message, {
+        action: { label: 'Undo', onPress: () => onChange(previous) },
+      })
+    }
+  }
+
+  const pickCombo = (view: ComboView) => {
     setBrowsing(false)
-    onChange(
+    replaceRows(
       view.layers.map((g) => ({
         key: crypto.randomUUID(),
         glazeId: g.id,
         name: g.name,
       })),
+      `Glazes set to ${view.name}`,
     )
-    if (!rowsAreBlank(previous)) {
-      showToast(`Glazes set to ${view.name}`, {
-        action: { label: 'Undo', onPress: () => onChange(previous) },
-      })
-    }
+  }
+
+  const pickPast = (piece: PastPiece) => {
+    setPickingPast(false)
+    replaceRows(rowsFromPastPiece(piece), `Glazes copied from ${piece.name}`)
   }
 
   const update = (index: number, patch: Partial<GlazeRow>) =>
@@ -94,19 +119,40 @@ export function GlazeRows({ value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <span className={label}>Glaze · from your library</span>
-      {firstTile ? (
-        <button
-          type="button"
-          onClick={() => setBrowsing(true)}
-          className="flex h-11 items-center gap-2 self-start rounded-full border border-border bg-surface px-3.5 text-[15px] font-semibold text-ink"
-        >
-          <GlazeSwatch
-            color={firstTile.layers[0].color}
-            photoId={firstTile.combo.swatchPhotoId}
-            className="size-[22px] flex-none overflow-hidden rounded-full"
-          />
-          Browse combos
-        </button>
+      {firstTile || newestPast ? (
+        <div className="flex flex-wrap gap-2">
+          {firstTile ? (
+            <button
+              type="button"
+              onClick={() => setBrowsing(true)}
+              className={pill}
+            >
+              <GlazeSwatch
+                color={firstTile.layers[0].color}
+                photoId={firstTile.combo.swatchPhotoId}
+                className="size-[22px] flex-none overflow-hidden rounded-full"
+              />
+              Browse combos
+            </button>
+          ) : null}
+          {newestPast ? (
+            <button
+              type="button"
+              onClick={() => setPickingPast(true)}
+              className={pill}
+            >
+              <span className="size-[22px] flex-none overflow-hidden rounded-md bg-border">
+                <PhotoImg
+                  photoId={newestPast.photoId}
+                  thumb
+                  className="size-full"
+                  style={centerCropStyle(1, 1)}
+                />
+              </span>
+              From a past piece
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {value.map((row, i) => {
         const n = i + 1
@@ -293,6 +339,13 @@ export function GlazeRows({ value, onChange }: Props) {
           strips={strips}
           onPick={pickCombo}
           onClose={() => setBrowsing(false)}
+        />
+      ) : null}
+      {pickingPast && pastPieces ? (
+        <PastPiecesSheet
+          pieces={pastPieces}
+          onUse={pickPast}
+          onClose={() => setPickingPast(false)}
         />
       ) : null}
       {toast}

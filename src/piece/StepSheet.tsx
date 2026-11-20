@@ -230,7 +230,11 @@ export function StepSheet({
               rows={glazes.rows}
               setRows={glazes.setRows}
             />
-            <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+            <GlazeRows
+              value={glazes.rows}
+              onChange={glazes.setRows}
+              pieceId={entry.pieceId}
+            />
           </div>
         ) : null}
         <div className="flex gap-3">
