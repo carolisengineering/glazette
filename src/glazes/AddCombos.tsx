@@ -147,7 +147,12 @@ export function AddCombos({ onClose, onSaved }: Props) {
     }
   }
 
-  /** Saves a piece's combo, first asking when its stack already has one. */
+  /**
+   * Saves a piece's combo, first asking when its stack already has one. The
+   * screen it was started from stays up until it ends. A failed save from
+   * the crop goes back to the piece grid, toast showing; from the replace
+   * question, the question stays.
+   */
   const savePiece = async (
     choice: ComboPhotoChoice,
     image: SwatchImage,
@@ -166,6 +171,8 @@ export function AddCombos({ onClose, onSaved }: Props) {
       onSaved(await saveCombo(choice.layers, image))
       onClose()
     } catch {
+      // The crop stays busy once it hands back an image, so leave it.
+      if (!replace) setStep({ kind: 'piece' })
       showToast(SAVE_ERROR)
     } finally {
       busy.current = false
@@ -205,12 +212,9 @@ export function AddCombos({ onClose, onSaved }: Props) {
           source={step.photo.blob}
           width={step.photo.width}
           height={step.photo.height}
-          onUse={(image) => {
-            // The crop stays busy once it hands back an image, so leave it
-            // first: a failed save lands back on the grid, toast showing.
-            setStep({ kind: 'piece' })
-            savePiece(step.choice, image)
-          }}
+          // The crop shows Saving… with its buttons off until the save ends,
+          // so no other photo can be picked meanwhile.
+          onUse={(image) => savePiece(step.choice, image)}
           onCancel={() => setStep({ kind: 'piece' })}
         />
       ) : null}

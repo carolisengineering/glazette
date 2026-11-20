@@ -443,3 +443,35 @@ test('a failed save from a piece shows the error and lets you leave', async () =
   expect(onSaved).not.toHaveBeenCalled()
   expect(await db.combos.count()).toBe(0)
 })
+
+test('while a piece combo saves, no other photo can be picked', async () => {
+  const { tenmoku, celadon } = await glazes()
+  await firedPiece([celadon, tenmoku])
+  const { onClose, onSaved } = setup()
+  const crop = await fromPiece('Celadon over Tenmoku')
+  // Hold the save at its first step, the check for an existing combo.
+  let release: (value: undefined) => void = () => {}
+  const held = new Promise<undefined>((resolve) => {
+    release = resolve
+  })
+  const get = db.combos.get.bind(db.combos)
+  vi.spyOn(db.combos, 'get').mockImplementationOnce(() => held as never)
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  // The crop stays up, saving, rather than the grid coming back.
+  const saving = screen.getByRole('dialog', { name: 'Crop swatch' })
+  await waitFor(() =>
+    expect(
+      within(saving).getByRole('button', { name: 'Saving…' }),
+    ).toBeDisabled(),
+  )
+  expect(within(saving).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  expect(screen.queryByRole('dialog', { name: 'From a piece' })).toBeNull()
+  vi.mocked(db.combos.get).mockImplementation(get)
+  release(undefined)
+  const id = comboId([celadon, tenmoku])
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(id))
+  expect(onClose).toHaveBeenCalled()
+  expect(await db.combos.count()).toBe(1)
+})
