@@ -183,3 +183,40 @@ test('From a piece offers only pieces with this exact stack', async () => {
     match,
   )
 })
+
+test('Escape closes only the dialog on top, and not the sheet while it saves', async () => {
+  const { tenmoku, celadon, combo } = await celadonOverTenmoku()
+  const { onClose } = setup(combo, [celadon, tenmoku])
+  await userEvent.click(screen.getByRole('button', { name: 'Delete combo' }))
+  screen.getByRole('dialog', { name: 'Delete Celadon over Tenmoku?' })
+  await userEvent.keyboard('{Escape}')
+  expect(
+    screen.queryByRole('dialog', { name: 'Delete Celadon over Tenmoku?' }),
+  ).toBeNull()
+  expect(screen.getByRole('dialog', { name: 'Edit combo' })).toBeVisible()
+  expect(onClose).not.toHaveBeenCalled()
+
+  // Hold the save once the crop hands back its image.
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  vi.spyOn(db, 'transaction').mockImplementationOnce(
+    () => held as ReturnType<typeof db.transaction>,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Add photo' }))
+  fireEvent.change(screen.getByTestId('library-input'), {
+    target: { files: [new File(['x'], 'new.jpg', { type: 'image/jpeg' })] },
+  })
+  const crop = await screen.findByRole('dialog', { name: 'Crop swatch' })
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Crop swatch' })).toBeNull(),
+  )
+  await userEvent.keyboard('{Escape}')
+  expect(onClose).not.toHaveBeenCalled()
+  release()
+  await waitFor(() => expect(onClose).toHaveBeenCalled())
+})

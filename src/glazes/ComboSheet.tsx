@@ -38,10 +38,11 @@ export function ComboSheet({ view, onClose }: Props) {
   }>()
   const [busy, setBusy] = useState(false)
   const { show: showToast, toast } = useToast()
-  // The confirm dialog, crop screen and piece grid handle their own Escape;
-  // the sheet stays put meanwhile.
+  // Escape reaches only the modal on top, so the confirm dialog, crop screen
+  // and piece grid take it while they're open. The sheet stays put while a
+  // save runs.
   useModal(titleRef, () => {
-    if (!confirming && !cropping && !choosingPiece && !busy) onClose()
+    if (!busy) onClose()
   })
   const pieceChoices = useComboPhotoChoices(combo.layers)
   const picker = usePhotoPicker(
