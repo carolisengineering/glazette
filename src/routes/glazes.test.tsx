@@ -271,10 +271,18 @@ test("deleting a glaze with combos says they'll stop showing", async () => {
   const celadon = await addGlaze('Celadon')
   const tenmoku = await addGlaze('Tenmoku')
   const chun = await addGlaze('Chun')
+  // Already hidden: its other glaze is deleted, so it isn't counted.
+  await db.glazes.add({
+    id: 'gone',
+    name: 'Shino',
+    color: '#ffffff',
+    deletedAt: '2026-01-01T00:00:00.000Z',
+  })
   const ids = ['combo-a', 'combo-b']
   await db.combos.bulkAdd([
     { id: ids[0], layers: [celadon, tenmoku], swatchPhotoId: 'p1' },
     { id: ids[1], layers: [chun, celadon], swatchPhotoId: 'p2' },
+    { id: 'combo-c', layers: [celadon, 'gone'], swatchPhotoId: 'p3' },
   ])
   renderRoute('/glazes')
   await userEvent.click(

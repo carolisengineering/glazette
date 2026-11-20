@@ -141,10 +141,19 @@ export function useShownCombos(): ComboView[] | undefined {
   }, [])
 }
 
-/** Live combos with this glaze in any layer. */
-export function comboCountWith(glazeId: string, combos: Combo[]): number {
-  return combos.filter((c) => notDeleted(c) && c.layers.includes(glazeId))
-    .length
+/**
+ * Shown combos (see `shownComboViews`) with this glaze in any layer: the ones
+ * deleting the glaze would hide. A combo another deleted glaze already hides
+ * isn't counted.
+ */
+export function comboCountWith(
+  glazeId: string,
+  combos: Combo[],
+  glazes: Glaze[],
+): number {
+  return shownComboViews(combos, glazes).filter((v) =>
+    v.combo.layers.includes(glazeId),
+  ).length
 }
 
 export interface ComboPhotoChoice {

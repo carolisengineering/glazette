@@ -139,16 +139,29 @@ test('strips go by bottom glaze, alphabetical, tiles alphabetical by label', () 
 })
 
 test('comboCountWith counts every layer position and skips deleted combos', () => {
+  const glazes = [glaze('g1', 'A'), glaze('g2', 'B'), glaze('g3', 'C')]
   const combos = [
     combo(['g1', 'g2']),
     combo(['g2', 'g3']),
     combo(['g3', 'g1', 'g2']),
     combo(['g1', 'g3'], { deletedAt: 'x' }),
   ]
-  expect(comboCountWith('g1', combos)).toBe(2 + 0)
-  expect(comboCountWith('g2', combos)).toBe(3)
-  expect(comboCountWith('g3', combos)).toBe(2)
-  expect(comboCountWith('zz', combos)).toBe(0)
+  expect(comboCountWith('g1', combos, glazes)).toBe(2 + 0)
+  expect(comboCountWith('g2', combos, glazes)).toBe(3)
+  expect(comboCountWith('g3', combos, glazes)).toBe(2)
+  expect(comboCountWith('zz', combos, glazes)).toBe(0)
+})
+
+test('comboCountWith skips combos already hidden by another deleted glaze', () => {
+  // "X over Z" with Z deleted is already hidden, so deleting X hides nothing more.
+  const glazes = [
+    glaze('x', 'X'),
+    glaze('y', 'Y'),
+    glaze('z', 'Z', { deletedAt: 'gone' }),
+  ]
+  const combos = [combo(['x', 'z']), combo(['x', 'y']), combo(['y', 'x', 'z'])]
+  expect(comboCountWith('x', combos, glazes)).toBe(1)
+  expect(comboCountWith('z', combos, glazes)).toBe(0)
 })
 
 const fired = (

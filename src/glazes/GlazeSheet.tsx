@@ -51,7 +51,13 @@ export function GlazeSheet({
   const comboCount =
     useLiveQuery(
       async () =>
-        glaze ? comboCountWith(glaze.id, await db.combos.toArray()) : 0,
+        glaze
+          ? comboCountWith(
+              glaze.id,
+              await db.combos.toArray(),
+              await db.glazes.toArray(),
+            )
+          : 0,
       [glaze?.id],
     ) ?? 0
   // A photo waiting to be cropped, and where it came from.
