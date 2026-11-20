@@ -340,7 +340,7 @@ describe('GlazeRows past pieces', () => {
   const fromPast = () =>
     screen.findByRole('button', { name: 'From a past piece' })
 
-  async function useBowl() {
+  async function copyBowl() {
     await userEvent.click(await fromPast())
     await userEvent.click(
       await screen.findByRole('button', {
@@ -376,7 +376,7 @@ describe('GlazeRows past pieces', () => {
     await seedBowl()
     const onChange = vi.fn()
     render(<GlazeRows value={rows('')} onChange={onChange} />)
-    await useBowl()
+    await copyBowl()
     const next = onChange.mock.calls[0][0] as GlazeRow[]
     expect(next.map(({ key, ...r }) => r)).toEqual([
       { glazeId: 'c', name: 'Celadon', dips: 2, method: 'dip' },
@@ -388,7 +388,7 @@ describe('GlazeRows past pieces', () => {
   it('filling blank rows shows no toast', async () => {
     await seedBowl()
     render(<GlazeRows value={rows('')} onChange={() => {}} />)
-    await useBowl()
+    await copyBowl()
     expect(screen.queryByRole('status')).toBeNull()
   })
 
@@ -399,7 +399,7 @@ describe('GlazeRows past pieces', () => {
     ]
     const onChange = vi.fn()
     render(<GlazeRows value={original} onChange={onChange} />)
-    await useBowl()
+    await copyBowl()
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Glazes copied from Soup bowl',
     )
@@ -412,7 +412,7 @@ describe('GlazeRows past pieces', () => {
     await db.glazes.update('t', { deletedAt: '2026-11-01T00:00:00Z' })
     const onChange = vi.fn()
     render(<GlazeRows value={rows('')} onChange={onChange} />)
-    await useBowl()
+    await copyBowl()
     const next = onChange.mock.calls[0][0] as GlazeRow[]
     expect(next[1]).toMatchObject({ name: 'Tenmoku', note: 'thin at rim' })
     expect(next[1].glazeId).toBeUndefined()
