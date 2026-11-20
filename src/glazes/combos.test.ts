@@ -13,6 +13,7 @@ import {
   comboCountWith,
   comboPhotoChoices,
   comboStrips,
+  pieceStack,
   shownComboViews,
   useComboViews,
 } from './combos'
@@ -262,4 +263,17 @@ test('useComboViews builds the views once per data change, not per render', asyn
   expect(result.current).toBe(first)
   await db.combos.add(combo(['g2', 'g1']))
   await waitFor(() => expect(result.current).toHaveLength(2))
+})
+
+test("pieceStack reads the glaze step's live layers in order, top first", () => {
+  // Stored out of order, with a deleted layer.
+  const ga = [
+    ...apps('p1', ['g1', 'g2', 'g3']).reverse(),
+    { ...apps('p1', ['gx'])[0], id: 'gone', order: 1, deletedAt: 'x' },
+  ]
+  const live = ga.filter((a) => !a.deletedAt)
+  const [view] = buildPieceViews([piece('p1')], [glazedEntry('p1')], ga, G, [])
+  expect(pieceStack(view, live)).toEqual(['g1', 'g2', 'g3'])
+  const [bare] = buildPieceViews([piece('p2')], [], [], G, [])
+  expect(pieceStack(bare, live)).toBeUndefined()
 })

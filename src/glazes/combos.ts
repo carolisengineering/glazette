@@ -59,6 +59,24 @@ export function shownComboViews(combos: Combo[], glazes: Glaze[]): ComboView[] {
 }
 
 /**
+ * A piece's current stack: the glaze ids on its latest Glazed step with live
+ * layers, top first. Undefined when it has no such step. `liveApps` must
+ * already be live-only. The "wore it" count and From a piece both use this,
+ * so they agree on what a piece wears.
+ */
+export function pieceStack(
+  view: PieceView,
+  liveApps: GlazeApplication[],
+): string[] | undefined {
+  const glazed = glazedStepWithGlazes(view.entries, liveApps)
+  if (!glazed) return undefined
+  return liveApps
+    .filter((a) => a.entryId === glazed.id)
+    .sort((a, b) => a.order - b.order)
+    .map((a) => a.glazeId)
+}
+
+/**
  * The combos to show (see `shownComboViews`), each with the pieces wearing
  * it. `pieceViews` must already be live-only (see `buildPieceViews`).
  */
@@ -72,13 +90,8 @@ export function buildComboViews(
 
   // Each piece's current layers, bottom of the list last.
   const stacks = pieceViews.flatMap((view) => {
-    const glazed = glazedStepWithGlazes(view.entries, liveApps)
-    if (!glazed) return []
-    const ids = liveApps
-      .filter((a) => a.entryId === glazed.id)
-      .sort((a, b) => a.order - b.order)
-      .map((a) => a.glazeId)
-    return [{ view, key: ids.join('|') }]
+    const ids = pieceStack(view, liveApps)
+    return ids ? [{ view, key: ids.join('|') }] : []
   })
 
   return shownComboViews(combos, glazes).map((view) => {
@@ -190,12 +203,8 @@ export function comboPhotoChoices(
 
   const found: { entry: StageEntry; layers: string[]; name: string }[] = []
   for (const view of pieceViews) {
-    const glazed = glazedStepWithGlazes(view.entries, liveApps)
-    if (!glazed) continue
-    const layers = liveApps
-      .filter((a) => a.entryId === glazed.id)
-      .sort((a, b) => a.order - b.order)
-      .map((a) => a.glazeId)
+    const layers = pieceStack(view, liveApps)
+    if (!layers) continue
     if (!isValidStack(layers) || !layers.every((id) => byId.has(id))) continue
     if (onlyKey !== undefined && layers.join('|') !== onlyKey) continue
     const name = layers.map((id) => byId.get(id)?.name).join(' over ')
