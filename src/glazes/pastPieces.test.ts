@@ -324,3 +324,23 @@ describe('usePastPieces', () => {
     await waitFor(() => expect(result.current).toEqual([]))
   })
 })
+
+test('a chip also finds pieces with a deleted glaze of the same name', () => {
+  // Ash was deleted, then added again as a new glaze with the same name.
+  const library = [...glazes, glaze('x2', 'ash ')]
+  const pieces = build(
+    [
+      glazedAndFired('old', ['x', 'c'], '2026-10-01T12:00:00Z'),
+      glazedAndFired('new', ['x2'], '2026-10-02T12:00:00Z'),
+    ],
+    undefined,
+    [],
+    [],
+    library,
+  )
+  expect(pastChips(pieces).map((c) => c.glazeId)).toEqual(['x2', 'c'])
+  expect(filterPastPieces(pieces, ['x2']).map((p) => p.pieceId)).toEqual([
+    'new',
+    'old',
+  ])
+})

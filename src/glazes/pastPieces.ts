@@ -3,6 +3,7 @@ import type { GlazeRow } from '../capture/GlazeRows'
 import { db } from '../db/db'
 import { layerDetails } from '../db/layerDetails'
 import { buildPieceViews, notDeleted, type PieceView } from '../db/queries'
+import { nameKey } from '../db/rowChecks'
 import {
   compareEntries,
   displayName,
@@ -124,14 +125,24 @@ export function pastChips(pieces: PastPiece[]): PastChip[] {
   )
 }
 
-/** Pieces that used every one of `glazeIds`, in any layer. None given keeps all. */
+/**
+ * Pieces that used every one of `glazeIds`, in any layer. None given keeps all.
+ * A glaze matches by name too, so a glaze deleted and added again under the
+ * same name still finds the pieces that wore the old one.
+ */
 export function filterPastPieces(
   pieces: PastPiece[],
   glazeIds: string[],
 ): PastPiece[] {
-  return pieces.filter((p) =>
-    glazeIds.every((id) => p.layers.some((l) => l.glazeId === id)),
-  )
+  const keyOf = new Map<string, string>()
+  for (const p of pieces) {
+    for (const l of p.layers) keyOf.set(l.glazeId, nameKey(l.name))
+  }
+  const wanted = glazeIds.map((id) => keyOf.get(id) ?? id)
+  return pieces.filter((p) => {
+    const keys = new Set(p.layers.map((l) => nameKey(l.name)))
+    return wanted.every((k) => keys.has(k))
+  })
 }
 
 const joinNames = (names: string[]): string =>
