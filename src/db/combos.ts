@@ -29,13 +29,6 @@ export function comboId(layers: string[]): string {
   return `combo-${hex16(a)}${hex16(b)}`
 }
 
-/** A stack is 2 or 3 glaze ids, none empty. */
-export function isValidStack(layers: string[]): boolean {
-  return (
-    (layers.length === 2 || layers.length === 3) && layers.every((l) => !!l)
-  )
-}
-
 /**
  * Saves the swatch photo for a stack. Saving a stack again replaces its photo
  * (releasing the old one) and brings a deleted combo back, dated past the

@@ -152,6 +152,24 @@ describe('GlazeRows combos', () => {
     expect(await browse()).toBeInTheDocument()
   })
 
+  it("the Browse combos icon is the first tile's swatch", async () => {
+    // Whichever stack sorts first by id gets the bottom glaze that sorts
+    // last, so the first tile shown is the other combo.
+    const [[p, q]] = [
+      ['a', 'b'],
+      ['b', 'a'],
+    ].sort((x, y) => (comboId(x) < comboId(y) ? -1 : 1))
+    await addGlaze(p, 'Amber', { color: '#111111' })
+    await addGlaze(q, 'Zinc', { color: '#222222' })
+    await addCombo([p, q])
+    await addCombo([q, p])
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    const icon = (await browse()).querySelector<HTMLElement>(
+      '[data-testid="glaze-swatch"]',
+    )
+    expect(icon?.style.backgroundColor).toBe('rgb(34, 34, 34)')
+  })
+
   it('tapping a combo fills the rows top first', async () => {
     await addGlaze('t', 'Tenmoku')
     await addGlaze('c', 'Celadon')

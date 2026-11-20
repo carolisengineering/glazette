@@ -11,6 +11,7 @@ import {
   comboCountWith,
   comboPhotoChoices,
   comboStrips,
+  shownComboViews,
 } from './combos'
 
 const glaze = (
@@ -85,6 +86,22 @@ test('hides a combo whose layer glaze is deleted or missing', () => {
 
 test('hides a deleted combo', () => {
   expect(build([combo(['g1', 'g2'], { deletedAt: 'x' })])).toEqual([])
+})
+
+test('shownComboViews hides combos as buildComboViews does, without pieces', () => {
+  const glazes = [G[0], glaze('g2', 'Tenmoku', { deletedAt: 'x' }), G[2]]
+  const combos = [
+    combo(['g1', 'g2']),
+    combo(['g1', 'gone']),
+    combo(['g1', 'g3'], { deletedAt: 'x' }),
+    combo(['g3', 'g1']),
+  ]
+  const views = shownComboViews(combos, glazes)
+  expect(views.map((v) => v.name)).toEqual(['Chun over Celadon'])
+  expect(views[0].pieces).toEqual([])
+  expect(views.map((v) => v.combo.id)).toEqual(
+    build(combos, glazes).map((v) => v.combo.id),
+  )
 })
 
 test("counts pieces whose glaze step has exactly the combo's layers in order", () => {

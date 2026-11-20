@@ -1,20 +1,20 @@
-import { useId, useMemo, useRef } from 'react'
+import { useId, useRef } from 'react'
 import { useModal } from '../components/useModal'
 import { ComboStrips } from '../glazes/ComboStrips'
-import { type ComboView, comboStrips, useComboViews } from '../glazes/combos'
+import type { ComboStrip, ComboView } from '../glazes/combos'
 
 interface Props {
+  /** The shown combos' strips, from the caller's read. */
+  strips: ComboStrip[]
   onPick: (view: ComboView) => void
   onClose: () => void
 }
 
 /** Every shown combo, one sideways strip per bottom glaze. Tapping one picks it. */
-export function ComboBrowseSheet({ onPick, onClose }: Props) {
+export function ComboBrowseSheet({ strips, onPick, onClose }: Props) {
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
   useModal(titleRef, onClose)
-  const views = useComboViews()
-  const strips = useMemo(() => comboStrips(views ?? []), [views])
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40">

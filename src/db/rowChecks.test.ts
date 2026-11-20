@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest'
-import { isComboRow, isGlazeRow, isPhotoRow, isPieceRow } from './rowChecks'
+import {
+  isComboRow,
+  isGlazeRow,
+  isPhotoRow,
+  isPieceRow,
+  isValidStack,
+} from './rowChecks'
 
 const piece = { id: 'p', createdAt: 'x', updatedAt: 'x' }
 
@@ -61,4 +67,13 @@ test('isComboRow takes 2–3 string layers and a swatch', () => {
   expect(isComboRow({ ...combo, layers: ['a', 'b', 'c', 'd'] })).toBe(false)
   expect(isComboRow({ ...combo, layers: ['a', 2] })).toBe(false)
   expect(isComboRow({ ...combo, layers: 'ab' })).toBe(false)
+})
+
+test('isValidStack takes 2 or 3 layers', () => {
+  expect(isValidStack([])).toBe(false)
+  expect(isValidStack(['a'])).toBe(false)
+  expect(isValidStack(['a', 'b', 'c', 'd'])).toBe(false)
+  expect(isValidStack(['a', ''])).toBe(false)
+  expect(isValidStack(['a', 'b'])).toBe(true)
+  expect(isValidStack(['a', 'b', 'a'])).toBe(true)
 })

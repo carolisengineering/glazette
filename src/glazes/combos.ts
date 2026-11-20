@@ -1,5 +1,4 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { isValidStack } from '../db/combos'
 import { db } from '../db/db'
 import {
   buildPieceViews,
@@ -7,6 +6,7 @@ import {
   type PieceView,
   usePiecesQuery,
 } from '../db/queries'
+import { isValidStack } from '../db/rowChecks'
 import { compareEntries, glazedStepWithGlazes } from '../db/stage'
 import type { Combo, Glaze, GlazeApplication, StageEntry } from '../db/types'
 import { pickablePhotoIds } from './PiecePhotoGrid'
@@ -34,7 +34,32 @@ const compareText = (a: string, b: string) =>
 
 /**
  * The combos to show: not deleted, and every layer's glaze exists and isn't
- * deleted. `pieceViews` must already be live-only (see `buildPieceViews`).
+ * deleted. Their `pieces` are left empty; `buildComboViews` fills them.
+ */
+export function shownComboViews(combos: Combo[], glazes: Glaze[]): ComboView[] {
+  const byId = new Map(glazes.filter(notDeleted).map((g) => [g.id, g]))
+  const views: ComboView[] = []
+  for (const combo of combos.filter(notDeleted)) {
+    const layers = combo.layers.map((id) => byId.get(id))
+    if (layers.some((g) => !g)) continue
+    const found = layers as Glaze[]
+    views.push({
+      combo,
+      layers: found,
+      name: found.map((g) => g.name).join(' over '),
+      label: {
+        top: found[0].name,
+        ...(found.length === 3 ? { over: `over ${found[1].name}` } : {}),
+      },
+      pieces: [],
+    })
+  }
+  return views
+}
+
+/**
+ * The combos to show (see `shownComboViews`), each with the pieces wearing
+ * it. `pieceViews` must already be live-only (see `buildPieceViews`).
  */
 export function buildComboViews(
   combos: Combo[],
@@ -43,7 +68,6 @@ export function buildComboViews(
   glazeApps: GlazeApplication[],
 ): ComboView[] {
   const liveApps = glazeApps.filter(notDeleted)
-  const byId = new Map(glazes.filter(notDeleted).map((g) => [g.id, g]))
 
   // Each piece's current layers, bottom of the list last.
   const stacks = pieceViews.flatMap((view) => {
@@ -56,24 +80,13 @@ export function buildComboViews(
     return [{ view, key: ids.join('|') }]
   })
 
-  const views: ComboView[] = []
-  for (const combo of combos.filter(notDeleted)) {
-    const layers = combo.layers.map((id) => byId.get(id))
-    if (layers.some((g) => !g)) continue
-    const found = layers as Glaze[]
-    const key = combo.layers.join('|')
-    views.push({
-      combo,
-      layers: found,
-      name: found.map((g) => g.name).join(' over '),
-      label: {
-        top: found[0].name,
-        ...(found.length === 3 ? { over: `over ${found[1].name}` } : {}),
-      },
+  return shownComboViews(combos, glazes).map((view) => {
+    const key = view.combo.layers.join('|')
+    return {
+      ...view,
       pieces: stacks.filter((s) => s.key === key).map((s) => s.view),
-    })
-  }
-  return views
+    }
+  })
 }
 
 /** Strips by bottom glaze, alphabetical; tiles alphabetical by label. */
@@ -111,6 +124,21 @@ export function useComboViews(): ComboView[] | undefined {
   }, [])
   if (!pieceViews || !rows) return undefined
   return buildComboViews(rows.combos, rows.glazes, pieceViews, rows.glazeApps)
+}
+
+/**
+ * The combos to show, with `pieces` left empty, for pickers that don't need
+ * piece counts. Reads only combos and glazes, and builds the views only when
+ * those change. `undefined` until the first read resolves.
+ */
+export function useShownCombos(): ComboView[] | undefined {
+  return useLiveQuery(async () => {
+    const [combos, glazes] = await Promise.all([
+      db.combos.toArray(),
+      db.glazes.toArray(),
+    ])
+    return shownComboViews(combos, glazes)
+  }, [])
 }
 
 /** Live combos with this glaze in any layer. */

@@ -1,5 +1,4 @@
 import { PHOTO_HASH } from '../../shared/photoProtocol'
-import { isValidStack } from './combos'
 import { DEFAULT_GLAZE_COLOR } from './seed'
 import { STAGES } from './stage'
 
@@ -7,6 +6,13 @@ import { STAGES } from './stage'
 // fields (and device-only ones such as dirty) are allowed.
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
+
+/** A stack is 2 or 3 glaze ids, none empty. */
+export function isValidStack(layers: string[]): boolean {
+  return (
+    (layers.length === 2 || layers.length === 3) && layers.every((l) => !!l)
+  )
+}
 
 /** A plain object: not null and not an array. */
 export const isObject = (v: unknown): v is Record<string, unknown> =>

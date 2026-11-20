@@ -1,5 +1,5 @@
 import type { SwatchImage } from '../photos/swatchImage'
-import { comboId, deleteCombo, isValidStack, saveCombo } from './combos'
+import { comboId, deleteCombo, saveCombo } from './combos'
 import { db } from './db'
 import { releaseSwatch } from './swatch'
 
@@ -34,15 +34,6 @@ test('comboId spreads 1000 random stacks without a clash', () => {
     ids.add(comboId(layers))
   }
   expect(ids.size).toBe(1000)
-})
-
-test('isValidStack takes 2 or 3 layers', () => {
-  expect(isValidStack([])).toBe(false)
-  expect(isValidStack(['a'])).toBe(false)
-  expect(isValidStack(['a', 'b', 'c', 'd'])).toBe(false)
-  expect(isValidStack(['a', ''])).toBe(false)
-  expect(isValidStack(['a', 'b'])).toBe(true)
-  expect(isValidStack(['a', 'b', 'a'])).toBe(true)
 })
 
 test('saveCombo stores the photo as a swatch and links it', async () => {

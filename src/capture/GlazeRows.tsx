@@ -1,12 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { notDeleted } from '../db/queries'
 import type { GlazeApplication } from '../db/types'
-import { type ComboView, useComboViews } from '../glazes/combos'
+import { type ComboView, comboStrips, useShownCombos } from '../glazes/combos'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
-
 import { ComboBrowseSheet } from './ComboBrowseSheet'
 
 export interface GlazeRow {
@@ -58,7 +57,10 @@ export function GlazeRows({ value, onChange }: Props) {
     [],
   )
 
-  const combos = useComboViews()
+  const combos = useShownCombos()
+  const strips = useMemo(() => comboStrips(combos ?? []), [combos])
+  // The button shows the first tile the Combos sheet shows.
+  const firstTile = strips[0]?.combos[0]
   const [browsing, setBrowsing] = useState(false)
   const { show: showToast, toast } = useToast()
 
@@ -100,15 +102,15 @@ export function GlazeRows({ value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <span className={label}>Glaze · from your library</span>
-      {combos && combos.length > 0 ? (
+      {firstTile ? (
         <button
           type="button"
           onClick={() => setBrowsing(true)}
           className="flex h-11 items-center gap-2 self-start rounded-full border border-border bg-surface px-3.5 text-[15px] font-semibold text-ink"
         >
           <GlazeSwatch
-            color={combos[0].layers[0].color}
-            photoId={combos[0].combo.swatchPhotoId}
+            color={firstTile.layers[0].color}
+            photoId={firstTile.combo.swatchPhotoId}
             className="size-[22px] flex-none overflow-hidden rounded-full"
           />
           Browse combos
@@ -296,6 +298,7 @@ export function GlazeRows({ value, onChange }: Props) {
       </button>
       {browsing ? (
         <ComboBrowseSheet
+          strips={strips}
           onPick={pickCombo}
           onClose={() => setBrowsing(false)}
         />
