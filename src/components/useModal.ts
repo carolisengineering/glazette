@@ -16,6 +16,8 @@ export function useModal(
 
   useEffect(() => {
     const id = Symbol('modal')
+    // A child modal mounted in the same commit as its parent lands below it
+    // here, since React runs child effects first.
     openModals.push(id)
     const opener = document.activeElement
     initialFocus.current?.focus()

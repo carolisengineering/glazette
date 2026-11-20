@@ -309,9 +309,9 @@ async function carrySwatches(
 
 /**
  * As removePhoto does in the app: a photo is deleted only when no live step
- * shows it and no live glaze has it as its swatch, because identical photos
- * share one row. Runs after the steps are written and the swatch links fixed,
- * so it sees the merged state.
+ * shows it and no live glaze or combo has it as its swatch, because identical
+ * photos share one row. Runs after the steps are written and the swatch links
+ * fixed, so it sees the merged state.
  */
 async function releaseUnusedPhotos(candidates: Map<string, string>) {
   if (candidates.size === 0) return

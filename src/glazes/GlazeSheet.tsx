@@ -325,7 +325,7 @@ export function GlazeSheet({
           title={`Delete ${glaze.name}?`}
           body={`Pieces that used it keep the name, marked (retired).${
             comboCount
-              ? ` Its ${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} won't show any more.`
+              ? ` Its ${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} won't show anymore.`
               : ''
           }`}
           confirmLabel="Delete"

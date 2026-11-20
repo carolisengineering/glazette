@@ -284,7 +284,7 @@ test("deleting a glaze with combos says they'll stop showing", async () => {
   const confirm = await screen.findByRole('dialog', { name: /Delete Celadon/ })
   expect(
     within(confirm).getByText(
-      "Pieces that used it keep the name, marked (retired). Its 2 combos won't show any more.",
+      "Pieces that used it keep the name, marked (retired). Its 2 combos won't show anymore.",
     ),
   ).toBeVisible()
   await userEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))

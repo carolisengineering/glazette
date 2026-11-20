@@ -43,7 +43,8 @@ const TABLE_OF: Record<RecordKind, TableName> = {
   combo: 'combos',
   clay: 'clays',
   settings: 'settings',
-  // Last, so a push sends a step's change before its photo's.
+  // Last, so a push sends a step's, glaze's or combo's change before the
+  // photo's it links.
   photo: 'photos',
 }
 
