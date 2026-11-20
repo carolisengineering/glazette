@@ -1,3 +1,5 @@
+import { renderHook, waitFor } from '@testing-library/react'
+import { db } from '../db/db'
 import { buildPieceViews } from '../db/queries'
 import type {
   Combo,
@@ -12,6 +14,7 @@ import {
   comboPhotoChoices,
   comboStrips,
   shownComboViews,
+  useComboViews,
 } from './combos'
 
 const glaze = (
@@ -245,4 +248,18 @@ test('only narrows to one stack', () => {
     'p-two-old',
   ])
   expect(choicesFor(['g3', 'g2'])).toEqual([])
+})
+
+test('useComboViews builds the views once per data change, not per render', async () => {
+  await db.delete()
+  await db.open()
+  await db.glazes.bulkAdd([glaze('g1', 'A'), glaze('g2', 'B')])
+  await db.combos.add(combo(['g1', 'g2']))
+  const { result, rerender } = renderHook(() => useComboViews())
+  await waitFor(() => expect(result.current).toHaveLength(1))
+  const first = result.current
+  rerender()
+  expect(result.current).toBe(first)
+  await db.combos.add(combo(['g2', 'g1']))
+  await waitFor(() => expect(result.current).toHaveLength(2))
 })

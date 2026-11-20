@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { BottomBar } from '../components/BottomBar'
 import { db } from '../db/db'
 import { DEFAULT_SETTINGS } from '../db/seed'
@@ -42,7 +42,7 @@ export function GlazesScreen() {
   const editing = editingView?.glaze
 
   const comboList = comboViews ?? []
-  const strips = comboStrips(comboList)
+  const strips = useMemo(() => comboStrips(comboViews ?? []), [comboViews])
   const selectedCombo =
     comboList.find((v) => v.combo.id === pickedComboId) ?? strips[0]?.combos[0]
   const editingCombo = comboSheet?.comboId

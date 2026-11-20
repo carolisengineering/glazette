@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useMemo } from 'react'
 import { db } from '../db/db'
 import {
   buildPieceViews,
@@ -111,7 +112,10 @@ export function comboStrips(views: ComboView[]): ComboStrip[] {
   return result
 }
 
-/** `undefined` until the first read resolves. */
+/**
+ * Built once per change to the rows read, not on every render. `undefined`
+ * until the first read resolves.
+ */
 export function useComboViews(): ComboView[] | undefined {
   const pieceViews = usePiecesQuery()
   const rows = useLiveQuery(async () => {
@@ -122,8 +126,13 @@ export function useComboViews(): ComboView[] | undefined {
     ])
     return { combos, glazes, glazeApps }
   }, [])
-  if (!pieceViews || !rows) return undefined
-  return buildComboViews(rows.combos, rows.glazes, pieceViews, rows.glazeApps)
+  return useMemo(
+    () =>
+      pieceViews && rows
+        ? buildComboViews(rows.combos, rows.glazes, pieceViews, rows.glazeApps)
+        : undefined,
+    [pieceViews, rows],
+  )
 }
 
 /**
