@@ -1,5 +1,5 @@
 import { GlazetteDB } from '../db/db'
-import type { Glaze, Photo, StageEntry } from '../db/types'
+import type { Combo, Glaze, Photo, StageEntry } from '../db/types'
 import { settlePhotos } from './settlePhotos'
 import { onLocalChange, quietly } from './track'
 
@@ -510,6 +510,102 @@ describe('swatch photos that glazes link', () => {
     })
     // A deleted glaze and the stub itself stay as they were.
     expect((await db.glazes.get('g3'))?.swatchPhotoId).toBe('sw1')
+    expect(await db.photos.get('sw1')).toEqual(stub)
+    expect(await db.photos.count()).toBe(2)
+  })
+})
+
+describe('swatch photos that combos link', () => {
+  const PURGED = '2026-04-01T00:00:00.000Z'
+  const combo = (id: string, extra: Partial<Combo> = {}): Combo => ({
+    id,
+    layers: ['g1', 'g2'],
+    swatchPhotoId: 'none',
+    updatedAt: T1,
+    ...extra,
+  })
+  const seedCombos = (combos: Combo[]) =>
+    quietly(db, () => db.combos.bulkAdd(combos))
+
+  test('settlePhotos brings back a deleted photo that a live combo links', async () => {
+    await heldBytes()
+    await seed([
+      photo('sw1', { swatch: 1, deletedAt: T2 }),
+      photo('sw2', { swatch: 1, deletedAt: T2 }),
+    ])
+    await seedCombos([
+      combo('c1', { swatchPhotoId: 'sw1' }),
+      combo('c2', { swatchPhotoId: 'sw2', deletedAt: T2 }),
+    ])
+    await settlePhotos(db)
+    const row = await db.photos.get('sw1')
+    expect(row?.deletedAt).toBeUndefined()
+    expect(row?.needsDownload).toBeUndefined()
+    expect(row?.dirty).toBe(1)
+    expect((row?.updatedAt ?? '') > T2).toBe(true)
+    // Only a live combo brings one back.
+    expect((await db.photos.get('sw2'))?.deletedAt).toBe(T2)
+  })
+
+  test('settlePhotos leaves a live combo swatch photo alone though no step shows it', async () => {
+    await seed([photo('sw1', { swatch: 1 }), photo('sw2', { swatch: 1 })])
+    await seedCombos([
+      combo('c1', { swatchPhotoId: 'sw1' }),
+      combo('c2', { swatchPhotoId: 'sw2', deletedAt: T2 }),
+    ])
+    const photos = await db.photos.toArray()
+    const combos = await db.combos.toArray()
+    const listener = vi.fn()
+    const stop = onLocalChange(db, listener)
+    await settlePhotos(db)
+    stop()
+    expect(listener).not.toHaveBeenCalled()
+    expect(await db.photos.toArray()).toEqual(photos)
+    expect(await db.combos.toArray()).toEqual(combos)
+  })
+
+  test("settlePhotos moves a combo's link to the new photo when its swatch was purged and this device holds the bytes", async () => {
+    const FUTURE = '2099-01-01T00:00:00.000Z'
+    await heldBytes()
+    await seed([
+      photo('sw1', { swatch: 1, deletedAt: PURGED, purgedAt: PURGED }),
+    ])
+    await seedCombos([
+      combo('c1', { swatchPhotoId: 'sw1' }),
+      combo('c2', { swatchPhotoId: 'sw1', updatedAt: FUTURE }),
+      combo('c3', { swatchPhotoId: 'sw1', deletedAt: T2 }),
+    ])
+    await quietly(db, () =>
+      db.glazes.add({
+        id: 'g1',
+        name: 'g1',
+        color: '#aabbcc',
+        updatedAt: T1,
+        swatchPhotoId: 'sw1',
+      }),
+    )
+    const stub = await db.photos.get('sw1')
+    await settlePhotos(db)
+
+    const c1 = await db.combos.get('c1')
+    const photoId = c1?.swatchPhotoId as string
+    expect(photoId).not.toBe('sw1')
+    expect(c1?.dirty).toBe(1)
+    expect((c1?.updatedAt ?? '') > T1).toBe(true)
+    // Dated past its last change, so it wins over the copy it changes.
+    const c2 = await db.combos.get('c2')
+    expect(c2?.swatchPhotoId).toBe(photoId)
+    expect(c2?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
+    // A glaze linking the same stub moves to the same new photo.
+    expect((await db.glazes.get('g1'))?.swatchPhotoId).toBe(photoId)
+    expect(await db.photos.get(photoId)).toMatchObject({
+      hash: HASH,
+      swatch: 1,
+      needsUpload: 1,
+      dirty: 1,
+    })
+    // A deleted combo and the stub itself stay as they were.
+    expect((await db.combos.get('c3'))?.swatchPhotoId).toBe('sw1')
     expect(await db.photos.get('sw1')).toEqual(stub)
     expect(await db.photos.count()).toBe(2)
   })

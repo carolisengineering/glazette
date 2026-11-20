@@ -1,5 +1,5 @@
 import { GlazetteDB } from '../db/db'
-import type { Glaze, Photo, StageEntry } from '../db/types'
+import type { Combo, Glaze, Photo, StageEntry } from '../db/types'
 import { mergePhotosByHash } from './photoMerge'
 import { onLocalChange, quietly } from './track'
 
@@ -197,4 +197,34 @@ test("mergePhotosByHash moves a glaze's swatch link to the kept photo", async ()
   const g3 = await db.glazes.get('g3')
   expect(g3?.updatedAt).toBe(T1)
   expect(g3?.dirty).toBeUndefined()
+})
+
+const combo = (id: string, extra: Partial<Combo> = {}): Combo => ({
+  id,
+  layers: ['g1', 'g2'],
+  swatchPhotoId: 'none',
+  updatedAt: T1,
+  ...extra,
+})
+
+test("mergePhotosByHash moves a combo's swatch link to the kept photo", async () => {
+  await seed([photo('b-x', { swatch: 1 }), photo('a-y', { swatch: 1 })])
+  await quietly(db, () =>
+    db.combos.bulkAdd([
+      combo('c1', { swatchPhotoId: 'b-x' }),
+      combo('c2', { swatchPhotoId: 'b-x', deletedAt: T2 }),
+      combo('c3', { swatchPhotoId: 'a-y' }),
+    ]),
+  )
+  await mergePhotosByHash(db)
+  const c1 = await db.combos.get('c1')
+  expect(c1?.swatchPhotoId).toBe('a-y')
+  expect(c1?.updatedAt).toBe('2026-01-01T00:00:00.001Z')
+  expect(c1?.dirty).toBe(1)
+  const c2 = await db.combos.get('c2')
+  expect(c2?.swatchPhotoId).toBe('a-y')
+  expect(c2?.updatedAt).toBe('2026-02-01T00:00:00.001Z')
+  const c3 = await db.combos.get('c3')
+  expect(c3?.updatedAt).toBe(T1)
+  expect(c3?.dirty).toBeUndefined()
 })
