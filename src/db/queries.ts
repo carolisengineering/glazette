@@ -170,6 +170,20 @@ export function usePiecesQuery(): PieceView[] | undefined {
   }, [])
 }
 
+/**
+ * Live glazes, sorted by name (plain `localeCompare`). `undefined` until the
+ * first read resolves.
+ */
+export function useLiveGlazes(): Glaze[] | undefined {
+  return useLiveQuery(
+    async () =>
+      (await db.glazes.toArray())
+        .filter(notDeleted)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [],
+  )
+}
+
 /** Live pieces, newest activity first. Empty until the first read resolves. */
 export function usePieces(): PieceView[] {
   return usePiecesQuery() ?? []

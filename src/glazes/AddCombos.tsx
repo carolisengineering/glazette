@@ -6,7 +6,7 @@ import { SAVE_ERROR, useToast } from '../components/useToast'
 import { comboId, saveCombo } from '../db/combos'
 import { db } from '../db/db'
 import { upsertGlaze } from '../db/ops'
-import { notDeleted } from '../db/queries'
+import { useLiveGlazes } from '../db/queries'
 import { DEFAULT_GLAZE_COLOR, DEFAULT_SETTINGS } from '../db/seed'
 import type { ProcessedImage } from '../photos/process'
 import type { SwatchImage } from '../photos/swatchImage'
@@ -15,7 +15,7 @@ import { CropSwatch } from './CropSwatch'
 import {
   type ComboPhotoChoice,
   useComboPhotoChoices,
-  useComboViews,
+  useShownCombos,
 } from './combos'
 import type { CropView } from './cropView'
 import { type GlazePick, GlazeTilePicker } from './GlazeTilePicker'
@@ -63,18 +63,12 @@ export function AddCombos({ onClose, onSaved }: Props) {
   // A tap while a save is running is ignored.
   const busy = useRef(false)
 
-  const glazes = useLiveQuery(
-    async () =>
-      (await db.glazes.toArray())
-        .filter(notDeleted)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [],
-  )
+  const glazes = useLiveGlazes()
   const settings = useLiveQuery(() => db.settings.get('app'), [])
-  const comboViews = useComboViews()
+  const shownCombos = useShownCombos()
   const pieceChoices = useComboPhotoChoices()
   const savedTops = new Set(
-    (comboViews ?? []).flatMap(({ combo }) =>
+    (shownCombos ?? []).flatMap(({ combo }) =>
       combo.layers.length === 2 && combo.layers[1] === bucket?.id
         ? [combo.layers[0]]
         : [],

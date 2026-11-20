@@ -1,8 +1,6 @@
-import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo, useState } from 'react'
 import { useToast } from '../components/useToast'
-import { db } from '../db/db'
-import { notDeleted } from '../db/queries'
+import { useLiveGlazes } from '../db/queries'
 import type { GlazeApplication } from '../db/types'
 import { type ComboView, comboStrips, useShownCombos } from '../glazes/combos'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
@@ -49,13 +47,7 @@ export const newGlazeRow = (): GlazeRow => ({
 
 /** The ordered glaze list for a Glazed photo: first layer on top. */
 export function GlazeRows({ value, onChange }: Props) {
-  const glazes = useLiveQuery(
-    async () =>
-      (await db.glazes.toArray())
-        .filter(notDeleted)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [],
-  )
+  const glazes = useLiveGlazes()
 
   const combos = useShownCombos()
   const strips = useMemo(() => comboStrips(combos ?? []), [combos])
