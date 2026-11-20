@@ -6,7 +6,12 @@ import type {
   Piece,
   StageEntry,
 } from '../db/types'
-import { buildComboViews, comboCountWith, comboStrips } from './combos'
+import {
+  buildComboViews,
+  comboCountWith,
+  comboPhotoChoices,
+  comboStrips,
+} from './combos'
 
 const glaze = (
   id: string,
@@ -127,4 +132,87 @@ test('comboCountWith counts every layer position and skips deleted combos', () =
   expect(comboCountWith('g2', combos)).toBe(3)
   expect(comboCountWith('g3', combos)).toBe(2)
   expect(comboCountWith('zz', combos)).toBe(0)
+})
+
+const fired = (
+  pieceId: string,
+  photoId: string | undefined,
+  date: string,
+  extra: Partial<StageEntry> = {},
+): StageEntry => ({
+  id: `f-${pieceId}-${photoId}-${date}`,
+  pieceId,
+  stage: 'fired',
+  photoId,
+  date,
+  ...extra,
+})
+
+function choicesFor(only?: string[]) {
+  const glazes = [
+    ...G,
+    glaze('g4', 'Gone', { deletedAt: 'x' }),
+    glaze('g5', 'Shino'),
+  ]
+  const ga = [
+    ...apps('one', ['g1']),
+    ...apps('four', ['g1', 'g2', 'g3', 'g5']),
+    ...apps('dead', ['g1', 'g4']),
+    ...apps('two', ['g1', 'g2']),
+    ...apps('flip', ['g2', 'g1']),
+    ...apps('rep', ['g1', 'g2', 'g1']),
+    ...apps('three', ['g3', 'g1', 'g2']),
+  ]
+  const ids = [...new Set(ga.map((a) => a.pieceId))]
+  const entries = [
+    ...ids.map(glazedEntry),
+    fired('one', 'p-one', '2026-10-20'),
+    fired('four', 'p-four', '2026-10-20'),
+    fired('dead', 'p-dead', '2026-10-20'),
+    fired('two', 'p-two-old', '2026-10-03'),
+    fired('two', 'p-two-new', '2026-10-09'),
+    fired('two', 'p-two-gone', '2026-10-19', { deletedAt: 'x' }),
+    fired('flip', 'p-flip', '2026-10-04'),
+    fired('rep', 'p-rep', '2026-10-07'),
+    fired('three', 'p-three', '2026-10-08'),
+    fired('three', undefined, '2026-10-18'),
+    // The same photo on an older step is listed once, where it's newest.
+    fired('three', 'p-three', '2026-10-05'),
+  ]
+  const pv = buildPieceViews(ids.map(piece), entries, ga, glazes, [])
+  return comboPhotoChoices(pv, ga, glazes, only)
+}
+
+test('photo choices take fired photos of pieces with 2–3 live glazes', () => {
+  expect(choicesFor()).toEqual([
+    {
+      photoId: 'p-two-new',
+      layers: ['g1', 'g2'],
+      name: 'Celadon over Tenmoku',
+    },
+    {
+      photoId: 'p-three',
+      layers: ['g3', 'g1', 'g2'],
+      name: 'Chun over Celadon over Tenmoku',
+    },
+    {
+      photoId: 'p-rep',
+      layers: ['g1', 'g2', 'g1'],
+      name: 'Celadon over Tenmoku over Celadon',
+    },
+    { photoId: 'p-flip', layers: ['g2', 'g1'], name: 'Tenmoku over Celadon' },
+    {
+      photoId: 'p-two-old',
+      layers: ['g1', 'g2'],
+      name: 'Celadon over Tenmoku',
+    },
+  ])
+})
+
+test('only narrows to one stack', () => {
+  expect(choicesFor(['g1', 'g2']).map((c) => c.photoId)).toEqual([
+    'p-two-new',
+    'p-two-old',
+  ])
+  expect(choicesFor(['g3', 'g2'])).toEqual([])
 })

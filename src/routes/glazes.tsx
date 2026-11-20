@@ -5,6 +5,7 @@ import { db } from '../db/db'
 import { DEFAULT_SETTINGS } from '../db/seed'
 import { AddCombos } from '../glazes/AddCombos'
 import { ComboCard } from '../glazes/ComboCard'
+import { ComboSheet } from '../glazes/ComboSheet'
 import { ComboStrips } from '../glazes/ComboStrips'
 import { comboStrips, useComboViews } from '../glazes/combos'
 import { GlazeCard } from '../glazes/GlazeCard'
@@ -27,7 +28,7 @@ export function GlazesScreen() {
   const comboViews = useComboViews()
   const [tab, setTab] = useState<'glazes' | 'combos'>('glazes')
   const [pickedComboId, setPickedComboId] = useState<string>()
-  // Adding combos; with `comboId` set, editing one (not built yet).
+  // Adding combos; with `comboId` set, editing that one.
   const [comboSheet, setComboSheet] = useState<{ comboId?: string }>()
   const settings = useLiveQuery(() => db.settings.get('app'), [])
   const [pickedId, setPickedId] = useState<string>()
@@ -44,6 +45,9 @@ export function GlazesScreen() {
   const strips = comboStrips(comboList)
   const selectedCombo =
     comboList.find((v) => v.combo.id === pickedComboId) ?? strips[0]?.combos[0]
+  const editingCombo = comboSheet?.comboId
+    ? comboList.find((v) => v.combo.id === comboSheet.comboId)
+    : undefined
   const onCombos = tab === 'combos' && !!selected
   // Like Add glaze, the header's Add combos waits until there's a combo; the
   // empty card offers it before then.
@@ -164,6 +168,12 @@ export function GlazesScreen() {
             setTab('combos')
             setPickedComboId(id)
           }}
+        />
+      ) : null}
+      {editingCombo ? (
+        <ComboSheet
+          view={editingCombo}
+          onClose={() => setComboSheet(undefined)}
         />
       ) : null}
       <BottomBar />

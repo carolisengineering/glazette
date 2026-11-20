@@ -541,6 +541,33 @@ test('tapping a combo shows its card with the pieces that wore it', async () => 
   expect(within(card).getByRole('button', { name: 'Edit' })).toBeVisible()
 })
 
+test("a combo's Edit opens its sheet, and deleting falls back to the first combo", async () => {
+  await comboSetup()
+  renderRoute('/glazes')
+  await userEvent.click(await screen.findByRole('button', { name: 'Combos' }))
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+  )
+  const card = screen.getByRole('region', { name: 'Celadon over Tenmoku' })
+  await userEvent.click(within(card).getByRole('button', { name: 'Edit' }))
+  const sheet = await screen.findByRole('dialog', { name: 'Edit combo' })
+  await userEvent.click(
+    within(sheet).getByRole('button', { name: 'Delete combo' }),
+  )
+  await userEvent.click(
+    within(
+      screen.getByRole('dialog', { name: 'Delete Celadon over Tenmoku?' }),
+    ).getByRole('button', { name: 'Delete' }),
+  )
+  expect(
+    await screen.findByRole('region', { name: 'Oatmeal over Celadon' }),
+  ).toBeVisible()
+  expect(screen.queryByRole('dialog', { name: 'Edit combo' })).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: 'Celadon over Tenmoku' }),
+  ).toBeNull()
+})
+
 test('no combos yet shows the empty message', async () => {
   await addGlaze('Celadon')
   renderRoute('/glazes')

@@ -1,4 +1,10 @@
-import { render, renderHook, screen, waitFor } from '@testing-library/react'
+import {
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { db } from '../db/db'
 import { bytesOf } from '../photos/bytes'
@@ -53,7 +59,7 @@ test("usePickablePhotoIds leaves out a photo whose bytes aren't on this device",
 test('PiecePhotoGrid shows one tile per photo it is given', async () => {
   render(
     <PiecePhotoGrid
-      glazeName="Celadon"
+      title="Pieces in Celadon"
       photoIds={['p1', 'p2']}
       onPick={vi.fn()}
       onCancel={vi.fn()}
@@ -67,12 +73,32 @@ test('PiecePhotoGrid shows one tile per photo it is given', async () => {
   expect(screen.queryByRole('button', { name: 'Photo 3' })).toBeNull()
 })
 
+test('shows a caption under each photo when given', async () => {
+  render(
+    <PiecePhotoGrid
+      title="From a piece"
+      photoIds={['p1', 'p2']}
+      captionOf={(id) => (id === 'p1' ? 'Celadon over Tenmoku' : undefined)}
+      onPick={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  )
+  expect(
+    screen.getByRole('dialog', { name: 'From a piece' }),
+  ).toBeInTheDocument()
+  const first = screen.getByRole('button', {
+    name: 'Photo 1, Celadon over Tenmoku',
+  })
+  expect(within(first).getByText('Celadon over Tenmoku')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Photo 2' })).toBeInTheDocument()
+})
+
 test("PiecePhotoGrid says so when a tapped photo's bytes aren't on this device", async () => {
   await db.photos.add(row('later', 'h2', { needsDownload: 1 }))
   const onPick = vi.fn()
   render(
     <PiecePhotoGrid
-      glazeName="Celadon"
+      title="Pieces in Celadon"
       photoIds={['later']}
       onPick={onPick}
       onCancel={vi.fn()}
@@ -90,7 +116,7 @@ test('PiecePhotoGrid says so when a tapped photo fails to read', async () => {
   const onPick = vi.fn()
   render(
     <PiecePhotoGrid
-      glazeName="Celadon"
+      title="Pieces in Celadon"
       photoIds={['p1']}
       onPick={onPick}
       onCancel={vi.fn()}
@@ -125,7 +151,7 @@ test('PiecePhotoGrid reads a photo once when it is tapped twice', async () => {
   const onPick = vi.fn()
   render(
     <PiecePhotoGrid
-      glazeName="Celadon"
+      title="Pieces in Celadon"
       photoIds={['p1']}
       onPick={onPick}
       onCancel={vi.fn()}
@@ -146,7 +172,7 @@ test("PiecePhotoGrid passes the full photo's blob and size to onPick", async () 
   const onPick = vi.fn()
   render(
     <PiecePhotoGrid
-      glazeName="Celadon"
+      title="Pieces in Celadon"
       photoIds={['p1']}
       onPick={onPick}
       onCancel={vi.fn()}
@@ -158,4 +184,5 @@ test("PiecePhotoGrid passes the full photo's blob and size to onPick", async () 
   expect(picked.blob).toBe(full)
   expect(picked.width).toBe(3000)
   expect(picked.height).toBe(4000)
+  expect(picked.photoId).toBe('p1')
 })

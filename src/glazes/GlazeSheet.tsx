@@ -335,7 +335,7 @@ export function GlazeSheet({
       ) : null}
       {choosingPiece && glaze ? (
         <PiecePhotoGrid
-          glazeName={glaze.name}
+          title={`Pieces in ${glaze.name}`}
           photoIds={pickable ?? []}
           onPick={(picked) => {
             setChoosingPiece(false)

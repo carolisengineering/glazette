@@ -83,8 +83,55 @@ async function glazes() {
 function setup() {
   const onClose = vi.fn()
   const onSaved = vi.fn()
-  render(<AddCombos onClose={onClose} onSaved={onSaved} />)
-  return { onClose, onSaved }
+  const { unmount } = render(<AddCombos onClose={onClose} onSaved={onSaved} />)
+  return { onClose, onSaved, unmount }
+}
+
+/** A fired piece wearing these glazes, top first, with a photo on this device. */
+async function firedPiece(layers: string[], tag = 'pot') {
+  const pieceId = newId()
+  const now = new Date().toISOString()
+  await db.pieces.add({ id: pieceId, createdAt: now, updatedAt: now })
+  const glazedId = newId()
+  await db.entries.add({
+    id: glazedId,
+    pieceId,
+    stage: 'glazed',
+    date: '2026-10-01',
+  })
+  await db.glazeApps.bulkAdd(
+    layers.map((glazeId, order) => ({
+      id: newId(),
+      entryId: glazedId,
+      pieceId,
+      glazeId,
+      order,
+    })),
+  )
+  const photoId = await storePhoto(photo(tag))
+  await db.entries.add({
+    id: newId(),
+    pieceId,
+    stage: 'fired',
+    date: '2026-10-10',
+    photoId,
+  })
+  return photoId
+}
+
+/** Picks From a piece, then the photo with this caption; resolves to the crop. */
+async function fromPiece(caption: string) {
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  await userEvent.click(
+    await within(choose).findByRole('button', { name: /From a piece/ }),
+  )
+  const grid = await screen.findByRole('dialog', { name: 'From a piece' })
+  await userEvent.click(
+    await within(grid).findByRole('button', {
+      name: `Photo 1, ${caption}`,
+    }),
+  )
+  return screen.findByRole('dialog', { name: 'Crop swatch' })
 }
 
 /** Picks the tile photo and the bucket; resolves to the crop screen. */
@@ -296,4 +343,78 @@ test('the bucket sheet shows the whole tile photo', async () => {
   expect(
     within(sheet).getByText('The bottom glaze for every tile in this photo'),
   ).toBeVisible()
+})
+
+test("from a piece saves the piece's stack", async () => {
+  const { tenmoku, celadon } = await glazes()
+  await firedPiece([celadon, tenmoku])
+  const { onClose, onSaved } = setup()
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  expect(
+    await within(choose).findByText(
+      'A fired piece with 2 or 3 glazes. One combo.',
+    ),
+  ).toBeVisible()
+  const crop = await fromPiece('Celadon over Tenmoku')
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  const id = comboId([celadon, tenmoku])
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(id))
+  expect(onClose).toHaveBeenCalled()
+  const saved = await db.combos.get(id)
+  expect(saved).toMatchObject({ layers: [celadon, tenmoku] })
+  expect(saved?.swatchPhotoId).toBeTruthy()
+})
+
+test('from a piece asks before replacing an existing combo', async () => {
+  const { tenmoku, celadon } = await glazes()
+  await firedPiece([celadon, tenmoku])
+  const old = await storePhoto(photo('old'))
+  await db.photos.update(old, { swatch: 1 })
+  const id = comboId([celadon, tenmoku])
+  await db.combos.add({ id, layers: [celadon, tenmoku], swatchPhotoId: old })
+  const question =
+    'Celadon over Tenmoku already has a photo. Replace it with this one?'
+
+  const first = setup()
+  let crop = await fromPiece('Celadon over Tenmoku')
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  let ask = await screen.findByRole('dialog', { name: question })
+  await userEvent.click(within(ask).getByRole('button', { name: 'Keep old' }))
+  expect(first.onClose).toHaveBeenCalled()
+  expect(first.onSaved).not.toHaveBeenCalled()
+  expect((await db.combos.get(id))?.swatchPhotoId).toBe(old)
+  expect((await db.photos.get(old))?.deletedAt).toBeUndefined()
+  first.unmount()
+
+  const second = setup()
+  crop = await fromPiece('Celadon over Tenmoku')
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  ask = await screen.findByRole('dialog', { name: question })
+  await userEvent.click(within(ask).getByRole('button', { name: 'Replace' }))
+  await waitFor(() => expect(second.onSaved).toHaveBeenCalledWith(id))
+  const saved = await db.combos.get(id)
+  expect(saved?.swatchPhotoId).toBeTruthy()
+  expect(saved?.swatchPhotoId).not.toBe(old)
+  expect((await db.photos.get(old))?.deletedAt).toBeTruthy()
+  expect(await db.combos.count()).toBe(1)
+})
+
+test('From a piece is hidden when no piece qualifies', async () => {
+  const { tenmoku, celadon, oatmeal } = await glazes()
+  await firedPiece([celadon], 'one')
+  await firedPiece([celadon, tenmoku, oatmeal, celadon], 'four')
+  setup()
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  expect(
+    within(choose).getByRole('button', { name: /Test tile photo/ }),
+  ).toBeVisible()
+  expect(
+    within(choose).queryByRole('button', { name: /From a piece/ }),
+  ).toBeNull()
 })

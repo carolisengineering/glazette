@@ -1,8 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { isValidStack } from '../db/combos'
 import { db } from '../db/db'
-import { notDeleted, type PieceView, usePiecesQuery } from '../db/queries'
-import { glazedStepWithGlazes } from '../db/stage'
-import type { Combo, Glaze, GlazeApplication } from '../db/types'
+import {
+  buildPieceViews,
+  notDeleted,
+  type PieceView,
+  usePiecesQuery,
+} from '../db/queries'
+import { compareEntries, glazedStepWithGlazes } from '../db/stage'
+import type { Combo, Glaze, GlazeApplication, StageEntry } from '../db/types'
+import { pickablePhotoIds } from './PiecePhotoGrid'
 
 export interface ComboView {
   combo: Combo
@@ -110,4 +117,78 @@ export function useComboViews(): ComboView[] | undefined {
 export function comboCountWith(glazeId: string, combos: Combo[]): number {
   return combos.filter((c) => notDeleted(c) && c.layers.includes(glazeId))
     .length
+}
+
+export interface ComboPhotoChoice {
+  photoId: string
+  /** The piece's glaze ids, top first. */
+  layers: string[]
+  /** Layer names joined with " over ", top first. */
+  name: string
+}
+
+/**
+ * Fired photos of pieces whose glaze step's live layers make a valid stack of
+ * live glazes, newest step first, each photo once. With `only`, just the
+ * pieces wearing exactly that stack. `pieceViews` must already be live-only.
+ */
+export function comboPhotoChoices(
+  pieceViews: PieceView[],
+  glazeApps: GlazeApplication[],
+  glazes: Glaze[],
+  only?: string[],
+): ComboPhotoChoice[] {
+  const liveApps = glazeApps.filter(notDeleted)
+  const byId = new Map(glazes.filter(notDeleted).map((g) => [g.id, g]))
+  const onlyKey = only?.join('|')
+
+  const found: { entry: StageEntry; layers: string[]; name: string }[] = []
+  for (const view of pieceViews) {
+    const glazed = glazedStepWithGlazes(view.entries, liveApps)
+    if (!glazed) continue
+    const layers = liveApps
+      .filter((a) => a.entryId === glazed.id)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => a.glazeId)
+    if (!isValidStack(layers) || !layers.every((id) => byId.has(id))) continue
+    if (onlyKey !== undefined && layers.join('|') !== onlyKey) continue
+    const name = layers.map((id) => byId.get(id)?.name).join(' over ')
+    for (const entry of view.entries) {
+      if (entry.stage === 'fired' && !entry.deletedAt && entry.photoId) {
+        found.push({ entry, layers, name })
+      }
+    }
+  }
+
+  found.sort((a, b) => compareEntries(b.entry, a.entry))
+  const seen = new Set<string>()
+  return found.flatMap(({ entry, layers, name }) => {
+    const photoId = entry.photoId as string
+    if (seen.has(photoId)) return []
+    seen.add(photoId)
+    return [{ photoId, layers, name }]
+  })
+}
+
+/**
+ * `comboPhotoChoices` over live pieces, keeping only photos whose bytes this
+ * device holds. `undefined` until the first read resolves.
+ */
+export function useComboPhotoChoices(
+  only?: string[],
+): ComboPhotoChoice[] | undefined {
+  const key = only?.join('|')
+  return useLiveQuery(async () => {
+    const [pieces, entries, glazeApps, glazes, clays] = await Promise.all([
+      db.pieces.toArray(),
+      db.entries.toArray(),
+      db.glazeApps.toArray(),
+      db.glazes.toArray(),
+      db.clays.toArray(),
+    ])
+    const views = buildPieceViews(pieces, entries, glazeApps, glazes, clays)
+    const choices = comboPhotoChoices(views, glazeApps, glazes, only)
+    const held = new Set(await pickablePhotoIds(choices.map((c) => c.photoId)))
+    return choices.filter((c) => held.has(c.photoId))
+  }, [key])
 }

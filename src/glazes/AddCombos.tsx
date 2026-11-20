@@ -1,8 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useId, useRef, useState } from 'react'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useModal } from '../components/useModal'
 import { SAVE_ERROR, useToast } from '../components/useToast'
-import { saveCombo } from '../db/combos'
+import { comboId, saveCombo } from '../db/combos'
 import { db } from '../db/db'
 import { upsertGlaze } from '../db/ops'
 import { notDeleted } from '../db/queries'
@@ -11,9 +12,14 @@ import type { ProcessedImage } from '../photos/process'
 import type { SwatchImage } from '../photos/swatchImage'
 import { usePhotoPicker } from '../photos/usePhotoPicker'
 import { CropSwatch } from './CropSwatch'
-import { useComboViews } from './combos'
+import {
+  type ComboPhotoChoice,
+  useComboPhotoChoices,
+  useComboViews,
+} from './combos'
 import type { CropView } from './cropView'
 import { type GlazePick, GlazeTilePicker } from './GlazeTilePicker'
+import { PiecePhotoGrid } from './PiecePhotoGrid'
 
 interface Props {
   onClose: () => void
@@ -26,6 +32,13 @@ type Step =
   | { kind: 'bucket'; photo: ProcessedImage }
   | { kind: 'crop'; photo: ProcessedImage }
   | { kind: 'top'; photo: ProcessedImage; image: SwatchImage }
+  | { kind: 'piece' }
+  | {
+      kind: 'pieceCrop'
+      choice: ComboPhotoChoice
+      photo: { blob: Blob; width: number; height: number }
+    }
+  | { kind: 'replace'; choice: ComboPhotoChoice; image: SwatchImage }
 
 const FIRST_HINT =
   "Drag and pinch so the square holds only glaze. Read the tile's label before you tap Next."
@@ -34,6 +47,8 @@ const FIRST_HINT =
  * Adds combos. A test tile run: pick a photo of one bucket's tiles, say which
  * glaze the bucket holds, then crop a tile and say which glaze is on top, as
  * many times as there are tiles. Each tile saves as soon as it's named.
+ * From a piece: pick a fired photo of a piece wearing 2 or 3 glazes, crop it,
+ * and its glazes become the combo's layers. One combo, then done.
  */
 export function AddCombos({ onClose, onSaved }: Props) {
   const [step, setStep] = useState<Step>({ kind: 'choose' })
@@ -57,6 +72,7 @@ export function AddCombos({ onClose, onSaved }: Props) {
   )
   const settings = useLiveQuery(() => db.settings.get('app'), [])
   const comboViews = useComboViews()
+  const pieceChoices = useComboPhotoChoices()
   const savedTops = new Set(
     (comboViews ?? []).flatMap(({ combo }) =>
       combo.layers.length === 2 && combo.layers[1] === bucket?.id
@@ -131,12 +147,73 @@ export function AddCombos({ onClose, onSaved }: Props) {
     }
   }
 
+  /** Saves a piece's combo, first asking when its stack already has one. */
+  const savePiece = async (
+    choice: ComboPhotoChoice,
+    image: SwatchImage,
+    replace = false,
+  ) => {
+    if (busy.current) return
+    busy.current = true
+    try {
+      if (!replace) {
+        const existing = await db.combos.get(comboId(choice.layers))
+        if (existing && !existing.deletedAt) {
+          setStep({ kind: 'replace', choice, image })
+          return
+        }
+      }
+      onSaved(await saveCombo(choice.layers, image))
+      onClose()
+    } catch {
+      showToast(SAVE_ERROR)
+    } finally {
+      busy.current = false
+    }
+  }
+
   return (
     <>
-      {step.kind === 'choose' ? (
+      {/* Waits for the piece check, so From a piece doesn't appear under a finger. */}
+      {step.kind === 'choose' && pieceChoices ? (
         <ChooseSheet
           onTestTiles={picker.open}
+          onPiece={
+            pieceChoices.length > 0
+              ? () => setStep({ kind: 'piece' })
+              : undefined
+          }
           processing={picker.processing}
+          onCancel={onClose}
+        />
+      ) : null}
+      {step.kind === 'piece' ? (
+        <PiecePhotoGrid
+          title="From a piece"
+          photoIds={(pieceChoices ?? []).map((c) => c.photoId)}
+          captionOf={(id) => pieceChoices?.find((c) => c.photoId === id)?.name}
+          onPick={({ photoId, ...photo }) => {
+            const choice = pieceChoices?.find((c) => c.photoId === photoId)
+            if (choice) setStep({ kind: 'pieceCrop', choice, photo })
+          }}
+          onCancel={() => setStep({ kind: 'choose' })}
+        />
+      ) : null}
+      {step.kind === 'pieceCrop' ? (
+        <CropSwatch
+          source={step.photo.blob}
+          width={step.photo.width}
+          height={step.photo.height}
+          onUse={(image) => savePiece(step.choice, image)}
+          onCancel={() => setStep({ kind: 'piece' })}
+        />
+      ) : null}
+      {step.kind === 'replace' ? (
+        <ConfirmDialog
+          title={`${step.choice.name} already has a photo. Replace it with this one?`}
+          confirmLabel="Replace"
+          cancelLabel="Keep old"
+          onConfirm={() => savePiece(step.choice, step.image, true)}
           onCancel={onClose}
         />
       ) : null}
@@ -193,13 +270,18 @@ export function AddCombos({ onClose, onSaved }: Props) {
 const choice =
   'flex min-h-11 w-full items-center gap-3 rounded-[18px] bg-surface p-3.5 text-left text-ink disabled:opacity-50'
 
-/** The ways in. Test tile photo opens the photo picker straight from the tap. */
+/**
+ * The ways in. Test tile photo opens the photo picker straight from the tap.
+ * From a piece shows only when `onPiece` is given.
+ */
 function ChooseSheet({
   onTestTiles,
+  onPiece,
   processing,
   onCancel,
 }: {
   onTestTiles: () => void
+  onPiece?: () => void
   processing: boolean
   onCancel: () => void
 }) {
@@ -235,6 +317,21 @@ function ChooseSheet({
             </span>
           </span>
         </button>
+        {onPiece ? (
+          <button
+            type="button"
+            onClick={onPiece}
+            disabled={processing}
+            className={choice}
+          >
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[16px] font-semibold">From a piece</span>
+              <span className="text-[14px] text-muted">
+                A fired piece with 2 or 3 glazes. One combo.
+              </span>
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onCancel}
