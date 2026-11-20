@@ -7,6 +7,13 @@ import { STAGES } from './stage'
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
 
+/** A stack is 2 or 3 glaze ids, none empty. */
+export function isValidStack(layers: string[]): boolean {
+  return (
+    (layers.length === 2 || layers.length === 3) && layers.every((l) => !!l)
+  )
+}
+
 /** A plain object: not null and not an array. */
 export const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -66,6 +73,17 @@ export const isLayerRow = (row: unknown) =>
 
 export const isGlazeRow = (row: unknown) =>
   isRow(row, ['name'], (r) => isStringOrAbsent(r.swatchPhotoId))
+
+/** A combo: 2-3 glaze ids, top layer first, and its swatch photo. */
+export const isComboRow = (row: unknown) =>
+  isRow(
+    row,
+    ['swatchPhotoId'],
+    (r) =>
+      Array.isArray(r.layers) &&
+      r.layers.every((l) => typeof l === 'string') &&
+      isValidStack(r.layers as string[]),
+  )
 
 export const isClayRow = (row: unknown) => isRow(row, ['name'])
 

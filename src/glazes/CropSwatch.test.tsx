@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SwatchImage } from '../photos/swatchImage'
 import { CropSwatch } from './CropSwatch'
-import { sourceSquare, startView } from './cropView'
+import { type CropView, sourceSquare, startView } from './cropView'
 
 const makeSwatch = vi.fn()
 vi.mock('../photos/swatchImage', () => ({
@@ -43,7 +43,69 @@ describe('CropSwatch', () => {
       source,
       sourceSquare(startView(4000, 3000), 4000, 3000),
     )
-    expect(onUse).toHaveBeenCalledWith(made)
+    expect(onUse).toHaveBeenCalledWith(made, startView(4000, 3000))
+  })
+
+  it('run labels, status and hint replace the defaults', () => {
+    render(
+      <CropSwatch
+        source={source}
+        width={4000}
+        height={3000}
+        labels={{ cancel: 'Done', use: 'Next' }}
+        status="Over Tenmoku · 2 saved"
+        hint="Saved Celadon over Tenmoku."
+        onUse={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Done' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use swatch' })).toBeNull()
+    expect(screen.getByText('Over Tenmoku · 2 saved')).toBeVisible()
+    expect(screen.getByText('Saved Celadon over Tenmoku.')).toBeVisible()
+    expect(
+      screen.queryByText('Drag and pinch so the square holds only glaze'),
+    ).toBeNull()
+  })
+
+  it('onUse gets the view so the next tile starts there', async () => {
+    const onUse = vi.fn()
+    const { unmount } = render(
+      <CropSwatch
+        source={source}
+        width={4000}
+        height={3000}
+        onUse={onUse}
+        onCancel={vi.fn()}
+      />,
+    )
+    const area = screen.getByRole('dialog').querySelector('.touch-none')
+    if (!area) throw new Error('no crop area')
+    fireEvent.wheel(area, { deltaY: -100 })
+    await userEvent.click(screen.getByRole('button', { name: 'Use swatch' }))
+    await waitFor(() => expect(onUse).toHaveBeenCalled())
+    const view = onUse.mock.calls[0][1] as CropView
+    expect(view.zoom).toBeGreaterThan(1)
+    unmount()
+
+    render(
+      <CropSwatch
+        source={source}
+        width={4000}
+        height={3000}
+        initialView={view}
+        onUse={onUse}
+        onCancel={vi.fn()}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Use swatch' }))
+    expect(makeSwatch).toHaveBeenLastCalledWith(
+      source,
+      sourceSquare(view, 4000, 3000),
+    )
+    expect(onUse).toHaveBeenLastCalledWith(made, view)
   })
 
   it('a wheel scroll up zooms in', async () => {
@@ -79,7 +141,9 @@ describe('CropSwatch', () => {
     await userEvent.keyboard('{Escape}')
     expect(onCancel).not.toHaveBeenCalled()
     finish(made)
-    await waitFor(() => expect(onUse).toHaveBeenCalledWith(made))
+    await waitFor(() =>
+      expect(onUse).toHaveBeenCalledWith(made, expect.anything()),
+    )
     expect(onCancel).not.toHaveBeenCalled()
   })
 

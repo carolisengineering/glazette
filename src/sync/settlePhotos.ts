@@ -1,6 +1,6 @@
 import { type GlazetteDB, newId, UNDELETE_PHOTO } from '../db/db'
 import { compareEntries } from '../db/stage'
-import type { Glaze, Photo, StageEntry } from '../db/types'
+import type { Combo, Glaze, Photo, StageEntry } from '../db/types'
 import { hashesHeld, keepBytes } from '../photos/bytes'
 import { changeTime } from './records'
 
@@ -42,23 +42,24 @@ function addTo<T>(map: Map<string, T[]>, key: string, item: T): void {
  * remembers the step it was on. A deleted photo without that place gets it
  * from a deleted step. A photo no step shows is left alone:
  * only an actual delete deletes a photo. Merged duplicates are left alone.
- * A live glaze's swatch counts as shown, like a live step's photo, but a
- * deleted glaze's doesn't delete it or give it a place.
+ * A live glaze's or combo's swatch counts as shown, like a live step's photo,
+ * but a deleted glaze's or combo's doesn't delete it or give it a place.
  *
- * A purged photo (a stub) stays as it is. But if a live step or glaze still
- * shows it, as after restoring a backup from before the purge, and this device
- * holds its bytes, the image comes back as a new photo that waits to upload,
- * and those steps and glazes move to it. Without the bytes it's left alone.
+ * A purged photo (a stub) stays as it is. But if a live step, glaze or combo
+ * still shows it, as after restoring a backup from before the purge, and this
+ * device holds its bytes, the image comes back as a new photo that waits to
+ * upload, and those steps, glazes and combos move to it. Without the bytes
+ * it's left alone.
  *
  * Each change is dated past the row's last one, so it wins over the copy it
  * changes. A normal tracked write, so the changes sync. Bytes are never
- * removed. Every photo, step and glaze is read on each sync, which is fine at a
- * journal's scale.
+ * removed. Every photo, step, glaze and combo is read on each sync, which is
+ * fine at a journal's scale.
  */
 export function settlePhotos(db: GlazetteDB): Promise<void> {
   return db.transaction(
     'rw',
-    [db.photos, db.entries, db.photoBytes, db.pieces, db.glazes],
+    [db.photos, db.entries, db.photoBytes, db.pieces, db.glazes, db.combos],
     async () => {
       const rows = await db.photos.filter((p) => !p.mergedInto).toArray()
       const photos = rows.filter((p) => !p.purgedAt)
@@ -82,7 +83,14 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
       for (const glaze of glazes) {
         addTo(linked, glaze.swatchPhotoId as string, glaze)
       }
-      const shown = (id: string) => live.has(id) || linked.has(id)
+      // Live combos by the swatch photo they link.
+      const linkedCombos = new Map<string, Combo[]>()
+      const combos = await db.combos.filter((c) => !c.deletedAt).toArray()
+      for (const combo of combos) {
+        addTo(linkedCombos, combo.swatchPhotoId, combo)
+      }
+      const shown = (id: string) =>
+        live.has(id) || linked.has(id) || linkedCombos.has(id)
 
       const now = new Date().toISOString()
       const changes: { key: string; changes: Partial<Photo> }[] = []
@@ -127,6 +135,7 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
 
       const repointed: { key: string; changes: Partial<StageEntry> }[] = []
       const relinked: { key: string; changes: Partial<Glaze> }[] = []
+      const relinkedCombos: { key: string; changes: Partial<Combo> }[] = []
       for (const stub of stranded) {
         if (!stub.blob && !held.has(stub.hash)) continue
         // Bytes still on an old row go to the table, where the new row finds
@@ -160,9 +169,18 @@ export function settlePhotos(db: GlazetteDB): Promise<void> {
             changes: { swatchPhotoId: id, updatedAt: changeTime(glaze, now) },
           })
         }
+        for (const combo of linkedCombos.get(stub.id) ?? []) {
+          relinkedCombos.push({
+            key: combo.id,
+            changes: { swatchPhotoId: id, updatedAt: changeTime(combo, now) },
+          })
+        }
       }
       if (repointed.length > 0) await db.entries.bulkUpdate(repointed)
       if (relinked.length > 0) await db.glazes.bulkUpdate(relinked)
+      if (relinkedCombos.length > 0) {
+        await db.combos.bulkUpdate(relinkedCombos)
+      }
     },
   )
 }

@@ -2,9 +2,11 @@ import type { EntityTable, IDType } from 'dexie'
 import { strFromU8, type Unzipped, unzipSync } from 'fflate'
 import { PHOTO_HASH } from '../../shared/photoProtocol'
 import { EPOCH } from '../../shared/syncProtocol'
+import { comboId } from '../db/combos'
 import { db, newId, UNDELETE_PHOTO } from '../db/db'
 import {
   isClayRow,
+  isComboRow,
   isEntryRow,
   isGlazeRow,
   isLayerRow,
@@ -75,6 +77,7 @@ export async function importZip(
       db.entries,
       db.glazeApps,
       db.glazes,
+      db.combos,
       db.clays,
       db.settings,
       db.photos,
@@ -123,6 +126,7 @@ function isBackup(json: unknown): json is BackupJson {
     areRows(json.entries, isEntryRow) &&
     areRows(json.glazeApps, isLayerRow) &&
     areRows(json.glazes, isGlazeRow) &&
+    (json.combos === undefined || areRows(json.combos, isComboRow)) &&
     areRows(json.clays, isClayRow) &&
     areRows(json.photos, (row) =>
       isRow(row, ['hash'], (r) => PHOTO_HASH.test(r.hash as string)),
@@ -165,12 +169,36 @@ async function merge(json: BackupJson, files: Unzipped): Promise<ImportResult> {
     glazeRows,
     (g) => g.swatchPhotoId,
   )
-  for (const id of await swatchesOfKeptGlazes(glazeRows)) {
+  for (const id of await swatchesOfKept(db.glazes, glazeRows)) {
     if (!releases.has(id)) releases.set(id, new Date().toISOString())
   }
   const addedGlazes = await mergeKeepingLocal(db.glazes, glazeRows, count)
   await reviveSwatches(addedGlazes, photos.matched, count)
   await carrySwatches(glazes.matches, photos, releases, count)
+
+  // Combos follow their glazes and photos to the ids here; a combo's id comes
+  // from its layers, so it is rebuilt from the mapped ones.
+  const comboRows = (json.combos ?? []).map((c) => {
+    const layers = c.layers.map((l) => glazes.idMap.get(l) ?? l)
+    return {
+      ...c,
+      id: comboId(layers),
+      layers,
+      swatchPhotoId: photos.idMap.get(c.swatchPhotoId) ?? c.swatchPhotoId,
+    }
+  })
+  for (const [id, deletedAt] of await photosOfTombstoned(
+    db.combos,
+    comboRows,
+    (c) => c.swatchPhotoId,
+  )) {
+    releases.set(id, deletedAt)
+  }
+  for (const id of await swatchesOfKept(db.combos, comboRows)) {
+    if (!releases.has(id)) releases.set(id, new Date().toISOString())
+  }
+  const addedCombos = await mergeKeepingLocal(db.combos, comboRows, count)
+  await reviveSwatches(addedCombos, photos.matched, count)
 
   const entries = json.entries.map((e) => {
     const photoId = e.photoId && photos.idMap.get(e.photoId)
@@ -228,13 +256,16 @@ async function photosOfTombstoned<T extends { id: string; deletedAt?: string }>(
 }
 
 /**
- * Swatch photos of incoming glazes whose id is already here, where the glaze
- * here (which the merge keeps) links another photo or none. Read before the
- * glazes are written.
+ * Swatch photos of incoming glazes or combos whose id is already here, where
+ * the row here (which the merge keeps) links another photo or none. Read
+ * before the rows are written.
  */
-async function swatchesOfKeptGlazes(incoming: Glaze[]): Promise<string[]> {
+async function swatchesOfKept<T extends { id: string; swatchPhotoId?: string }>(
+  table: EntityTable<T, 'id'>,
+  incoming: T[],
+): Promise<string[]> {
   const rows = uniqueById(incoming)
-  const local = await db.glazes.bulkGet(rows.map((r) => r.id))
+  const local = await table.bulkGet(rows.map((r) => r.id) as IDType<T, 'id'>[])
   return rows.flatMap((row, i) => {
     const mine = local[i]
     return mine && row.swatchPhotoId && row.swatchPhotoId !== mine.swatchPhotoId
@@ -278,9 +309,9 @@ async function carrySwatches(
 
 /**
  * As removePhoto does in the app: a photo is deleted only when no live step
- * shows it and no live glaze has it as its swatch, because identical photos
- * share one row. Runs after the steps are written and the swatch links fixed,
- * so it sees the merged state.
+ * shows it and no live glaze or combo has it as its swatch, because identical
+ * photos share one row. Runs after the steps are written and the swatch links
+ * fixed, so it sees the merged state.
  */
 async function releaseUnusedPhotos(candidates: Map<string, string>) {
   if (candidates.size === 0) return
@@ -537,16 +568,16 @@ async function mergePhotos(
 }
 
 /**
- * A live incoming glaze whose swatch is a photo deleted here brings that photo
- * back, as a step does.
+ * A live incoming glaze or combo whose swatch is a photo deleted here brings
+ * that photo back, as a step does.
  */
 async function reviveSwatches(
-  addedGlazes: Glaze[],
+  added: { swatchPhotoId?: string; deletedAt?: string }[],
   matched: Set<string>,
   count: ImportResult,
 ) {
   await undeletePhotos(
-    addedGlazes.filter((g) => !g.deletedAt).map((g) => g.swatchPhotoId),
+    added.filter((r) => !r.deletedAt).map((r) => r.swatchPhotoId),
     matched,
     count,
   )

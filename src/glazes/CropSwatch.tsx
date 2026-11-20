@@ -10,9 +10,20 @@ interface Props {
   /** The source photo's size in pixels. */
   width: number
   height: number
-  onUse: (image: SwatchImage) => void
+  /** Called with the made image and the view it was cut from. */
+  onUse: (image: SwatchImage, view: CropView) => void
   onCancel: () => void
+  /** Button labels; default Cancel and Use swatch. */
+  labels?: { cancel: string; use: string }
+  /** A short line between the buttons. */
+  status?: string
+  /** Replaces the default hint under the photo. */
+  hint?: string
+  /** Where the square starts; default centered with the short side filling it. */
+  initialView?: CropView
 }
+
+const DEFAULT_LABELS = { cancel: 'Cancel', use: 'Use swatch' }
 
 /** How much of the content column the square frame takes. */
 const FRAME_SHARE = 0.8
@@ -21,11 +32,23 @@ type Point = { x: number; y: number }
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
 /** Full-screen crop: drag and pinch the photo under a fixed square, then use it as a swatch. */
-export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
+export function CropSwatch({
+  source,
+  width,
+  height,
+  onUse,
+  onCancel,
+  labels = DEFAULT_LABELS,
+  status,
+  hint = 'Drag and pinch so the square holds only glaze',
+  initialView,
+}: Props) {
   const url = usePhotoUrl(source)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const { show: showToast, toast } = useToast()
-  const [view, setView] = useState<CropView>(() => startView(width, height))
+  const [view, setView] = useState<CropView>(
+    () => initialView ?? startView(width, height),
+  )
   const [busy, setBusy] = useState(false)
   // Escape does nothing while the swatch is being made, like the Cancel button.
   useModal(cancelRef, () => {
@@ -102,7 +125,7 @@ export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
   const use = async () => {
     setBusy(true)
     try {
-      onUse(await makeSwatch(source, sourceSquare(view, width, height)))
+      onUse(await makeSwatch(source, sourceSquare(view, width, height)), view)
     } catch {
       showToast(SAVE_ERROR)
       setBusy(false)
@@ -123,23 +146,28 @@ export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
       className="fixed inset-0 z-[60] bg-camera text-white"
     >
       <div className="mx-auto flex h-full max-w-[430px] flex-col pt-14 pb-8">
-        <div className="flex items-center justify-between px-5 pb-3">
+        <div className="flex items-center justify-between gap-3 px-5 pb-3">
           <button
             ref={cancelRef}
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="h-11 rounded-[22px] bg-white/12 px-4 text-[15px] font-semibold disabled:opacity-50"
+            className="h-11 shrink-0 rounded-[22px] bg-white/12 px-4 text-[15px] font-semibold disabled:opacity-50"
           >
-            Cancel
+            {labels.cancel}
           </button>
+          {status ? (
+            <span className="min-w-0 text-center text-[13px] leading-tight font-medium text-white/75">
+              {status}
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={use}
             disabled={busy}
-            className="h-11 rounded-[22px] bg-white px-4 text-[15px] font-semibold text-camera disabled:opacity-50"
+            className="h-11 shrink-0 rounded-[22px] bg-white px-4 text-[15px] font-semibold text-camera disabled:opacity-50"
           >
-            {busy ? 'Saving…' : 'Use swatch'}
+            {busy ? 'Saving…' : labels.use}
           </button>
         </div>
         <div
@@ -170,7 +198,7 @@ export function CropSwatch({ source, width, height, onUse, onCancel }: Props) {
           />
         </div>
         <p className="px-5 pt-4 text-center text-[15px] text-white/80">
-          Drag and pinch so the square holds only glaze
+          {hint}
         </p>
       </div>
       {toast}

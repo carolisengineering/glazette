@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest'
-import { isGlazeRow, isPhotoRow, isPieceRow } from './rowChecks'
+import {
+  isComboRow,
+  isGlazeRow,
+  isPhotoRow,
+  isPieceRow,
+  isValidStack,
+} from './rowChecks'
 
 const piece = { id: 'p', createdAt: 'x', updatedAt: 'x' }
 
@@ -50,4 +56,24 @@ test('isPhotoRow rejects swatch other than 1', () => {
   expect(isPhotoRow({ ...photo, swatch: 1 })).toBe(true)
   expect(isPhotoRow({ ...photo, swatch: 2 })).toBe(false)
   expect(isPhotoRow({ ...photo, swatch: true })).toBe(false)
+})
+
+test('isComboRow takes 2–3 string layers and a swatch', () => {
+  const combo = { id: 'c', layers: ['a', 'b'], swatchPhotoId: 'ph' }
+  expect(isComboRow(combo)).toBe(true)
+  expect(isComboRow({ ...combo, layers: ['a', 'b', 'c'] })).toBe(true)
+  expect(isComboRow({ id: 'c', layers: ['a', 'b'] })).toBe(false)
+  expect(isComboRow({ ...combo, layers: ['a'] })).toBe(false)
+  expect(isComboRow({ ...combo, layers: ['a', 'b', 'c', 'd'] })).toBe(false)
+  expect(isComboRow({ ...combo, layers: ['a', 2] })).toBe(false)
+  expect(isComboRow({ ...combo, layers: 'ab' })).toBe(false)
+})
+
+test('isValidStack takes 2 or 3 layers', () => {
+  expect(isValidStack([])).toBe(false)
+  expect(isValidStack(['a'])).toBe(false)
+  expect(isValidStack(['a', 'b', 'c', 'd'])).toBe(false)
+  expect(isValidStack(['a', ''])).toBe(false)
+  expect(isValidStack(['a', 'b'])).toBe(true)
+  expect(isValidStack(['a', 'b', 'a'])).toBe(true)
 })

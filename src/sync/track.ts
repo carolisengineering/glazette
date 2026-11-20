@@ -10,6 +10,7 @@ export const SYNCED_TABLES = [
   'entries',
   'glazeApps',
   'glazes',
+  'combos',
   'clays',
   'settings',
   'photos',

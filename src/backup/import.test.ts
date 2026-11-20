@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { EPOCH } from '../../shared/syncProtocol'
+import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { createPiece, ensureDefaults, softDelete } from '../db/ops'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
@@ -1480,4 +1481,124 @@ test('the result counts pieces added, replaced and newly deleted, not other rows
   expect(result.pieces).toBe(2)
   expect(result.added).toBe(4)
   expect((await importZip(zip)).pieces).toBe(0)
+})
+
+const comboGlaze = (id: string, name: string): Glaze => ({
+  id,
+  name,
+  color: '#9dbbaa',
+})
+
+const comboRow = (layers: string[], swatchPhotoId: string, over = {}) => ({
+  id: comboId(layers),
+  layers,
+  swatchPhotoId,
+  ...over,
+})
+
+test('restoring adds combos with their layers on the matched glazes', async () => {
+  await db.glazes.add(comboGlaze('L1', 'tenmoku'))
+  await db.glazes.add(comboGlaze('L2', 'Celadon'))
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  const zip = zipOf(
+    backup({
+      glazes: [comboGlaze('B1', 'Tenmoku'), comboGlaze('L2', 'Celadon')],
+      combos: [comboRow(['B1', 'L2'], 'sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  const combos = await db.combos.toArray()
+  expect(combos).toHaveLength(1)
+  expect(combos[0].layers).toEqual(['L1', 'L2'])
+  expect(combos[0].id).toBe(comboId(['L1', 'L2']))
+  expect(combos[0].swatchPhotoId).toBe('local-sw')
+})
+
+test('a backup without combos still restores', async () => {
+  const json = backup({ glazes: [comboGlaze('g1', 'Celadon')] })
+  await importZip(zipOf(json))
+  expect(await db.glazes.count()).toBe(1)
+  expect(await db.combos.count()).toBe(0)
+})
+
+test("a combo already here keeps its photo and the backup's is released", async () => {
+  await db.photos.add({ ...photoRow('local-sw', H1), swatch: 1 })
+  await db.combos.add(comboRow(['g1', 'g2'], 'local-sw'))
+  const zip = zipOf(
+    backup({
+      combos: [comboRow(['g1', 'g2'], 'sw2')],
+      photos: [{ ...photoMeta('sw2', H2), swatch: 1 }],
+    }),
+    [H2],
+  )
+
+  await importZip(zip)
+
+  expect((await db.combos.get(comboId(['g1', 'g2'])))?.swatchPhotoId).toBe(
+    'local-sw',
+  )
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+  expect((await db.photos.get('sw2'))?.deletedAt).toBeDefined()
+})
+
+test('a deleted combo in the backup deletes the live one here', async () => {
+  await db.photos.add({ ...photoRow('sw1', H1), swatch: 1 })
+  await db.combos.add(comboRow(['g1', 'g2'], 'sw1'))
+  const zip = zipOf(
+    backup({
+      combos: [
+        comboRow(['g1', 'g2'], 'sw1', {
+          deletedAt: '2026-11-10T09:00:00.000Z',
+        }),
+      ],
+    }),
+  )
+
+  await importZip(zip)
+
+  expect((await db.combos.get(comboId(['g1', 'g2'])))?.deletedAt).toBe(
+    '2026-11-10T09:00:00.000Z',
+  )
+  expect((await db.photos.get('sw1'))?.deletedAt).toBe(
+    '2026-11-10T09:00:00.000Z',
+  )
+})
+
+test('a backup combo whose swatch is a photo deleted here brings the photo back', async () => {
+  await db.photos.add({
+    ...photoRow('local-sw', H1, '2026-11-02T09:00:00.000Z'),
+    swatch: 1,
+  })
+  const zip = zipOf(
+    backup({
+      combos: [comboRow(['g1', 'g2'], 'sw1')],
+      photos: [{ ...photoMeta('sw1', H1), swatch: 1 }],
+    }),
+    [H1],
+  )
+
+  await importZip(zip)
+
+  expect((await db.combos.get(comboId(['g1', 'g2'])))?.swatchPhotoId).toBe(
+    'local-sw',
+  )
+  expect((await db.photos.get('local-sw'))?.deletedAt).toBeUndefined()
+})
+
+test("restoring rejects a combo row that isn't valid", async () => {
+  const bad = [
+    [{ id: 'x', layers: ['g1'], swatchPhotoId: 'sw1' }],
+    [{ id: 'x', layers: ['g1', 'g2'] }],
+    [{ id: 'x', layers: 'g1', swatchPhotoId: 'sw1' }],
+  ]
+  for (const combos of bad) {
+    await expect(
+      importZip(zipOf({ ...backup(), combos })),
+    ).rejects.toBeInstanceOf(NotABackupError)
+  }
+  expect(await db.combos.count()).toBe(0)
 })

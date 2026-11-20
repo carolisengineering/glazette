@@ -5,6 +5,8 @@ interface Props {
   title: string
   body?: string
   confirmLabel: string
+  /** Default Cancel. */
+  cancelLabel?: string
   onConfirm: () => void
   onCancel: () => void
 }
@@ -14,6 +16,7 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel,
+  cancelLabel = 'Cancel',
   onConfirm,
   onCancel,
 }: Props) {
@@ -39,7 +42,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             className="h-12 flex-1 rounded-3xl border border-border bg-surface text-[16px] font-semibold"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"

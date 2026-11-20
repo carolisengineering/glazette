@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 import { trackChanges } from '../sync/track'
 import type {
   Clay,
+  Combo,
   Glaze,
   GlazeApplication,
   Photo,
@@ -18,6 +19,7 @@ export class GlazetteDB extends Dexie {
   entries!: EntityTable<StageEntry, 'id'>
   glazeApps!: EntityTable<GlazeApplication, 'id'>
   glazes!: EntityTable<Glaze, 'id'>
+  combos!: EntityTable<Combo, 'id'>
   clays!: EntityTable<Clay, 'id'>
   photos!: EntityTable<Photo, 'id'>
   photoBytes!: EntityTable<PhotoBytes, 'hash'>
@@ -60,6 +62,11 @@ export class GlazetteDB extends Dexie {
         photos: 'id, hash, dirty, needsUpload, needsDownload',
         photoBytes: 'hash',
       })
+      .upgrade(forgetLastSync)
+    // Old versions skip combo records they pull, so the first sync after
+    // updating must be a full one.
+    this.version(5)
+      .stores({ combos: 'id, deletedAt, dirty' })
       .upgrade(forgetLastSync)
     trackChanges(this)
   }

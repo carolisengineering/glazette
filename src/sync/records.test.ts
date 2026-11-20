@@ -3,6 +3,7 @@ import {
   MAX_DATA_CHARS,
   type SyncRecord,
 } from '../../shared/syncProtocol'
+import { comboId } from '../db/combos'
 import { GlazetteDB } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import type { Glaze, Photo, Piece } from '../db/types'
@@ -1021,5 +1022,211 @@ describe('mergeByName', () => {
       updatedAt: '2026-01-01T00:00:00.001Z',
       dirty: 1,
     })
+  })
+})
+
+describe('combos', () => {
+  const comboRecord = (id: string, changed: string): SyncRecord => ({
+    kind: 'combo',
+    id,
+    changedAt: changed,
+    data: {
+      id,
+      layers: ['g1', 'g2'],
+      swatchPhotoId: 'ph1',
+      updatedAt: changed,
+    },
+  })
+
+  test('a combo pushes and pulls like a glaze', async () => {
+    const id = comboId(['g1', 'g2'])
+    await db.combos.add({ id, layers: ['g1', 'g2'], swatchPhotoId: 'ph1' })
+    expect(await db.combos.get(id)).toMatchObject({ dirty: 1 })
+    expect(
+      (await readDirty(db)).filter((r) => r.kind === 'combo').map((r) => r.id),
+    ).toEqual([id])
+    await clearDirty(db, await readDirty(db))
+    await db.combos.update(id, { deletedAt: T2 })
+    expect((await readDirty(db)).map((r) => r.kind)).toEqual(['combo'])
+
+    await applyRecords(db, [comboRecord('combo-x', T2)])
+    expect(await db.combos.get('combo-x')).toMatchObject({
+      layers: ['g1', 'g2'],
+      swatchPhotoId: 'ph1',
+      updatedAt: T2,
+    })
+    expect((await db.combos.get('combo-x'))?.dirty).toBeUndefined()
+  })
+
+  const stored = (id: string, layers: string[], photo: string) => ({
+    id,
+    layers,
+    swatchPhotoId: photo,
+    createdAt: T1,
+    updatedAt: T1,
+  })
+
+  const photoFor = (id: string, photo: string, changed: string) => ({
+    ...comboRecord(id, changed),
+    data: { ...comboRecord(id, changed).data, swatchPhotoId: photo },
+  })
+
+  test('a pulled combo with another photo releases the local one', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.combos.get(id))?.swatchPhotoId).toBe('phB')
+    const released = await db.photos.get('phA')
+    expect(released?.deletedAt).toBeTruthy()
+    // A tracked change, so the delete reaches the other devices.
+    expect(released?.dirty).toBe(1)
+    expect(released?.updatedAt && released.updatedAt > T1).toBe(true)
+  })
+
+  test('a pulled combo with the same photo keeps it', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phA', T2)])
+    expect(await db.photos.get('phA')).toEqual(photoRow('phA', { swatch: 1 }))
+  })
+
+  test('a pulled combo keeps a replaced photo a glaze still links', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.glazes.add(glaze('g3', 'Chun', { swatchPhotoId: 'phA' }))
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+  })
+
+  test('an older pulled combo leaves the local photo alone', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add({ ...stored(id, ['g1', 'g2'], 'phA'), updatedAt: T3 })
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.combos.get(id))?.swatchPhotoId).toBe('phA')
+    expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+  })
+
+  test("first sign-in moves combos onto the account's glazes", async () => {
+    const old = comboId(['X', 'L'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.add(photoRow('ph1', { swatch: 1 }))
+      await db.combos.add(stored(old, ['X', 'L'], 'ph1'))
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    expect(await db.combos.get(comboId(['X', 'A']))).toMatchObject({
+      layers: ['X', 'A'],
+      swatchPhotoId: 'ph1',
+      dirty: 1,
+    })
+    expect(
+      (await db.combos.get(comboId(['X', 'A'])))?.deletedAt,
+    ).toBeUndefined()
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+  })
+
+  test("first sign-in keeps the account's combo when it changed later", async () => {
+    const old = comboId(['X', 'L'])
+    const kept = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1 }),
+      ])
+      await db.combos.bulkAdd([
+        stored(old, ['X', 'L'], 'ph1'),
+        { ...stored(kept, ['X', 'A'], 'ph2'), updatedAt: T2 },
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    expect(await db.combos.get(kept)).toMatchObject({
+      swatchPhotoId: 'ph2',
+      updatedAt: T2,
+    })
+    expect((await db.combos.get(kept))?.deletedAt).toBeUndefined()
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph2'))?.deletedAt).toBeUndefined()
+  })
+
+  test("first sign-in keeps the local combo's photo when it changed later", async () => {
+    const old = comboId(['X', 'L'])
+    const kept = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1 }),
+      ])
+      await db.combos.bulkAdd([
+        { ...stored(old, ['X', 'L'], 'ph1'), updatedAt: T2 },
+        stored(kept, ['X', 'A'], 'ph2'),
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    const combo = await db.combos.get(kept)
+    expect(combo).toMatchObject({
+      layers: ['X', 'A'],
+      swatchPhotoId: 'ph1',
+      createdAt: T1,
+      dirty: 1,
+    })
+    expect(combo?.deletedAt).toBeUndefined()
+    expect((combo?.updatedAt ?? '') > T2).toBe(true)
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+    expect((await db.photos.get('ph2'))?.deletedAt).toBeTruthy()
+  })
+
+  test('first sign-in dates a combo it revives after its delete', async () => {
+    const FUTURE = '2099-01-01T00:00:00.000Z'
+    const old = comboId(['X', 'L'])
+    const target = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1, deletedAt: FUTURE }),
+      ])
+      await db.combos.bulkAdd([
+        stored(old, ['X', 'L'], 'ph1'),
+        {
+          ...stored(target, ['X', 'A'], 'ph2'),
+          deletedAt: FUTURE,
+          updatedAt: FUTURE,
+        },
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    const combo = await db.combos.get(target)
+    expect(combo).toMatchObject({ swatchPhotoId: 'ph1', dirty: 1 })
+    expect(combo?.deletedAt).toBeUndefined()
+    expect(combo?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
   })
 })

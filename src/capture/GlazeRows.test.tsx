@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useModal } from '../components/useModal'
+import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { type GlazeRow, GlazeRows, isBlankRow, rowsAreBlank } from './GlazeRows'
 
@@ -128,4 +130,140 @@ describe('GlazeRows tile grid', () => {
     )
     expect(screen.getByTestId('picked-swatch')).toBeInTheDocument()
   })
+})
+
+describe('GlazeRows combos', () => {
+  const addGlaze = (id: string, name: string, extra = {}) =>
+    db.glazes.add({ id, name, color: '#aabbcc', ...extra })
+  const addCombo = (layers: string[]) =>
+    db.combos.add({ id: comboId(layers), layers, swatchPhotoId: 'p' })
+  const browse = () => screen.findByRole('button', { name: 'Browse combos' })
+
+  it('Browse combos shows only when a combo is shown', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon', { deletedAt: '2026-11-01' })
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await screen.findByRole('button', { name: 'Tenmoku' })
+    expect(screen.queryByRole('button', { name: 'Browse combos' })).toBeNull()
+    await addCombo(['c', 't'])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByRole('button', { name: 'Browse combos' })).toBeNull()
+    await db.glazes.update('c', { deletedAt: undefined })
+    expect(await browse()).toBeInTheDocument()
+  })
+
+  it("the Browse combos icon is the first tile's swatch", async () => {
+    // Whichever stack sorts first by id gets the bottom glaze that sorts
+    // last, so the first tile shown is the other combo.
+    const [[p, q]] = [
+      ['a', 'b'],
+      ['b', 'a'],
+    ].sort((x, y) => (comboId(x) < comboId(y) ? -1 : 1))
+    await addGlaze(p, 'Amber', { color: '#111111' })
+    await addGlaze(q, 'Zinc', { color: '#222222' })
+    await addCombo([p, q])
+    await addCombo([q, p])
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    const icon = (await browse()).querySelector<HTMLElement>(
+      '[data-testid="glaze-swatch"]',
+    )
+    expect(icon?.style.backgroundColor).toBe('rgb(34, 34, 34)')
+  })
+
+  it('tapping a combo fills the rows top first', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addGlaze('h', 'Chun')
+    await addCombo(['h', 'c', 't'])
+    const onChange = vi.fn()
+    render(<GlazeRows value={rows('')} onChange={onChange} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Chun over Celadon over Tenmoku',
+      }),
+    )
+    const next = onChange.mock.calls[0][0] as GlazeRow[]
+    expect(next.map((r) => [r.glazeId, r.name])).toEqual([
+      ['h', 'Chun'],
+      ['c', 'Celadon'],
+      ['t', 'Tenmoku'],
+    ])
+    for (const r of next) {
+      expect(r.dips).toBeUndefined()
+      expect(r.method).toBeUndefined()
+      expect(r.note).toBeUndefined()
+    }
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('filling blank rows shows no toast', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addCombo(['c', 't'])
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('undo restores the rows exactly', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addCombo(['c', 't'])
+    const original: GlazeRow[] = [
+      {
+        key: 'k1',
+        glazeId: 't',
+        name: 'Tenmoku',
+        dips: 2,
+        method: 'brush',
+        note: 'thin',
+      },
+    ]
+    const onChange = vi.fn()
+    render(<GlazeRows value={original} onChange={onChange} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+    )
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Glazes set to Celadon over Tenmoku',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onChange).toHaveBeenLastCalledWith(original)
+  })
+})
+
+function ModalHost({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useModal(ref, onClose)
+  return (
+    <div ref={ref} tabIndex={-1}>
+      <GlazeRows value={rows('')} onChange={() => {}} />
+    </div>
+  )
+}
+
+it('Escape on the Combos sheet closes only that sheet, not the host sheet', async () => {
+  await db.glazes.add({ id: 't', name: 'Tenmoku', color: '#aabbcc' })
+  await db.glazes.add({ id: 'c', name: 'Celadon', color: '#aabbcc' })
+  await db.combos.add({
+    id: comboId(['c', 't']),
+    layers: ['c', 't'],
+    swatchPhotoId: 'p',
+  })
+  const hostClose = vi.fn()
+  render(<ModalHost onClose={hostClose} />)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Browse combos' }),
+  )
+  expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(hostClose).not.toHaveBeenCalled()
+  await userEvent.keyboard('{Escape}')
+  expect(hostClose).toHaveBeenCalledTimes(1)
 })
