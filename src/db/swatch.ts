@@ -15,27 +15,29 @@ export type SwatchEdit =
  * Releases (soft-deletes) a swatch photo once no live glaze or combo links it. Does
  * nothing when the photo is missing, purged or already deleted. The caller has
  * already moved the link off the glaze. Call inside a transaction that
- * includes `db.glazes`, `db.combos` and `db.photos`.
+ * includes `db.glazes`, `db.combos` and `db.photos`. Says whether it released
+ * the photo.
  */
 export async function releaseSwatch(
   db: GlazetteDB,
   photoId: string,
   now: string,
-): Promise<void> {
+): Promise<boolean> {
   const photo = await db.photos.get(photoId)
-  if (!photo || photo.deletedAt || photo.purgedAt) return
+  if (!photo || photo.deletedAt || photo.purgedAt) return false
   const glazesUsing = await db.glazes
     .filter((g) => g.swatchPhotoId === photoId && !g.deletedAt)
     .count()
-  if (glazesUsing > 0) return
+  if (glazesUsing > 0) return false
   const combosUsing = await db.combos
     .filter((c) => c.swatchPhotoId === photoId && !c.deletedAt)
     .count()
-  if (combosUsing > 0) return
+  if (combosUsing > 0) return false
   await db.photos.update(photoId, {
     deletedAt: now,
     updatedAt: changeTime(photo, now),
   })
+  return true
 }
 
 /** The ids of swatch photos that live glazes and combos link. */

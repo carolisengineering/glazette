@@ -231,6 +231,8 @@ export function applyRecords(
         result.skippedKeys.add(recordKey({ kind: named.kind, id: named.id }))
       }
     }
+    // Photos of local combos that a record gave another photo.
+    const replaced = new Set<string>()
     const usable: SyncRecord[] = []
     for (const record of records) {
       if (
@@ -265,6 +267,13 @@ export function applyRecords(
             continue
           }
         }
+        if (
+          kind === 'combo' &&
+          typeof mine?.swatchPhotoId === 'string' &&
+          mine.swatchPhotoId !== row.swatchPhotoId
+        ) {
+          replaced.add(mine.swatchPhotoId)
+        }
         rows.set(record.id, row)
         writes.set(record.id, row)
         result.applied++
@@ -273,8 +282,29 @@ export function applyRecords(
         await db.table(TABLE_OF[kind]).bulkPut([...writes.values()])
       }
     }
+    await releaseReplaced(db, replaced)
     return result
   })
+}
+
+/**
+ * Releases each photo a pulled combo replaced here, as when a combo's photo is
+ * replaced on this device, unless a live glaze or combo still links it. Two
+ * devices that made the same stack end with the later photo; this lets the
+ * other one go. Run after every table is written, so a photo record in the
+ * same batch is seen first. The release is marked by hand, since sync writes
+ * are quiet, so the delete reaches the other devices.
+ */
+async function releaseReplaced(
+  db: GlazetteDB,
+  photoIds: Set<string>,
+): Promise<void> {
+  const now = new Date().toISOString()
+  for (const id of photoIds) {
+    if (await releaseSwatch(db, id, now)) {
+      await db.photos.update(id, { dirty: 1 })
+    }
+  }
 }
 
 /**

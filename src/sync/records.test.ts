@@ -1066,6 +1066,58 @@ describe('combos', () => {
     updatedAt: T1,
   })
 
+  const photoFor = (id: string, photo: string, changed: string) => ({
+    ...comboRecord(id, changed),
+    data: { ...comboRecord(id, changed).data, swatchPhotoId: photo },
+  })
+
+  test('a pulled combo with another photo releases the local one', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.combos.get(id))?.swatchPhotoId).toBe('phB')
+    const released = await db.photos.get('phA')
+    expect(released?.deletedAt).toBeTruthy()
+    // A tracked change, so the delete reaches the other devices.
+    expect(released?.dirty).toBe(1)
+    expect(released?.updatedAt && released.updatedAt > T1).toBe(true)
+  })
+
+  test('a pulled combo with the same photo keeps it', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phA', T2)])
+    expect(await db.photos.get('phA')).toEqual(photoRow('phA', { swatch: 1 }))
+  })
+
+  test('a pulled combo keeps a replaced photo a glaze still links', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.glazes.add(glaze('g3', 'Chun', { swatchPhotoId: 'phA' }))
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add(stored(id, ['g1', 'g2'], 'phA'))
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+  })
+
+  test('an older pulled combo leaves the local photo alone', async () => {
+    const id = comboId(['g1', 'g2'])
+    await quietly(db, async () => {
+      await db.photos.add(photoRow('phA', { swatch: 1 }))
+      await db.combos.add({ ...stored(id, ['g1', 'g2'], 'phA'), updatedAt: T3 })
+    })
+    await applyRecords(db, [photoFor(id, 'phB', T2)])
+    expect((await db.combos.get(id))?.swatchPhotoId).toBe('phA')
+    expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+  })
+
   test("first sign-in moves combos onto the account's glazes", async () => {
     const old = comboId(['X', 'L'])
     await quietly(db, async () => {

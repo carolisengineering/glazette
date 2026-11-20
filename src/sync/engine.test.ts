@@ -1123,3 +1123,39 @@ describe('recently deleted', () => {
     expect((await a.photos.get('ph1'))?.needsDownload).toBeUndefined()
   })
 })
+
+test('two devices that make the same combo keep one photo and release the other', async () => {
+  const photo = (id: string, n: string) => ({
+    id,
+    blob: new Blob(['full'], { type: 'image/jpeg' }),
+    hash: n.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+    swatch: 1 as const,
+  })
+  const combo = (photoId: string, updatedAt: string) => ({
+    id: 'combo-1',
+    layers: ['g1', 'g2'],
+    swatchPhotoId: photoId,
+    createdAt: T1,
+    updatedAt,
+  })
+  await a.photos.add(photo('ph-a', 'a'))
+  await a.combos.add(combo('ph-a', T1))
+  await b.photos.add(photo('ph-b', 'b'))
+  await b.combos.add(combo('ph-b', T2))
+
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+  await syncOnce(a, server, ME)
+  await syncOnce(b, server, ME)
+
+  // B's later photo wins; A's crop is released on both devices.
+  expect((await a.combos.get('combo-1'))?.swatchPhotoId).toBe('ph-b')
+  expect(onServer('photo', 'ph-a')?.data.deletedAt).toBeTruthy()
+  expect((await a.photos.get('ph-a'))?.deletedAt).toBeTruthy()
+  expect((await b.photos.get('ph-a'))?.deletedAt).toBeTruthy()
+  expect((await b.photos.get('ph-b'))?.deletedAt).toBeUndefined()
+  expect(await dirtyCount(a)).toBe(0)
+})
