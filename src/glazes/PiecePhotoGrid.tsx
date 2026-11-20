@@ -8,6 +8,8 @@ import { centerCropStyle } from './swatch'
 
 interface Props {
   title: string
+  /** A short line under the title. */
+  sub?: string
   /** The photos to offer, as usePickablePhotoIds gives them. */
   photoIds: string[]
   /** A short line shown under a photo. */
@@ -49,6 +51,7 @@ const READ_FAILED = "Couldn't open this photo. Try again."
 /** Pick one of the fired photos of pieces, to crop into a swatch. */
 export function PiecePhotoGrid({
   title,
+  sub,
   photoIds,
   captionOf,
   onPick,
@@ -94,9 +97,12 @@ export function PiecePhotoGrid({
         aria-labelledby={titleId}
         className="flex max-h-dvh w-full max-w-[430px] flex-col gap-4 overflow-y-auto rounded-t-[28px] bg-background px-5 pt-6 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-ink"
       >
-        <h2 id={titleId} className="font-serif text-[24px] leading-tight">
-          {title}
-        </h2>
+        <div className="flex flex-col gap-1">
+          <h2 id={titleId} className="font-serif text-[24px] leading-tight">
+            {title}
+          </h2>
+          {sub ? <p className="text-[14px] text-muted">{sub}</p> : null}
+        </div>
         <ul className="grid grid-cols-3 gap-2">
           {photoIds.map((id, i) => {
             const caption = captionOf?.(id)

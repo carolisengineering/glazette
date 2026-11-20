@@ -77,6 +77,7 @@ test('shows a caption under each photo when given', async () => {
   render(
     <PiecePhotoGrid
       title="From a piece"
+      sub="Fired pieces with 2 or 3 glazes"
       photoIds={['p1', 'p2']}
       captionOf={(id) => (id === 'p1' ? 'Celadon over Tenmoku' : undefined)}
       onPick={vi.fn()}
@@ -86,6 +87,7 @@ test('shows a caption under each photo when given', async () => {
   expect(
     screen.getByRole('dialog', { name: 'From a piece' }),
   ).toBeInTheDocument()
+  expect(screen.getByText('Fired pieces with 2 or 3 glazes')).toBeVisible()
   const first = screen.getByRole('button', {
     name: 'Photo 1, Celadon over Tenmoku',
   })

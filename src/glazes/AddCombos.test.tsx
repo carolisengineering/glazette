@@ -126,6 +126,9 @@ async function fromPiece(caption: string) {
     await within(choose).findByRole('button', { name: /From a piece/ }),
   )
   const grid = await screen.findByRole('dialog', { name: 'From a piece' })
+  expect(
+    within(grid).getByText('Fired pieces with 2 or 3 glazes'),
+  ).toBeVisible()
   await userEvent.click(
     await within(grid).findByRole('button', {
       name: `Photo 1, ${caption}`,
@@ -417,4 +420,26 @@ test('From a piece is hidden when no piece qualifies', async () => {
   expect(
     within(choose).queryByRole('button', { name: /From a piece/ }),
   ).toBeNull()
+})
+
+test('a failed save from a piece shows the error and lets you leave', async () => {
+  const { tenmoku, celadon } = await glazes()
+  await firedPiece([celadon, tenmoku])
+  const { onClose, onSaved } = setup()
+  const crop = await fromPiece('Celadon over Tenmoku')
+  vi.spyOn(db.combos, 'put').mockRejectedValue(new Error('full'))
+  await userEvent.click(
+    within(crop).getByRole('button', { name: 'Use swatch' }),
+  )
+  expect(
+    await screen.findByText("Couldn't save. Free up space and try again."),
+  ).toBeVisible()
+  expect(screen.queryByRole('dialog', { name: 'Crop swatch' })).toBeNull()
+  const grid = screen.getByRole('dialog', { name: 'From a piece' })
+  await userEvent.click(within(grid).getByRole('button', { name: 'Cancel' }))
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  await userEvent.click(within(choose).getByRole('button', { name: 'Cancel' }))
+  expect(onClose).toHaveBeenCalled()
+  expect(onSaved).not.toHaveBeenCalled()
+  expect(await db.combos.count()).toBe(0)
 })

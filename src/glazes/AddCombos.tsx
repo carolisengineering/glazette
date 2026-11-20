@@ -190,6 +190,7 @@ export function AddCombos({ onClose, onSaved }: Props) {
       {step.kind === 'piece' ? (
         <PiecePhotoGrid
           title="From a piece"
+          sub="Fired pieces with 2 or 3 glazes"
           photoIds={(pieceChoices ?? []).map((c) => c.photoId)}
           captionOf={(id) => pieceChoices?.find((c) => c.photoId === id)?.name}
           onPick={({ photoId, ...photo }) => {
@@ -204,7 +205,12 @@ export function AddCombos({ onClose, onSaved }: Props) {
           source={step.photo.blob}
           width={step.photo.width}
           height={step.photo.height}
-          onUse={(image) => savePiece(step.choice, image)}
+          onUse={(image) => {
+            // The crop stays busy once it hands back an image, so leave it
+            // first: a failed save lands back on the grid, toast showing.
+            setStep({ kind: 'piece' })
+            savePiece(step.choice, image)
+          }}
           onCancel={() => setStep({ kind: 'piece' })}
         />
       ) : null}
