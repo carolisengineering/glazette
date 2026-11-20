@@ -18,15 +18,10 @@ import {
 } from '../db/stage'
 import type { Stage } from '../db/types'
 import type { ProcessedImage } from '../photos/process'
-import {
-  type GlazeRow,
-  GlazeRows,
-  newGlazeRow,
-  rowsAreBlank,
-} from './GlazeRows'
+import { type GlazeRow, GlazeRows, isBlankRow, newGlazeRow } from './GlazeRows'
 import { NoPhoto } from './NoPhoto'
 import type { ExitTarget } from './Review'
-import { resolveGlazes, rowsFromPlan } from './resolveGlazes'
+import { isPlanRow, resolveGlazes, rowsFromPlan } from './resolveGlazes'
 import { StagePicker } from './StagePicker'
 
 interface Props {
@@ -85,8 +80,10 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
   // A planned piece with nothing used yet starts its glaze rows from the plan.
   const prefill = view.startsFromPlan
   const rows = edited ?? (prefill ? rowsFromPlan(view.planLayers) : blankRows)
-  // The note goes once the user has cleared every row of what the plan filled in.
-  const showPlanLine = prefill && !(edited && rowsAreBlank(edited))
+  // The note stays while a row the plan filled in still has something in it.
+  // It goes once those are cleared or replaced (by a combo or a past piece).
+  const showPlanLine =
+    prefill && rows.some((r) => isPlanRow(r) && !isBlankRow(r))
   // A lost piece doesn't advance from the arrow: preselect where it already is.
   const stage: Stage =
     picked ??
@@ -274,7 +271,7 @@ export function StageStrip({ pieceId, photo, exit, onChangePiece }: Props) {
                 Filled in from your plan. Change anything you did differently.
               </p>
             ) : null}
-            <GlazeRows value={rows} onChange={setEdited} />
+            <GlazeRows value={rows} onChange={setEdited} pieceId={pieceId} />
           </div>
         ) : null}
 

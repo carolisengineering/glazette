@@ -115,7 +115,11 @@ export function EditSheet({ piece, glazedStepId, plan, onClose }: Props) {
               rows={glazes.rows}
               setRows={glazes.setRows}
             />
-            <GlazeRows value={glazes.rows} onChange={glazes.setRows} />
+            <GlazeRows
+              value={glazes.rows}
+              onChange={glazes.setRows}
+              pieceId={piece.id}
+            />
           </div>
         ) : null}
         <div className="flex gap-3">

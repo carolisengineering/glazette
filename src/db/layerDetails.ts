@@ -18,3 +18,24 @@ export function layerDetails(src: LayerDetails): LayerDetails {
   if (src.note != null) out.note = src.note
   return out
 }
+
+const METHOD_TEXT: Record<NonNullable<GlazeApplication['method']>, string> = {
+  dip: 'dipped',
+  brush: 'brushed',
+  pour: 'poured',
+  spray: 'sprayed',
+}
+
+/**
+ * "2 dips · thin at rim": dips, method and note joined with middle dots,
+ * leaving out what's missing. A dip count already says dipped.
+ */
+export function layerDetailText(layer: LayerDetails): string {
+  const parts: string[] = []
+  if (layer.dips != null)
+    parts.push(`${layer.dips} ${layer.dips === 1 ? 'dip' : 'dips'}`)
+  if (layer.method && !(layer.method === 'dip' && layer.dips != null))
+    parts.push(METHOD_TEXT[layer.method])
+  if (layer.note) parts.push(layer.note)
+  return parts.join(' · ')
+}
