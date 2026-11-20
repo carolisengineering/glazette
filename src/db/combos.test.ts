@@ -75,6 +75,22 @@ test('saving over a deleted combo brings it back', async () => {
   expect(photo?.deletedAt).toBeUndefined()
 })
 
+test('saving over a deleted combo from a clock that ran ahead is dated after its delete', async () => {
+  const FUTURE = '2099-01-01T00:00:00.000Z'
+  const id = comboId(['g1', 'g2'])
+  await db.combos.add({
+    id,
+    layers: ['g1', 'g2'],
+    swatchPhotoId: 'old',
+    deletedAt: FUTURE,
+    updatedAt: FUTURE,
+  })
+  await saveCombo(['g1', 'g2'], swatch('h1'))
+  const combo = await db.combos.get(id)
+  expect(combo?.deletedAt).toBeUndefined()
+  expect(combo?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
+})
+
 test('deleteCombo soft-deletes and releases its swatch', async () => {
   const id = await saveCombo(['g1', 'g2'], swatch('h1'))
   const photoId = (await db.combos.get(id))?.swatchPhotoId as string

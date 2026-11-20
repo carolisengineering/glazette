@@ -1,5 +1,6 @@
 import { storePhoto } from '../photos/store'
 import type { SwatchImage } from '../photos/swatchImage'
+import { changeTime } from '../sync/records'
 import { db } from './db'
 import { releaseSwatch } from './swatch'
 
@@ -37,7 +38,8 @@ export function isValidStack(layers: string[]): boolean {
 
 /**
  * Saves the swatch photo for a stack. Saving a stack again replaces its photo
- * (releasing the old one) and brings a deleted combo back. Returns the id.
+ * (releasing the old one) and brings a deleted combo back, dated past the
+ * row's last change so it wins over that copy. Returns the id.
  */
 export async function saveCombo(
   layers: string[],
@@ -64,6 +66,7 @@ export async function saveCombo(
         createdAt: existing?.createdAt ?? now,
         deletedAt: undefined,
         purgedAt: undefined,
+        ...(existing ? { updatedAt: changeTime(existing, now) } : {}),
       })
       if (previous && previous !== photoId) {
         await releaseSwatch(db, previous, now)

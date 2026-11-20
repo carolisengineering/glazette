@@ -1089,7 +1089,7 @@ describe('combos', () => {
     expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
   })
 
-  test("first sign-in keeps the account's combo when both have the stack", async () => {
+  test("first sign-in keeps the account's combo when it changed later", async () => {
     const old = comboId(['X', 'L'])
     const kept = comboId(['X', 'A'])
     await quietly(db, async () => {
@@ -1103,17 +1103,78 @@ describe('combos', () => {
       ])
       await db.combos.bulkAdd([
         stored(old, ['X', 'L'], 'ph1'),
-        stored(kept, ['X', 'A'], 'ph2'),
+        { ...stored(kept, ['X', 'A'], 'ph2'), updatedAt: T2 },
       ])
     })
     await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
     expect(await db.combos.get(kept)).toMatchObject({
       swatchPhotoId: 'ph2',
-      updatedAt: T1,
+      updatedAt: T2,
     })
     expect((await db.combos.get(kept))?.deletedAt).toBeUndefined()
     expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
     expect((await db.photos.get('ph1'))?.deletedAt).toBeTruthy()
     expect((await db.photos.get('ph2'))?.deletedAt).toBeUndefined()
+  })
+
+  test("first sign-in keeps the local combo's photo when it changed later", async () => {
+    const old = comboId(['X', 'L'])
+    const kept = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1 }),
+      ])
+      await db.combos.bulkAdd([
+        { ...stored(old, ['X', 'L'], 'ph1'), updatedAt: T2 },
+        stored(kept, ['X', 'A'], 'ph2'),
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    const combo = await db.combos.get(kept)
+    expect(combo).toMatchObject({
+      layers: ['X', 'A'],
+      swatchPhotoId: 'ph1',
+      createdAt: T1,
+      dirty: 1,
+    })
+    expect(combo?.deletedAt).toBeUndefined()
+    expect((combo?.updatedAt ?? '') > T2).toBe(true)
+    expect((await db.combos.get(old))?.deletedAt).toBeTruthy()
+    expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+    expect((await db.photos.get('ph2'))?.deletedAt).toBeTruthy()
+  })
+
+  test('first sign-in dates a combo it revives after its delete', async () => {
+    const FUTURE = '2099-01-01T00:00:00.000Z'
+    const old = comboId(['X', 'L'])
+    const target = comboId(['X', 'A'])
+    await quietly(db, async () => {
+      await db.glazes.bulkAdd([
+        glaze('L', 'Tenmoku'),
+        glaze('A', 'tenmoku', { updatedAt: T2 }),
+      ])
+      await db.photos.bulkAdd([
+        photoRow('ph1', { swatch: 1 }),
+        photoRow('ph2', { swatch: 1, deletedAt: FUTURE }),
+      ])
+      await db.combos.bulkAdd([
+        stored(old, ['X', 'L'], 'ph1'),
+        {
+          ...stored(target, ['X', 'A'], 'ph2'),
+          deletedAt: FUTURE,
+          updatedAt: FUTURE,
+        },
+      ])
+    })
+    await mergeByName(db, { glaze: new Set(['A']), clay: new Set() })
+    const combo = await db.combos.get(target)
+    expect(combo).toMatchObject({ swatchPhotoId: 'ph1', dirty: 1 })
+    expect(combo?.deletedAt).toBeUndefined()
+    expect(combo?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
   })
 })

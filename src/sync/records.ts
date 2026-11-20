@@ -333,8 +333,9 @@ function winningRow(
  * name matches a live one that is, becomes that one. Its details carry over to
  * the account's row (see carriedDetails), everything pointing at it moves to
  * the account's id, and the local duplicate is deleted. When both glazes had
- * a swatch, the photo of the one that didn't stay is deleted. A normal
- * tracked write, so the changes sync. A piece that moves to the account's
+ * a swatch, the photo of the one that didn't stay is deleted. Combos move
+ * onto the account's glazes too (see moveCombos). A normal tracked write, so
+ * the changes sync. A piece that moves to the account's
  * clay changes 1 ms after it last did: past a server copy with the same
  * change time (left by an earlier full sync that stopped partway), still
  * behind any later one, and in the same place on the shelf.
@@ -396,9 +397,12 @@ export function mergeByName(
 }
 
 /**
- * Points live combos at the account's glazes. A combo whose new stack the
- * account already has is deleted, and its photo released; otherwise it
- * becomes the combo of the new stack, keeping its photo.
+ * Points live combos at the account's glazes: each becomes the combo of its
+ * new stack and is deleted under its old id. When the new stack already has a
+ * live combo, the one that changed later keeps its photo there (on a tie, the
+ * one already there) and the other photo is released, as when two devices
+ * make the same stack. A write to an existing row is dated past its last
+ * change, so it wins over that copy.
  */
 async function moveCombos(
   db: GlazetteDB,
@@ -408,20 +412,32 @@ async function moveCombos(
     .filter((c) => !c.deletedAt && c.layers.some((l) => glazes.has(l)))
     .toArray()
   const now = new Date().toISOString()
+  // When a moved combo's photo went onto a stack here, that combo's own
+  // change time, so a second combo moving onto the stack is compared fairly.
+  const photoTime = new Map<string, string>()
   for (const combo of moving) {
     const layers = combo.layers.map((l) => glazes.get(l) ?? l)
     const id = comboId(layers)
     const existing = await db.combos.get(id)
     await db.combos.update(combo.id, { deletedAt: now })
-    if (existing && !existing.deletedAt) {
-      await releaseSwatch(db, combo.swatchPhotoId, now)
-    } else {
-      await db.combos.put({
-        id,
-        layers,
-        swatchPhotoId: combo.swatchPhotoId,
-        createdAt: combo.createdAt ?? now,
-      })
+    const live = existing && !existing.deletedAt
+    if (live) {
+      const existingTime = photoTime.get(id) ?? changedAt(existing)
+      if (changedAt(combo) <= existingTime) {
+        await releaseSwatch(db, combo.swatchPhotoId, now)
+        continue
+      }
+    }
+    await db.combos.put({
+      id,
+      layers,
+      swatchPhotoId: combo.swatchPhotoId,
+      createdAt: existing?.createdAt ?? combo.createdAt ?? now,
+      ...(existing ? { updatedAt: changeTime(existing, now) } : {}),
+    })
+    photoTime.set(id, changedAt(combo))
+    if (live && existing.swatchPhotoId !== combo.swatchPhotoId) {
+      await releaseSwatch(db, existing.swatchPhotoId, now)
     }
   }
 }
