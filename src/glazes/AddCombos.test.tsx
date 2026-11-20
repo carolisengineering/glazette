@@ -43,15 +43,19 @@ function photo(tag: string): ProcessedImage {
 }
 
 let crops = 0
+let tiles: ProcessedImage
 
 beforeEach(async () => {
-  URL.createObjectURL = vi.fn(() => 'blob:preview')
+  tiles = photo('tiles')
+  URL.createObjectURL = vi.fn((blob: Blob) =>
+    blob === tiles.blob ? 'blob:tiles' : 'blob:preview',
+  )
   URL.revokeObjectURL = vi.fn()
   await db.delete()
   await db.open()
   await ensureDefaults()
   crops = 0
-  vi.mocked(processImage).mockResolvedValue(photo('tiles'))
+  vi.mocked(processImage).mockResolvedValue(tiles)
   vi.mocked(makeSwatch).mockImplementation(async () => {
     crops += 1
     return { ...photo(`crop${crops}`), color: '#aabbcc' }
@@ -131,6 +135,9 @@ test('a test tile run saves each tile over the bucket', async () => {
 
   const top = await next()
   expect(within(top).getByText('? over Tenmoku')).toBeVisible()
+  expect(
+    within(top).getByText('Pick the glaze written on the tile'),
+  ).toBeVisible()
   await userEvent.click(within(top).getByRole('button', { name: 'Celadon' }))
   const first = comboId([celadon, tenmoku])
   await waitFor(async () => expect(await db.combos.get(first)).toBeTruthy())
@@ -266,4 +273,27 @@ test('Done before any tile saves nothing', async () => {
   expect(onClose).toHaveBeenCalled()
   expect(onSaved).not.toHaveBeenCalled()
   expect(await db.combos.count()).toBe(0)
+})
+
+test('the bucket sheet shows the whole tile photo', async () => {
+  await glazes()
+  setup()
+  const choose = await screen.findByRole('dialog', { name: 'Add combos' })
+  await userEvent.click(
+    within(choose).getByRole('button', { name: /Test tile photo/ }),
+  )
+  fireEvent.change(screen.getByTestId('library-input'), {
+    target: { files: [new File(['x'], 'tiles.jpg', { type: 'image/jpeg' })] },
+  })
+  const sheet = await screen.findByRole('dialog', {
+    name: 'Which bucket is this?',
+  })
+  const shown = await within(sheet).findByRole('img', {
+    name: 'Your test tiles',
+  })
+  expect(shown).toHaveAttribute('src', 'blob:tiles')
+  expect(shown).toHaveClass('object-contain')
+  expect(
+    within(sheet).getByText('The bottom glaze for every tile in this photo'),
+  ).toBeVisible()
 })

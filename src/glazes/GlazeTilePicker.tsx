@@ -3,17 +3,25 @@ import { useModal } from '../components/useModal'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { nameKey } from '../db/rowChecks'
 import type { Glaze } from '../db/types'
+import type { ProcessedImage } from '../photos/process'
 import type { SwatchImage } from '../photos/swatchImage'
 import { GlazeSwatch } from './GlazeSwatch'
 
 export type GlazePick = { glazeId: string } | { newName: string }
 
+/**
+ * What the sheet shows above the field: a crop being named, as a small square
+ * with a caption, or a whole photo, fitted so nothing is cut off.
+ */
+export type TilePickerPreview =
+  | { kind: 'crop'; photo: SwatchImage; caption: string; sub?: string }
+  | { kind: 'photo'; photo: ProcessedImage }
+
 interface Props {
   title: string
   /** A line under the title. */
   sub?: string
-  /** The crop being named, shown above the field. */
-  preview?: { photo: SwatchImage; caption: string }
+  preview?: TilePickerPreview
   /** Every live glaze. */
   glazes: Glaze[]
   /** A glaze id left out of the grid. */
@@ -45,7 +53,10 @@ export function GlazeTilePicker({
   // The title takes focus, so the keyboard doesn't cover the tiles on open.
   const titleRef = useRef<HTMLHeadingElement>(null)
   useModal(titleRef, onCancel)
-  const previewUrl = usePhotoUrl(preview?.photo.thumb)
+  // The whole photo shows full size, so its handwriting can be read.
+  const previewUrl = usePhotoUrl(
+    preview?.kind === 'photo' ? preview.photo.blob : preview?.photo.thumb,
+  )
   const [name, setName] = useState('')
 
   const key = nameKey(name)
@@ -71,9 +82,25 @@ export function GlazeTilePicker({
           >
             {title}
           </h2>
-          {sub ? <p className="text-[15px] text-muted">{sub}</p> : null}
+          {sub && preview?.kind !== 'photo' ? (
+            <p className="text-[15px] text-muted">{sub}</p>
+          ) : null}
         </div>
-        {preview ? (
+        {preview?.kind === 'photo' ? (
+          <>
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Your test tiles"
+                width={preview.photo.width}
+                height={preview.photo.height}
+                className="max-h-[40dvh] w-full rounded-[14px] bg-camera object-contain"
+              />
+            ) : null}
+            {sub ? <p className="-mt-1 text-[15px] text-muted">{sub}</p> : null}
+          </>
+        ) : null}
+        {preview?.kind === 'crop' ? (
           <div className="flex items-center gap-3 rounded-[18px] bg-surface p-2.5">
             <div className="size-14 flex-none overflow-hidden rounded-[14px] bg-border">
               {previewUrl ? (
@@ -84,9 +111,14 @@ export function GlazeTilePicker({
                 />
               ) : null}
             </div>
-            <p className="font-serif text-[19px] leading-tight">
-              {preview.caption}
-            </p>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <p className="font-serif text-[19px] leading-tight">
+                {preview.caption}
+              </p>
+              {preview.sub ? (
+                <p className="text-[14px] text-muted">{preview.sub}</p>
+              ) : null}
+            </div>
           </div>
         ) : null}
         <input

@@ -145,6 +145,7 @@ export function AddCombos({ onClose, onSaved }: Props) {
         <GlazeTilePicker
           title="Which bucket is this?"
           sub="The bottom glaze for every tile in this photo"
+          preview={{ kind: 'photo', photo: step.photo }}
           glazes={glazes ?? []}
           onPick={(pick) => pickBucket(step.photo, pick)}
           onCancel={finish}
@@ -169,7 +170,12 @@ export function AddCombos({ onClose, onSaved }: Props) {
       {step.kind === 'top' && bucket ? (
         <GlazeTilePicker
           title="Which glaze is on top?"
-          preview={{ photo: step.image, caption: `? over ${bucket.name}` }}
+          preview={{
+            kind: 'crop',
+            photo: step.image,
+            caption: `? over ${bucket.name}`,
+            sub: 'Pick the glaze written on the tile',
+          }}
           glazes={glazes ?? []}
           exclude={bucket.id}
           faded={savedTops}
