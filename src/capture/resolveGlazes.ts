@@ -57,13 +57,19 @@ export async function loadGlazeRows(entryId: string): Promise<GlazeRow[]> {
   }))
 }
 
+const PLAN_KEY = 'plan-'
+
+/** Whether a row was filled in from the plan (see `rowsFromPlan`). */
+export const isPlanRow = (row: GlazeRow): boolean =>
+  row.key.startsWith(PLAN_KEY)
+
 /**
  * A plan as editable rows. Each row keeps its glazeId, so a name that is blank
  * (glaze not synced yet) is only shown, never matched.
  */
 export function rowsFromPlan(layers: PlanLayerView[]): GlazeRow[] {
   return layers.map((l, i) => ({
-    key: `plan-${i}`,
+    key: `${PLAN_KEY}${i}`,
     glazeId: l.glazeId,
     name: l.name,
     ...layerDetails(l),

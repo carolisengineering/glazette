@@ -2,14 +2,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { GlazeRow } from '../capture/GlazeRows'
 import { db } from '../db/db'
 import { layerDetails } from '../db/layerDetails'
-import { buildPieceViews, notDeleted, type PieceView } from '../db/queries'
+import { buildPieceViews, type PieceView } from '../db/queries'
 import { nameKey } from '../db/rowChecks'
-import {
-  compareEntries,
-  displayName,
-  glazedStepWithGlazes,
-  latestEntry,
-} from '../db/stage'
+import { compareEntries, displayName, latestEntry } from '../db/stage'
 import type { Glaze, GlazeApplication, StageEntry } from '../db/types'
 import { pickablePhotoIds } from './PiecePhotoGrid'
 
@@ -41,9 +36,10 @@ export interface PastPiece {
   label: string
 }
 
-/** A glaze to narrow the past pieces by. */
+/** A glaze to narrow the past pieces by, matched by name. */
 export interface PastChip {
-  glazeId: string
+  /** The glaze's name as a match key (see `nameKey`). */
+  key: string
   name: string
   color: string
   swatchPhotoId?: string
@@ -51,31 +47,39 @@ export interface PastChip {
 
 /**
  * Pieces with a fired photo and glazes on their glaze step, newest Fired step
- * first (undated last). A piece with a layer whose glaze isn't on this device
- * yet is left out, as is `excludePieceId`. `views` must already be live-only.
+ * first (undated last). The photo is the newest Fired photo in `held`, when
+ * given. A piece with a layer whose glaze isn't on this device yet is left
+ * out, as is `excludePieceId`. `views` must already be live-only.
  */
 export function buildPastPieces(
   views: PieceView[],
   glazeApps: GlazeApplication[],
   glazes: Glaze[],
   excludePieceId?: string,
+  held?: Set<string>,
 ): PastPiece[] {
-  const liveApps = glazeApps.filter(notDeleted)
   const byId = new Map(glazes.map((g) => [g.id, g]))
+  const appsByStep = new Map<string, GlazeApplication[]>()
+  for (const a of glazeApps) {
+    if (a.deletedAt) continue
+    const list = appsByStep.get(a.entryId)
+    if (list) list.push(a)
+    else appsByStep.set(a.entryId, [a])
+  }
 
   const found: { past: PastPiece; fired: StageEntry }[] = []
   for (const view of views) {
     if (view.piece.id === excludePieceId) continue
     const fired = latestEntry(
-      view.entries.filter((e) => e.photoId),
+      view.entries.filter((e) => e.photoId && (!held || held.has(e.photoId))),
       'fired',
     )
     if (!fired?.photoId) continue
-    const glazed = glazedStepWithGlazes(view.entries, liveApps)
-    if (!glazed) continue
-    const apps = liveApps
-      .filter((a) => a.entryId === glazed.id)
-      .sort((a, b) => a.order - b.order)
+    // The glaze step is the one with layers, when any step has them.
+    const apps = [
+      ...((view.glazeStepId && appsByStep.get(view.glazeStepId)) || []),
+    ].sort((a, b) => a.order - b.order)
+    if (apps.length === 0) continue
     if (!apps.every((a) => byId.has(a.glazeId))) continue
     const layers = apps.map((a): PastLayer => {
       const g = byId.get(a.glazeId) as Glaze
@@ -105,43 +109,35 @@ export function buildPastPieces(
   return found.map((f) => f.past)
 }
 
-/** Each live glaze on these pieces once, alphabetical. */
+/** Each live glaze name on these pieces once, alphabetical. */
 export function pastChips(pieces: PastPiece[]): PastChip[] {
-  const byId = new Map<string, PastChip>()
+  const byKey = new Map<string, PastChip>()
   for (const p of pieces) {
     for (const l of p.layers) {
-      if (!l.live || byId.has(l.glazeId)) continue
-      const chip: PastChip = {
-        glazeId: l.glazeId,
-        name: l.name,
-        color: l.color,
-      }
+      const key = nameKey(l.name)
+      if (!l.live || byKey.has(key)) continue
+      const chip: PastChip = { key, name: l.name, color: l.color }
       if (l.swatchPhotoId) chip.swatchPhotoId = l.swatchPhotoId
-      byId.set(l.glazeId, chip)
+      byKey.set(key, chip)
     }
   }
-  return [...byId.values()].sort((a, b) =>
+  return [...byKey.values()].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
   )
 }
 
 /**
- * Pieces that used every one of `glazeIds`, in any layer. None given keeps all.
- * A glaze matches by name too, so a glaze deleted and added again under the
- * same name still finds the pieces that wore the old one.
+ * Pieces that used every one of these glaze names (chip keys), in any layer.
+ * None given keeps all. Matching by name means a glaze deleted and added again
+ * under the same name still finds the pieces that wore the old one.
  */
 export function filterPastPieces(
   pieces: PastPiece[],
-  glazeIds: string[],
+  keys: string[],
 ): PastPiece[] {
-  const keyOf = new Map<string, string>()
-  for (const p of pieces) {
-    for (const l of p.layers) keyOf.set(l.glazeId, nameKey(l.name))
-  }
-  const wanted = glazeIds.map((id) => keyOf.get(id) ?? id)
   return pieces.filter((p) => {
-    const keys = new Set(p.layers.map((l) => nameKey(l.name)))
-    return wanted.every((k) => keys.has(k))
+    const has = new Set(p.layers.map((l) => nameKey(l.name)))
+    return keys.every((k) => has.has(k))
   })
 }
 
@@ -202,23 +198,26 @@ export function rowsFromPastPiece(piece: PastPiece): GlazeRow[] {
 }
 
 /**
- * `buildPastPieces` over live pieces, keeping only photos whose bytes this
+ * `buildPastPieces` over live pieces, using only fired photos whose bytes this
  * device holds. `undefined` until the first read resolves.
  */
 export function usePastPieces(
   excludePieceId?: string,
 ): PastPiece[] | undefined {
   return useLiveQuery(async () => {
-    const [pieces, entries, glazeApps, glazes, clays] = await Promise.all([
+    const [pieces, entries, glazeApps, glazes] = await Promise.all([
       db.pieces.toArray(),
       db.entries.toArray(),
       db.glazeApps.toArray(),
       db.glazes.toArray(),
-      db.clays.toArray(),
     ])
-    const views = buildPieceViews(pieces, entries, glazeApps, glazes, clays)
-    const past = buildPastPieces(views, glazeApps, glazes, excludePieceId)
-    const held = new Set(await pickablePhotoIds(past.map((p) => p.photoId)))
-    return past.filter((p) => held.has(p.photoId))
+    const views = buildPieceViews(pieces, entries, glazeApps, glazes, [])
+    const firedPhotos = views.flatMap((v) =>
+      v.entries.flatMap((e) =>
+        e.stage === 'fired' && e.photoId ? [e.photoId] : [],
+      ),
+    )
+    const held = new Set(await pickablePhotoIds(firedPhotos))
+    return buildPastPieces(views, glazeApps, glazes, excludePieceId, held)
   }, [excludePieceId])
 }

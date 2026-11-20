@@ -1,30 +1,14 @@
 import { useId, useRef } from 'react'
 import { PhotoImg } from '../components/PhotoImg'
 import { useModal } from '../components/useModal'
+import { layerDetailText } from '../db/layerDetails'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
-import {
-  firedLabel,
-  type PastLayer,
-  type PastPiece,
-} from '../glazes/pastPieces'
+import { firedLabel, type PastPiece } from '../glazes/pastPieces'
 
 interface Props {
   piece: PastPiece
   onUse: () => void
   onBack: () => void
-}
-
-/** "2 dips · Dip · thin at rim", leaving out what the layer doesn't have. */
-function layerLine(layer: PastLayer): string {
-  const parts: string[] = []
-  if (layer.dips != null) {
-    parts.push(`${layer.dips} ${layer.dips === 1 ? 'dip' : 'dips'}`)
-  }
-  if (layer.method) {
-    parts.push(layer.method[0].toUpperCase() + layer.method.slice(1))
-  }
-  if (layer.note) parts.push(layer.note)
-  return parts.join(' · ')
 }
 
 /**
@@ -63,7 +47,7 @@ export function PastPieceCard({ piece, onUse, onBack }: Props) {
         </div>
         <ol className="flex flex-col rounded-[18px] bg-surface px-3.5">
           {piece.layers.map((layer, i) => {
-            const line = layerLine(layer)
+            const line = layerDetailText(layer)
             return (
               <li
                 // Layers can repeat a glaze, so the position keys them.

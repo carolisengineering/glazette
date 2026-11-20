@@ -161,6 +161,29 @@ describe('buildPastPieces', () => {
     expect(build([glazedOnly, firedNoPhoto, noGlazes])).toEqual([])
   })
 
+  it('uses an older fired photo on this device while the newest is not', () => {
+    const mug = glazedAndFired('mug', ['c'], '2026-10-01T12:00:00Z')
+    const later = entry('f2', 'mug', 'fired', {
+      date: '2026-10-20T12:00:00Z',
+      photoId: 'ph-later',
+    })
+    const views = buildPieceViews(
+      [mug.piece],
+      [...mug.entries, later],
+      mug.apps,
+      glazes,
+      [],
+    )
+    const held = new Set(['ph-mug'])
+    const out = buildPastPieces(views, mug.apps, glazes, undefined, held)
+    expect(out.map((p) => [p.photoId, p.firedDate])).toEqual([
+      ['ph-mug', '2026-10-01T12:00:00Z'],
+    ])
+    expect(
+      buildPastPieces(views, mug.apps, glazes, undefined, new Set()),
+    ).toEqual([])
+  })
+
   it('leaves out the piece being edited', () => {
     const a = glazedAndFired('a', ['c'], '2026-10-01T12:00:00Z')
     const b = glazedAndFired('b', ['t'], '2026-10-02T12:00:00Z')
@@ -210,6 +233,12 @@ describe('chips and narrowing', () => {
   ])
 
   it('lists each live glaze on the pieces once, alphabetical', () => {
+    expect(pastChips(pieces).map((c) => c.key)).toEqual([
+      'celadon',
+      'chun',
+      'shino',
+      'tenmoku',
+    ])
     expect(pastChips(pieces).map((c) => c.name)).toEqual([
       'Celadon',
       'Chun',
@@ -221,8 +250,8 @@ describe('chips and narrowing', () => {
   it('narrows to pieces with every chosen glaze, in any layer', () => {
     const ids = (g: string[]) =>
       filterPastPieces(pieces, g).map((p) => p.pieceId)
-    expect(ids(['c'])).toEqual(['a', 'b'])
-    expect(ids(['c', 'h'])).toEqual(['b'])
+    expect(ids(['celadon'])).toEqual(['a', 'b'])
+    expect(ids(['celadon', 'chun'])).toEqual(['b'])
     expect(ids([])).toEqual(['a', 'b', 'c'])
   })
 })
@@ -338,8 +367,8 @@ test('a chip also finds pieces with a deleted glaze of the same name', () => {
     [],
     library,
   )
-  expect(pastChips(pieces).map((c) => c.glazeId)).toEqual(['x2', 'c'])
-  expect(filterPastPieces(pieces, ['x2']).map((p) => p.pieceId)).toEqual([
+  expect(pastChips(pieces).map((c) => c.key)).toEqual(['ash', 'celadon'])
+  expect(filterPastPieces(pieces, ['ash']).map((p) => p.pieceId)).toEqual([
     'new',
     'old',
   ])

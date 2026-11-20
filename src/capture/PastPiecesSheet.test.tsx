@@ -116,8 +116,8 @@ test('the closer look shows the recipe and uses it', async () => {
   )
   const card = screen.getByRole('dialog', { name: 'Soup bowl' })
   expect(within(card).getByText('Fired Oct 22')).toBeVisible()
-  expect(within(card).getByText('2 dips · Dip')).toBeVisible()
-  expect(within(card).getByText('1 dip · Pour · thin at rim')).toBeVisible()
+  expect(within(card).getByText('2 dips')).toBeVisible()
+  expect(within(card).getByText('1 dip · poured · thin at rim')).toBeVisible()
   await userEvent.click(
     within(card).getByRole('button', { name: 'Use these glazes' }),
   )
@@ -144,4 +144,23 @@ test('Escape closes the closer look first, then the sheet', async () => {
   expect(onClose).not.toHaveBeenCalled()
   await userEvent.keyboard('{Escape}')
   expect(onClose).toHaveBeenCalledTimes(1)
+})
+
+test('a chosen glaze whose pieces go away stops narrowing', async () => {
+  const { rerender } = render(
+    <PastPiecesSheet pieces={pieces} onUse={vi.fn()} onClose={vi.fn()} />,
+  )
+  await userEvent.click(chip('Chun'))
+  expect(photos()).toHaveLength(1)
+  // A sync removes the only piece with Chun while the sheet is open.
+  rerender(
+    <PastPiecesSheet
+      pieces={pieces.filter((p) => p.pieceId !== 'mug')}
+      onUse={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  )
+  expect(photos()).toHaveLength(2)
+  expect(chip('All')).toHaveAttribute('aria-pressed', 'true')
+  expect(within(sheet()).queryByText(/pieces? with/)).toBeNull()
 })

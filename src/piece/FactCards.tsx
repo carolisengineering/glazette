@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
+import { type LayerDetails, layerDetailText } from '../db/layerDetails'
 import type { PieceDetail, PlanLayerView } from '../db/queries'
-import type { GlazeApplication, Stage } from '../db/types'
+import type { Stage } from '../db/types'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
 
 const valueText = 'text-[15px] leading-snug font-semibold wrap-anywhere'
@@ -45,27 +46,10 @@ const BEFORE_GLAZING: Array<Stage | undefined> = [
   'bisqued',
 ]
 
-const dipsText = (dips: number) => `${dips} ${dips === 1 ? 'dip' : 'dips'}`
-
-const METHOD_TEXT: Record<NonNullable<GlazeApplication['method']>, string> = {
-  dip: 'dipped',
-  brush: 'brushed',
-  pour: 'poured',
-  spray: 'sprayed',
-}
-
-/** Dips, method and note, each after a middle dot. A dip count already says dipped. */
-function detailText(layer: {
-  dips?: number
-  method?: GlazeApplication['method']
-  note?: string
-}): string {
-  const parts: string[] = []
-  if (layer.dips !== undefined) parts.push(dipsText(layer.dips))
-  if (layer.method && !(layer.method === 'dip' && layer.dips !== undefined))
-    parts.push(METHOD_TEXT[layer.method])
-  if (layer.note) parts.push(layer.note)
-  return parts.map((p) => ` · ${p}`).join('')
+/** Dips, method and note, each after a middle dot. */
+function detailText(layer: LayerDetails): string {
+  const text = layerDetailText(layer)
+  return text ? ` · ${text}` : ''
 }
 
 function Detail({ text }: { text: string }) {

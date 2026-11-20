@@ -33,18 +33,21 @@ export function PastPiecesSheet({ pieces, onUse, onClose }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null)
   useModal(titleRef, onClose)
   const chips = useMemo(() => pastChips(pieces), [pieces])
-  const [chosen, setChosen] = useState<string[]>([])
+  const [picked, setPicked] = useState<string[]>([])
+  // A chip can go away while the sheet is open (a sync removes its pieces);
+  // then it no longer narrows.
+  const chosen = picked.filter((k) => chips.some((c) => c.key === k))
   const [looking, setLooking] = useState<PastPiece>()
 
   const shown = filterPastPieces(pieces, chosen)
   // Names in the order they were chosen, as she'd say them.
-  const namesInOrder = chosen.flatMap((id) => {
-    const c = chips.find((x) => x.glazeId === id)
+  const namesInOrder = chosen.flatMap((key) => {
+    const c = chips.find((x) => x.key === key)
     return c ? [c.name] : []
   })
-  const toggle = (id: string) =>
-    setChosen((now) =>
-      now.includes(id) ? now.filter((x) => x !== id) : [...now, id],
+  const toggle = (key: string) =>
+    setPicked(
+      chosen.includes(key) ? chosen.filter((x) => x !== key) : [...chosen, key],
     )
 
   return (
@@ -68,19 +71,19 @@ export function PastPiecesSheet({ pieces, onUse, onClose }: Props) {
             <button
               type="button"
               aria-pressed={chosen.length === 0}
-              onClick={() => setChosen([])}
+              onClick={() => setPicked([])}
               className={`${chipBase} px-3.5 ${chosen.length === 0 ? chipOn : chipOff}`}
             >
               All
             </button>
             {chips.map((c) => {
-              const on = chosen.includes(c.glazeId)
+              const on = chosen.includes(c.key)
               return (
                 <button
-                  key={c.glazeId}
+                  key={c.key}
                   type="button"
                   aria-pressed={on}
-                  onClick={() => toggle(c.glazeId)}
+                  onClick={() => toggle(c.key)}
                   className={`${chipBase} pr-3 pl-1 ${on ? chipOn : chipOff}`}
                 >
                   <GlazeSwatch

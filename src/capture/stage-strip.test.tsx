@@ -1,5 +1,6 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { setGlazePlan } from '../db/glazePlan'
 import * as ops from '../db/ops'
@@ -534,6 +535,27 @@ test('the plan note goes once every prefilled row is removed', async () => {
   expect(await screen.findByText(PLAN_LINE)).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Remove glaze 1' }))
   expect(screen.queryByText(PLAN_LINE)).toBeNull()
+})
+
+test('the plan note goes when a combo replaces the rows, and comes back with Undo', async () => {
+  const { id, celadon } = await plannedBisqued()
+  const tenmoku = await upsertGlaze({ name: 'Tenmoku', color: '#332211' })
+  await db.combos.add({
+    id: comboId([celadon, tenmoku]),
+    layers: [celadon, tenmoku],
+    swatchPhotoId: 'p',
+  })
+  await openStrip(id)
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Browse combos' }),
+  )
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+  )
+  expect(screen.queryByText(PLAN_LINE)).toBeNull()
+  await userEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+  expect(await screen.findByText(PLAN_LINE)).toBeVisible()
 })
 
 test('a piece without a plan starts with one empty glaze row, as before', async () => {
