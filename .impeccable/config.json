@@ -9,6 +9,18 @@
         "files": ["src/**/*.test.tsx"],
         "createdAt": "2026-11-12T14:03:59.321Z",
         "reason": "Agent: test files mock PhotoImg with a src-less <img> stand-in; it never ships"
+      },
+      {
+        "rule": "overused-font",
+        "value": "instrument serif",
+        "createdAt": "2026-11-13T01:13:32.929Z",
+        "reason": "Agent: Glazette's design system sets Instrument Serif titles (approved design docs' Constraints)"
+      },
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-11-13T01:13:32.948Z",
+        "reason": "Agent: Glazette's design system sets Inter body text (approved design docs' Constraints)"
       }
     ]
   }
