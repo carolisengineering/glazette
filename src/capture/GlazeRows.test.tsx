@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useModal } from '../components/useModal'
 import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { type GlazeRow, GlazeRows, isBlankRow, rowsAreBlank } from './GlazeRows'
@@ -216,4 +217,35 @@ describe('GlazeRows combos', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(onChange).toHaveBeenLastCalledWith(original)
   })
+})
+
+function ModalHost({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useModal(ref, onClose)
+  return (
+    <div ref={ref} tabIndex={-1}>
+      <GlazeRows value={rows('')} onChange={() => {}} />
+    </div>
+  )
+}
+
+it('Escape on the Combos sheet closes only that sheet, not the host sheet', async () => {
+  await db.glazes.add({ id: 't', name: 'Tenmoku', color: '#aabbcc' })
+  await db.glazes.add({ id: 'c', name: 'Celadon', color: '#aabbcc' })
+  await db.combos.add({
+    id: comboId(['c', 't']),
+    layers: ['c', 't'],
+    swatchPhotoId: 'p',
+  })
+  const hostClose = vi.fn()
+  render(<ModalHost onClose={hostClose} />)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Browse combos' }),
+  )
+  expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(hostClose).not.toHaveBeenCalled()
+  await userEvent.keyboard('{Escape}')
+  expect(hostClose).toHaveBeenCalledTimes(1)
 })
