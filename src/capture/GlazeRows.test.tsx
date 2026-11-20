@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
+import { comboId } from '../db/combos'
 import { db } from '../db/db'
 import { type GlazeRow, GlazeRows, isBlankRow, rowsAreBlank } from './GlazeRows'
 
@@ -127,5 +128,92 @@ describe('GlazeRows tile grid', () => {
       await screen.findByRole('button', { name: 'Glaze 01' }),
     )
     expect(screen.getByTestId('picked-swatch')).toBeInTheDocument()
+  })
+})
+
+describe('GlazeRows combos', () => {
+  const addGlaze = (id: string, name: string, extra = {}) =>
+    db.glazes.add({ id, name, color: '#aabbcc', ...extra })
+  const addCombo = (layers: string[]) =>
+    db.combos.add({ id: comboId(layers), layers, swatchPhotoId: 'p' })
+  const browse = () => screen.findByRole('button', { name: 'Browse combos' })
+
+  it('Browse combos shows only when a combo is shown', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon', { deletedAt: '2026-11-01' })
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await screen.findByRole('button', { name: 'Tenmoku' })
+    expect(screen.queryByRole('button', { name: 'Browse combos' })).toBeNull()
+    await addCombo(['c', 't'])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByRole('button', { name: 'Browse combos' })).toBeNull()
+    await db.glazes.update('c', { deletedAt: undefined })
+    expect(await browse()).toBeInTheDocument()
+  })
+
+  it('tapping a combo fills the rows top first', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addGlaze('h', 'Chun')
+    await addCombo(['h', 'c', 't'])
+    const onChange = vi.fn()
+    render(<GlazeRows value={rows('')} onChange={onChange} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Chun over Celadon over Tenmoku',
+      }),
+    )
+    const next = onChange.mock.calls[0][0] as GlazeRow[]
+    expect(next.map((r) => [r.glazeId, r.name])).toEqual([
+      ['h', 'Chun'],
+      ['c', 'Celadon'],
+      ['t', 'Tenmoku'],
+    ])
+    for (const r of next) {
+      expect(r.dips).toBeUndefined()
+      expect(r.method).toBeUndefined()
+      expect(r.note).toBeUndefined()
+    }
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('filling blank rows shows no toast', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addCombo(['c', 't'])
+    render(<GlazeRows value={rows('')} onChange={() => {}} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('undo restores the rows exactly', async () => {
+    await addGlaze('t', 'Tenmoku')
+    await addGlaze('c', 'Celadon')
+    await addCombo(['c', 't'])
+    const original: GlazeRow[] = [
+      {
+        key: 'k1',
+        glazeId: 't',
+        name: 'Tenmoku',
+        dips: 2,
+        method: 'brush',
+        note: 'thin',
+      },
+    ]
+    const onChange = vi.fn()
+    render(<GlazeRows value={original} onChange={onChange} />)
+    await userEvent.click(await browse())
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Celadon over Tenmoku' }),
+    )
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Glazes set to Celadon over Tenmoku',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onChange).toHaveBeenLastCalledWith(original)
   })
 })

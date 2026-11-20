@@ -1,8 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useState } from 'react'
+import { useToast } from '../components/useToast'
 import { db } from '../db/db'
 import { notDeleted } from '../db/queries'
 import type { GlazeApplication } from '../db/types'
+import { type ComboView, useComboViews } from '../glazes/combos'
 import { GlazeSwatch } from '../glazes/GlazeSwatch'
+
+import { ComboBrowseSheet } from './ComboBrowseSheet'
 
 export interface GlazeRow {
   /** Stable React key; not saved. */
@@ -53,6 +58,29 @@ export function GlazeRows({ value, onChange }: Props) {
     [],
   )
 
+  const combos = useComboViews()
+  const [browsing, setBrowsing] = useState(false)
+  const { show: showToast, toast } = useToast()
+
+  // Replace the rows with the combo's layers, top first. Rows with anything in
+  // them can be brought back with Undo.
+  const pickCombo = (view: ComboView) => {
+    const previous = value
+    setBrowsing(false)
+    onChange(
+      view.layers.map((g) => ({
+        key: crypto.randomUUID(),
+        glazeId: g.id,
+        name: g.name,
+      })),
+    )
+    if (!rowsAreBlank(previous)) {
+      showToast(`Glazes set to ${view.name}`, {
+        action: { label: 'Undo', onPress: () => onChange(previous) },
+      })
+    }
+  }
+
   const update = (index: number, patch: Partial<GlazeRow>) =>
     onChange(value.map((row, i) => (i === index ? { ...row, ...patch } : row)))
 
@@ -72,6 +100,20 @@ export function GlazeRows({ value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <span className={label}>Glaze · from your library</span>
+      {combos && combos.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setBrowsing(true)}
+          className="flex h-11 items-center gap-2 self-start rounded-full border border-border bg-surface px-3.5 text-[15px] font-semibold text-ink"
+        >
+          <GlazeSwatch
+            color={combos[0].layers[0].color}
+            photoId={combos[0].combo.swatchPhotoId}
+            className="size-[22px] flex-none overflow-hidden rounded-full"
+          />
+          Browse combos
+        </button>
+      ) : null}
       {value.map((row, i) => {
         const n = i + 1
         const q = row.name.trim().toLowerCase()
@@ -252,6 +294,13 @@ export function GlazeRows({ value, onChange }: Props) {
       >
         + add another glaze
       </button>
+      {browsing ? (
+        <ComboBrowseSheet
+          onPick={pickCombo}
+          onClose={() => setBrowsing(false)}
+        />
+      ) : null}
+      {toast}
     </div>
   )
 }
