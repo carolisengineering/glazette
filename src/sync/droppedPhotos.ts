@@ -84,3 +84,48 @@ export function releaseDropped(
     },
   )
 }
+
+/** Where dropped photos wait for their release: a row beside the sync state. */
+const HELD = 'dropped'
+
+interface HeldDrops {
+  id: typeof HELD
+  photos: DroppedPhoto[]
+}
+
+const heldTable = (db: GlazetteDB) => db.table<HeldDrops, string>('syncState')
+
+/**
+ * Keeps dropped photos on this device until releaseHeld runs. Call it in the
+ * same transaction that saves the records that dropped them, so a sync that
+ * stops before the release still releases them next time.
+ */
+export async function holdDropped(
+  db: GlazetteDB,
+  dropped: DroppedPhoto[],
+): Promise<void> {
+  if (dropped.length === 0) return
+  const held = await heldTable(db).get(HELD)
+  await heldTable(db).put({
+    id: HELD,
+    photos: [...(held?.photos ?? []), ...dropped],
+  })
+}
+
+/**
+ * Releases every held dropped photo (see releaseDropped) and forgets them, in
+ * one transaction. Returns how many photos it released.
+ */
+export function releaseHeld(db: GlazetteDB): Promise<number> {
+  return db.transaction(
+    'rw',
+    [db.syncState, db.photos, db.entries, db.glazes, db.combos],
+    async () => {
+      const held = await heldTable(db).get(HELD)
+      if (!held) return 0
+      const released = await releaseDropped(db, held.photos)
+      await heldTable(db).delete(HELD)
+      return released
+    },
+  )
+}

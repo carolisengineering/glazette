@@ -1347,6 +1347,43 @@ describe('a photo a step drops in a conflict', () => {
     expect(await dirtyCount(b)).toBe(0)
   })
 
+  test('a sync that stops partway still sends the photo to Recently Deleted next time', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+    await syncOnce(a, server, ME)
+    // Enough later records that B's pull has a second page.
+    for (let i = 0; i < PULL_LIMIT + 50; i += 100) {
+      await server.push(
+        Array.from({ length: 100 }, (_, j) => {
+          const id = `p-more-${i + j}`
+          return {
+            kind: 'piece' as const,
+            id,
+            changedAt: T1,
+            data: { id, createdAt: T1, updatedAt: T1 },
+          }
+        }),
+      )
+    }
+    let pulls = 0
+    const flaky: Transport = {
+      push: (r) => server.push(r),
+      pull: async (since) => {
+        pulls++
+        if (pulls === 2) throw new SyncStopped('offline')
+        return server.pull(since)
+      },
+    }
+
+    expect(await syncOnce(b, flaky, ME)).toBe('offline')
+    expect((await b.entries.get('e1'))?.note).toBe('Cone 6')
+    expect(await syncOnce(b, server, ME)).toBe('done')
+    await syncOnce(a, server, ME)
+
+    await expectDropped()
+  })
+
   test('a first sync whose copies tie the server deletes no photo', async () => {
     await sharedStep()
     await a.syncState.clear()

@@ -1,6 +1,11 @@
 import { GlazetteDB } from '../db/db'
 import type { Combo, Glaze, Photo, StageEntry } from '../db/types'
-import { type DroppedPhoto, releaseDropped } from './droppedPhotos'
+import {
+  type DroppedPhoto,
+  holdDropped,
+  releaseDropped,
+  releaseHeld,
+} from './droppedPhotos'
 import { quietly } from './track'
 
 let db: GlazetteDB
@@ -150,4 +155,51 @@ test('the same photo dropped twice is released once', async () => {
 
 test('nothing dropped writes nothing', async () => {
   expect(await releaseDropped(db, [])).toBe(0)
+})
+
+describe('dropped photos held until they are released', () => {
+  test('held drops are released later and then forgotten', async () => {
+    await seed({ photos: [photo('ph2'), photo('ph3')] })
+
+    await holdDropped(db, [drop()])
+    await holdDropped(db, [drop({ photoId: 'ph3', entryId: 'e3' })])
+
+    expect(await releaseHeld(db)).toBe(2)
+    expect(await db.photos.get('ph2')).toMatchObject({ lastEntryId: 'e1' })
+    expect(await db.photos.get('ph3')).toMatchObject({ lastEntryId: 'e3' })
+    expect(await releaseHeld(db)).toBe(0)
+  })
+
+  test('holding nothing and releasing nothing leave the sync state alone', async () => {
+    await holdDropped(db, [])
+
+    expect(await releaseHeld(db)).toBe(0)
+    expect(await db.syncState.count()).toBe(0)
+  })
+
+  test('a held drop that is no longer stranded is let go without a release', async () => {
+    await seed({ photos: [photo('ph2')], steps: [step('e2')] })
+    await holdDropped(db, [drop()])
+
+    expect(await releaseHeld(db)).toBe(0)
+    expect(await db.syncState.count()).toBe(0)
+  })
+
+  test('holding sits beside the sync state without changing it', async () => {
+    await db.syncState.put({
+      id: 'state',
+      account: 'me@example.com',
+      cursor: 7,
+      lastSyncedAt: T1,
+    })
+
+    await holdDropped(db, [drop()])
+
+    expect(await db.syncState.get('state')).toEqual({
+      id: 'state',
+      account: 'me@example.com',
+      cursor: 7,
+      lastSyncedAt: T1,
+    })
+  })
 })
