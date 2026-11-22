@@ -43,11 +43,11 @@ export interface Transport {
 export type SyncOutcome = 'done' | StopReason
 
 /**
- * One sync with the account: pull and apply what changed there, send each
- * photo a step's losing copy showed to Recently Deleted, merge same-named
- * glazes and clays on the first sync for this account, merge photos of the
- * same image, settle photos against the steps that show them, then push what
- * changed here. Never throws.
+ * One sync with the account: pull and apply what changed there, merge
+ * same-named glazes and clays on the first sync for this account, merge
+ * photos of the same image, send each photo a step's losing copy showed to
+ * Recently Deleted, settle photos against the steps that show them, then push
+ * what changed here. Never throws.
  */
 export async function syncOnce(
   db: GlazetteDB,
@@ -113,14 +113,14 @@ async function run(
   // 3. The first sync for this account joins same-named glazes and clays.
   if (full) await mergeByName(db, accountIds)
 
-  // A photo that one copy of a step showed and the kept copy doesn't goes to
-  // Recently Deleted, once the whole pull is in so a step later in it that
-  // shows the photo keeps it.
-  await releaseHeld(db)
-
   // The same image under two ids becomes one photo, so its changes are in
   // the push below.
   await mergePhotosByHash(db)
+  // A photo that one copy of a step showed and the kept copy doesn't goes to
+  // Recently Deleted, once the whole pull is in so a step later in it that
+  // shows the photo keeps it. After the merge, so the same image under another
+  // id is merged rather than deleted.
+  await releaseHeld(db)
   // With the whole pull in, each photo follows the steps that show it: a
   // deleted step's photo is deleted, and a photo a live step shows comes back.
   // A purged photo a live step still shows comes back as a new photo, when

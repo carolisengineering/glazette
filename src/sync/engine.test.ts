@@ -1384,6 +1384,32 @@ describe('a photo a step drops in a conflict', () => {
     await expectDropped()
   })
 
+  test('the same image put on the step on both devices is merged, not deleted', async () => {
+    await sharedStep()
+    const image = (id: string) => ({
+      ...photoRow(id, 'c'),
+      updatedAt: T2,
+      needsUpload: 1 as const,
+    })
+    await a.photoBytes.add({ hash: 'c'.repeat(64), blob: new Blob(['same']) })
+    await a.photos.add(image('phA'))
+    await a.entries.update('e1', { photoId: 'phA', updatedAt: T2 })
+    await b.photoBytes.add({ hash: 'c'.repeat(64), blob: new Blob(['same']) })
+    await b.photos.add(image('phB'))
+    await b.entries.update('e1', { photoId: 'phB', updatedAt: T3 })
+
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    for (const db of [a, b]) {
+      expect((await db.entries.get('e1'))?.photoId).toBe('phA')
+      expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+      expect((await db.photos.get('phB'))?.mergedInto).toBe('phA')
+    }
+  })
+
   test('a first sync whose copies tie the server deletes no photo', async () => {
     await sharedStep()
     await a.syncState.clear()
