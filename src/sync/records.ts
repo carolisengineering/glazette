@@ -26,6 +26,7 @@ import { DEFAULT_GLAZE_COLOR } from '../db/seed'
 import { releaseSwatch } from '../db/swatch'
 import type { Piece } from '../db/types'
 import { hashesHeld } from '../photos/bytes'
+import type { DroppedPhoto } from './droppedPhotos'
 import {
   DEVICE_ONLY_FIELDS,
   quietly,
@@ -200,7 +201,20 @@ export interface ApplyResult {
   skipped: number
   /** The `kind/id` of each skipped record that has a kind and id. */
   skippedKeys: Set<string>
+  /**
+   * Each photo a step's losing copy showed that the copy kept doesn't, with
+   * that step as its place (see releaseDropped).
+   */
+  dropped: DroppedPhoto[]
 }
+
+/** A photo dropped from a step, placed on the step as `step` has it. */
+const droppedFrom = (photoId: string, step: Row): DroppedPhoto => ({
+  photoId,
+  pieceId: step.pieceId as string,
+  entryId: step.id as string,
+  stage: step.stage as DroppedPhoto['stage'],
+})
 
 /** What the server keeps of a purged record of a kind that expires. */
 const isStub = (record: SyncRecord) =>
@@ -210,6 +224,8 @@ const isStub = (record: SyncRecord) =>
 /**
  * Writes the records that are newer than (or tie with a dirty copy of) the
  * local row, skipping any this version can't use. Written rows end clean.
+ * When the two copies of a step show different photos, the photo on the copy
+ * that loses is reported in `dropped`, whichever side lost.
  * A stub always wins, whatever its change time (see stubbedRow).
  * Each table is read once and written once; records for the same row apply
  * in order, each against the row as the one before left it.
@@ -223,6 +239,7 @@ export function applyRecords(
       applied: 0,
       skipped: 0,
       skippedKeys: new Set(),
+      dropped: [],
     }
     const skip = (record: unknown) => {
       result.skipped++
@@ -263,8 +280,26 @@ export function applyRecords(
         } else {
           row = winningRow(record, mine, held)
           if (!row) {
+            // This copy stays: the record's photo leaves the step.
+            const theirs = record.data.photoId
+            if (
+              kind === 'entry' &&
+              mine &&
+              typeof theirs === 'string' &&
+              theirs !== mine.photoId
+            ) {
+              result.dropped.push(droppedFrom(theirs, mine))
+            }
             skip(record)
             continue
+          }
+          // The record replaces this copy: this copy's photo leaves the step.
+          if (
+            kind === 'entry' &&
+            typeof mine?.photoId === 'string' &&
+            mine.photoId !== row.photoId
+          ) {
+            result.dropped.push(droppedFrom(mine.photoId, row))
           }
         }
         if (

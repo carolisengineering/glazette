@@ -6,7 +6,7 @@ import {
 import { comboId } from '../db/combos'
 import { GlazetteDB } from '../db/db'
 import { DEFAULT_GLAZE_COLOR } from '../db/seed'
-import type { Glaze, Photo, Piece } from '../db/types'
+import type { Glaze, Photo, Piece, StageEntry } from '../db/types'
 import {
   applyRecords,
   changedAt,
@@ -334,7 +334,12 @@ describe('applyRecords follows the later-change rule', () => {
     const result = await applyRecords(db, [
       pieceRecord('p1', T2, { name: 'A' }),
     ])
-    expect(result).toEqual({ applied: 1, skipped: 0, skippedKeys: new Set() })
+    expect(result).toEqual({
+      applied: 1,
+      skipped: 0,
+      skippedKeys: new Set(),
+      dropped: [],
+    })
     const row = await db.pieces.get('p1')
     expect(row).toMatchObject({ name: 'A', updatedAt: T2 })
     expect(row?.dirty).toBeUndefined()
@@ -428,6 +433,7 @@ test("applyRecords skips what it can't use and applies the rest", async () => {
     applied: 1,
     skipped: 3,
     skippedKeys: new Set(['sticker/x1', 'entry/e1', 'piece/p2']),
+    dropped: [],
   })
   expect(await db.glazes.toArray()).toHaveLength(1)
   expect(await db.entries.count()).toBe(0)
@@ -446,6 +452,7 @@ test('applyRecords names the records it skipped, including ones the local row be
     applied: 1,
     skipped: 3,
     skippedKeys: new Set(['piece/later']),
+    dropped: [],
   })
 })
 
@@ -536,7 +543,12 @@ describe('stubs', () => {
       photoRow('ph1', { dirty: 1, needsUpload: 1, needsDownload: 1 }),
     )
     const result = await applyRecords(db, [stub('photo', 'ph1')])
-    expect(result).toEqual({ applied: 1, skipped: 0, skippedKeys: new Set() })
+    expect(result).toEqual({
+      applied: 1,
+      skipped: 0,
+      skippedKeys: new Set(),
+      dropped: [],
+    })
     expect(await db.photoBytes.get(HASH)).toEqual(held)
     const row = await db.photos.get('ph1')
     expect(row).toMatchObject({
@@ -569,7 +581,12 @@ describe('stubs', () => {
 
   test('a stub with no local row writes nothing', async () => {
     const result = await applyRecords(db, [stub('photo', 'ph1')])
-    expect(result).toEqual({ applied: 0, skipped: 0, skippedKeys: new Set() })
+    expect(result).toEqual({
+      applied: 0,
+      skipped: 0,
+      skippedKeys: new Set(),
+      dropped: [],
+    })
     expect(await db.photos.count()).toBe(0)
   })
 
@@ -603,7 +620,12 @@ describe('stubs', () => {
       stub('glazeApp', 'l1'),
       stub('photo', 'ph1'),
     ])
-    expect(result).toEqual({ applied: 4, skipped: 0, skippedKeys: new Set() })
+    expect(result).toEqual({
+      applied: 4,
+      skipped: 0,
+      skippedKeys: new Set(),
+      dropped: [],
+    })
     expect((await db.entries.get('e1'))?.purgedAt).toBe(PURGED)
     expect((await db.glazeApps.get('l1'))?.purgedAt).toBe(PURGED)
   })
@@ -1228,5 +1250,126 @@ describe('combos', () => {
     expect(combo).toMatchObject({ swatchPhotoId: 'ph1', dirty: 1 })
     expect(combo?.deletedAt).toBeUndefined()
     expect(combo?.updatedAt).toBe('2099-01-01T00:00:00.001Z')
+  })
+})
+
+describe('steps report the photo their losing copy showed', () => {
+  const entryRecord = (
+    id: string,
+    changed: string,
+    extra: Record<string, unknown> = {},
+  ): SyncRecord => ({
+    kind: 'entry',
+    id,
+    changedAt: changed,
+    data: { id, pieceId: 'p1', stage: 'glazed', updatedAt: changed, ...extra },
+  })
+
+  const localStep = (extra: Partial<StageEntry>) =>
+    quietly(db, () =>
+      db.entries.add({
+        id: 'e1',
+        pieceId: 'p1',
+        stage: 'glazed',
+        updatedAt: T1,
+        ...extra,
+      }),
+    )
+
+  const dropOf = (photoId: string) => ({
+    photoId,
+    pieceId: 'p1',
+    entryId: 'e1',
+    stage: 'glazed',
+  })
+
+  test('a pulled step that replaces this copy reports the photo this copy showed', async () => {
+    await localStep({ photoId: 'ph2', updatedAt: T1 })
+
+    const result = await applyRecords(db, [
+      entryRecord('e1', T2, { photoId: 'ph1' }),
+    ])
+
+    expect(result.dropped).toEqual([dropOf('ph2')])
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  })
+
+  test('a pulled step that loses to this copy reports the photo it showed', async () => {
+    await localStep({ photoId: 'ph1', updatedAt: T3, dirty: 1 })
+
+    const result = await applyRecords(db, [
+      entryRecord('e1', T2, { photoId: 'ph2' }),
+    ])
+
+    expect(result.dropped).toEqual([dropOf('ph2')])
+    expect((await db.entries.get('e1'))?.photoId).toBe('ph1')
+  })
+
+  test('a step that wins while deleting the step still reports the photo', async () => {
+    await localStep({ photoId: 'ph2', updatedAt: T1 })
+
+    const result = await applyRecords(db, [
+      entryRecord('e1', T2, { photoId: 'ph1', deletedAt: T2 }),
+    ])
+
+    expect(result.dropped).toEqual([dropOf('ph2')])
+  })
+
+  test('the place is the step as the copy that stays has it', async () => {
+    await localStep({ photoId: 'ph2', stage: 'bisqued', updatedAt: T1 })
+
+    const result = await applyRecords(db, [
+      entryRecord('e1', T2, { photoId: 'ph1', stage: 'glazed' }),
+    ])
+
+    expect(result.dropped).toEqual([dropOf('ph2')])
+  })
+
+  describe('no report when both copies show the same photo or the losing copy shows none', () => {
+    test.each([
+      ['the same photo', { photoId: 'ph1', updatedAt: T1 }, { photoId: 'ph1' }],
+      [
+        'a losing local copy with no photo',
+        { updatedAt: T1 },
+        { photoId: 'ph1' },
+      ],
+      [
+        'a losing record with no photo',
+        { photoId: 'ph1', updatedAt: T3, dirty: 1 as const },
+        {},
+      ],
+    ])('%s', async (_name, local, data) => {
+      await localStep(local)
+
+      const result = await applyRecords(db, [entryRecord('e1', T2, data)])
+
+      expect(result.dropped).toEqual([])
+    })
+  })
+
+  test('a stub or an unusable step record reports nothing', async () => {
+    await localStep({ photoId: 'ph2', updatedAt: T1 })
+
+    const result = await applyRecords(db, [
+      { kind: 'entry', id: 'e9', changedAt: T2, data: { id: 'e9' } },
+      {
+        kind: 'entry',
+        id: 'e1',
+        changedAt: T1,
+        data: { id: 'e1', deletedAt: T2, purgedAt: T2 },
+      },
+    ])
+
+    expect(result.skipped).toBe(1)
+    expect(result.dropped).toEqual([])
+    expect((await db.entries.get('e1'))?.purgedAt).toBe(T2)
+  })
+
+  test('a new step reports nothing', async () => {
+    const result = await applyRecords(db, [
+      entryRecord('e1', T2, { photoId: 'ph1' }),
+    ])
+
+    expect(result.dropped).toEqual([])
   })
 })

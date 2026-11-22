@@ -11,6 +11,7 @@ import { putBackPhoto, putBackPiece } from '../db/putBack'
 import type { Piece } from '../db/types'
 import { setSinkForTests } from '../telemetry/telemetry'
 import { SyncStopped, syncOnce, type Transport } from './engine'
+import { toRecord } from './records'
 import { createTestServer } from './testServer'
 import { SYNCED_TABLES } from './track'
 
@@ -1158,4 +1159,265 @@ test('two devices that make the same combo keep one photo and release the other'
   expect((await b.photos.get('ph-a'))?.deletedAt).toBeTruthy()
   expect((await b.photos.get('ph-b'))?.deletedAt).toBeUndefined()
   expect(await dirtyCount(a)).toBe(0)
+})
+
+describe('a photo a step drops in a conflict', () => {
+  const photoRow = (id: string, n: string) => ({
+    id,
+    hash: n.repeat(64),
+    width: 1,
+    height: 1,
+    takenAt: T1,
+  })
+
+  /** A holds piece p1 with photo ph1 on step e1, and both devices have synced. */
+  async function sharedStep() {
+    await a.photoBytes.add({ hash: 'a'.repeat(64), blob: new Blob(['one']) })
+    await a.pieces.add(piece('p1'))
+    await a.photos.add({
+      ...photoRow('ph1', 'a'),
+      updatedAt: T1,
+      needsUpload: 1,
+    })
+    await a.entries.add({
+      id: 'e1',
+      pieceId: 'p1',
+      stage: 'glazed',
+      photoId: 'ph1',
+      updatedAt: T1,
+    })
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+  }
+
+  /** B swaps in a new photo ph2 on e1, the way a swap on the step does. */
+  async function swapOnB() {
+    await b.photoBytes.add({ hash: 'b'.repeat(64), blob: new Blob(['two']) })
+    await b.photos.add({
+      ...photoRow('ph2', 'b'),
+      updatedAt: T2,
+      needsUpload: 1,
+    })
+    await b.entries.update('e1', { photoId: 'ph2', updatedAt: T2 })
+    await b.photos.update('ph1', {
+      deletedAt: T2,
+      lastPieceId: 'p1',
+      lastEntryId: 'e1',
+      lastStage: 'glazed',
+      updatedAt: T2,
+    })
+  }
+
+  /** A, not yet synced with B's swap, edits the same step's note later. */
+  const editOnA = () =>
+    a.entries.update('e1', { note: 'Cone 6', updatedAt: T3 })
+
+  async function expectDropped() {
+    for (const db of [a, b]) {
+      const step = await db.entries.get('e1')
+      expect(step).toMatchObject({ photoId: 'ph1', note: 'Cone 6' })
+      expect((await db.photos.get('ph1'))?.deletedAt).toBeUndefined()
+      const dropped = await db.photos.get('ph2')
+      expect(dropped?.deletedAt).toBeTruthy()
+      expect(dropped).toMatchObject({
+        lastPieceId: 'p1',
+        lastEntryId: 'e1',
+        lastStage: 'glazed',
+      })
+    }
+    expect(onServer('photo', 'ph2')?.data.deletedAt).toBeTruthy()
+    expect(onServer('photo', 'ph1')?.data.deletedAt).toBeUndefined()
+    expect(await dirtyCount(a)).toBe(0)
+    expect(await dirtyCount(b)).toBe(0)
+  }
+
+  test('the photo goes to Recently Deleted when the other device synced first', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+
+    await expectDropped()
+  })
+
+  test('the photo goes to Recently Deleted when the other device synced last', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    await expectDropped()
+  })
+
+  test('the photo goes to Recently Deleted when the server rejects the pushed step', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+    // A's edit reaches the server between B's pull and B's push.
+    let raced = false
+    const racing: Transport = {
+      pull: (since) => server.pull(since),
+      push: async (records) => {
+        if (!raced) {
+          raced = true
+          const row = await a.entries.get('e1')
+          await server.push([toRecord('entry', row as never)])
+        }
+        return server.push(records)
+      },
+    }
+
+    expect(await syncOnce(b, racing, ME)).toBe('done')
+    expect((await b.photos.get('ph2'))?.deletedAt).toBeTruthy()
+    await syncOnce(b, server, ME)
+
+    expect(onServer('photo', 'ph2')?.data.deletedAt).toBeTruthy()
+    expect(await b.entries.get('e1')).toMatchObject({
+      photoId: 'ph1',
+      note: 'Cone 6',
+    })
+    expect((await b.photos.get('ph1'))?.deletedAt).toBeUndefined()
+    expect(await dirtyCount(b)).toBe(0)
+  })
+
+  test('put back returns the dropped photo to its step', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+
+    await putBackPhoto('ph2', a)
+
+    expect(await a.entries.get('e1')).toMatchObject({
+      photoId: 'ph2',
+      note: 'Cone 6',
+    })
+    expect((await a.photos.get('ph2'))?.deletedAt).toBeUndefined()
+    const swappedOut = await a.photos.get('ph1')
+    expect(swappedOut?.deletedAt).toBeTruthy()
+    expect(swappedOut?.lastEntryId).toBe('e1')
+  })
+
+  test('a dropped photo another step shows stays', async () => {
+    await sharedStep()
+    await swapOnB()
+    await b.entries.add({
+      id: 'e2',
+      pieceId: 'p1',
+      stage: 'bisqued',
+      photoId: 'ph2',
+      updatedAt: T2,
+    })
+    await editOnA()
+
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+
+    for (const db of [a, b]) {
+      expect((await db.photos.get('ph2'))?.deletedAt).toBeUndefined()
+      expect((await db.entries.get('e2'))?.photoId).toBe('ph2')
+    }
+  })
+
+  test('a swap from one device alone deletes the old photo once', async () => {
+    await sharedStep()
+    await swapOnB()
+
+    await syncOnce(b, server, ME)
+    const ph1OnServer = onServer('photo', 'ph1')
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    expect((await a.entries.get('e1'))?.photoId).toBe('ph2')
+    expect((await a.photos.get('ph1'))?.deletedAt).toBe(T2)
+    expect((await a.photos.get('ph2'))?.deletedAt).toBeUndefined()
+    expect(onServer('photo', 'ph1')).toEqual(ph1OnServer)
+    expect(await dirtyCount(a)).toBe(0)
+    expect(await dirtyCount(b)).toBe(0)
+  })
+
+  test('a sync that stops partway still sends the photo to Recently Deleted next time', async () => {
+    await sharedStep()
+    await swapOnB()
+    await editOnA()
+    await syncOnce(a, server, ME)
+    // Enough later records that B's pull has a second page.
+    for (let i = 0; i < PULL_LIMIT + 50; i += 100) {
+      await server.push(
+        Array.from({ length: 100 }, (_, j) => {
+          const id = `p-more-${i + j}`
+          return {
+            kind: 'piece' as const,
+            id,
+            changedAt: T1,
+            data: { id, createdAt: T1, updatedAt: T1 },
+          }
+        }),
+      )
+    }
+    let pulls = 0
+    const flaky: Transport = {
+      push: (r) => server.push(r),
+      pull: async (since) => {
+        pulls++
+        if (pulls === 2) throw new SyncStopped('offline')
+        return server.pull(since)
+      },
+    }
+
+    expect(await syncOnce(b, flaky, ME)).toBe('offline')
+    expect((await b.entries.get('e1'))?.note).toBe('Cone 6')
+    expect(await syncOnce(b, server, ME)).toBe('done')
+    await syncOnce(a, server, ME)
+
+    await expectDropped()
+  })
+
+  test('the same image put on the step on both devices is merged, not deleted', async () => {
+    await sharedStep()
+    const image = (id: string) => ({
+      ...photoRow(id, 'c'),
+      updatedAt: T2,
+      needsUpload: 1 as const,
+    })
+    await a.photoBytes.add({ hash: 'c'.repeat(64), blob: new Blob(['same']) })
+    await a.photos.add(image('phA'))
+    await a.entries.update('e1', { photoId: 'phA', updatedAt: T2 })
+    await b.photoBytes.add({ hash: 'c'.repeat(64), blob: new Blob(['same']) })
+    await b.photos.add(image('phB'))
+    await b.entries.update('e1', { photoId: 'phB', updatedAt: T3 })
+
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+    await syncOnce(a, server, ME)
+    await syncOnce(b, server, ME)
+
+    for (const db of [a, b]) {
+      expect((await db.entries.get('e1'))?.photoId).toBe('phA')
+      expect((await db.photos.get('phA'))?.deletedAt).toBeUndefined()
+      expect((await db.photos.get('phB'))?.mergedInto).toBe('phA')
+    }
+  })
+
+  test('a first sync whose copies tie the server deletes no photo', async () => {
+    await sharedStep()
+    await a.syncState.clear()
+
+    expect(await syncOnce(a, server, ME)).toBe('done')
+
+    expect((await a.photos.get('ph1'))?.deletedAt).toBeUndefined()
+    expect(onServer('photo', 'ph1')?.data.deletedAt).toBeUndefined()
+    expect(await dirtyCount(a)).toBe(0)
+  })
 })
