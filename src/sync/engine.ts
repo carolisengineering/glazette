@@ -8,6 +8,7 @@ import {
 } from '../../shared/syncProtocol'
 import type { GlazetteDB } from '../db/db'
 import { captureError } from '../telemetry/telemetry'
+import { type DroppedPhoto, releaseDropped } from './droppedPhotos'
 import { mergePhotosByHash } from './photoMerge'
 import {
   applyRecords,
@@ -42,10 +43,11 @@ export interface Transport {
 export type SyncOutcome = 'done' | StopReason
 
 /**
- * One sync with the account: pull and apply what changed there, merge
- * same-named glazes and clays on the first sync for this account, merge
- * photos of the same image, settle photos against the steps that show them,
- * then push what changed here. Never throws.
+ * One sync with the account: pull and apply what changed there, send each
+ * photo a step's losing copy showed to Recently Deleted, merge same-named
+ * glazes and clays on the first sync for this account, merge photos of the
+ * same image, settle photos against the steps that show them, then push what
+ * changed here. Never throws.
  */
 export async function syncOnce(
   db: GlazetteDB,
@@ -77,13 +79,14 @@ async function run(
   // 2. Pull every page. An incremental sync keeps its place page by page; a
   // full one starts over until it completes.
   const accountIds = { glaze: new Set<string>(), clay: new Set<string>() }
+  const dropped: DroppedPhoto[] = []
   for (;;) {
     const page = await transport.pull(cursor)
     if (page.more && page.cursor <= cursor) {
       throw new Error(`Sync pull is stuck at cursor ${cursor}`)
     }
     if (full) {
-      await applyRecords(db, page.records)
+      dropped.push(...(await applyRecords(db, page.records)).dropped)
       for (const record of page.records) {
         if (
           isSyncRecord(record) &&
@@ -93,10 +96,12 @@ async function run(
         }
       }
     } else {
-      await quietly(db, async () => {
-        await applyRecords(db, page.records)
+      const applied = await quietly(db, async () => {
+        const result = await applyRecords(db, page.records)
         await db.syncState.update('state', { cursor: page.cursor })
+        return result
       })
+      dropped.push(...applied.dropped)
     }
     cursor = page.cursor
     if (!page.more) break
@@ -104,6 +109,11 @@ async function run(
 
   // 3. The first sync for this account joins same-named glazes and clays.
   if (full) await mergeByName(db, accountIds)
+
+  // A photo that one copy of a step showed and the kept copy doesn't goes to
+  // Recently Deleted, once the whole pull is in so a step later in it that
+  // shows the photo keeps it.
+  await releaseDropped(db, dropped)
 
   // The same image under two ids becomes one photo, so its changes are in
   // the push below.
@@ -122,13 +132,17 @@ async function run(
   // version applies that copy.
   for (const chunk of inPushes(await readDirty(db))) {
     const { rejected } = await transport.push(chunk)
-    await quietly(db, async () => {
-      const { skippedKeys } = await applyRecords(db, rejected)
+    const kept = await quietly(db, async () => {
+      const result = await applyRecords(db, rejected)
       await clearDirty(
         db,
-        chunk.filter((record) => !skippedKeys.has(recordKey(record))),
+        chunk.filter((record) => !result.skippedKeys.has(recordKey(record))),
       )
+      return result
     })
+    // A rejected step can drop a photo too. Tracked, so the next sync sends
+    // the delete.
+    await releaseDropped(db, kept.dropped)
   }
 
   // 5. Done.
